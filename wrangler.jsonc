@@ -1,0 +1,43 @@
+{
+  // chat.jarvisclaw.ai is a Worker with a static-assets binding, NOT a Pages project.
+  //
+  // Worth stating plainly, because DEPLOY.md described a Pages setup that was never
+  // built: `wrangler pages project list` shows only jarvisclaw-docs, and the chat site
+  // is served by a Worker of this name with a custom domain. Merging a PR therefore
+  // deployed nothing — there was no git integration to trigger. Two PRs landed on main
+  // while the live site kept serving a bundle uploaded by hand.
+  //
+  // This file is what makes `wrangler deploy` reproducible from the repo instead of
+  // depending on whoever last ran an upload.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "jarvisclaw-web",
+  "compatibility_date": "2026-08-20",
+
+  // No "main": this is a static site with no server-side code. Omitting the entry point
+  // lets the assets binding answer every request directly, which is also what keeps the
+  // deploy free of a Worker script that could go stale against the bundle.
+  "assets": {
+    "directory": "./dist",
+    // The app is a client-routed SPA, so a deep link must return index.html rather than
+    // 404. single-page-application also serves index.html for unknown paths, which is
+    // correct here because every real asset lives under /assets with a hashed name.
+    "not_found_handling": "single-page-application"
+  },
+
+  // The custom domain already exists on the zone; naming it here keeps the binding from
+  // silently reverting to a *.workers.dev URL on a later deploy.
+  "routes": [
+    {
+      "pattern": "chat.jarvisclaw.ai",
+      "custom_domain": true
+    }
+  ],
+
+  // dist/_headers carries the CSP. It is copied from public/ by the build, and the
+  // deployed Worker demonstrably serves it — verified against the live response before
+  // this config existed. Nothing here may drop it: the policy is what stops injected
+  // script from posting the user's API key to another host.
+  "observability": {
+    "enabled": true
+  }
+}

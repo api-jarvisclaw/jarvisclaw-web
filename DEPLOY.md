@@ -5,31 +5,51 @@ HTTP API: no shared build, no shared deploy, no shared process. The gateway can 
 redeployed, rolled back, or taken down for maintenance without touching this, and vice
 versa.
 
-## Cloudflare Pages setup
+## How it is actually served
 
-Same shape as `docs.jarvisclaw.ai`.
+**A Worker with a static-assets binding, not a Pages project.** `wrangler.jsonc` in this
+repo is the source of truth.
 
-1. Cloudflare Dashboard → Workers & Pages → Create → Pages → Connect to Git
-2. Pick `api-jarvisclaw/jarvisclaw-web`
-3. Build settings:
-   - **Framework preset:** None
-   - **Build command:** `npm install && npm run build`
-   - **Build output directory:** `dist`
-   - **Root directory:** `/`
-4. Custom domain: `chat.jarvisclaw.ai`
+This section used to describe a Pages setup that was never built, and the gap was
+expensive: two PRs merged to `main` while the live site kept serving a bundle someone had
+uploaded by hand, because there was no git integration for a merge to trigger. If you are
+looking for the Pages project, there isn't one —
 
-`npm run build` runs `tsc --noEmit` first, so a type error fails the deploy rather than
-shipping a broken bundle.
+```
+$ wrangler pages project list
+jarvisclaw-docs   docs.jarvisclaw.ai   git=Yes     # the docs site IS on Pages
+                                                  # (no row for this site)
+```
+
+To deploy:
+
+```
+bun install && bun run build      # tsc --noEmit runs first, so a type error fails here
+wrangler deploy                    # uploads dist/ and points chat.jarvisclaw.ai at it
+```
+
+`wrangler deploy` needs `wrangler login` once per machine. There is no CI deploy on
+purpose: nothing in `.github/workflows/` holds a Cloudflare credential, and a deploy that
+publishes a page holding an API key is worth doing deliberately.
+
+The config declares `chat.jarvisclaw.ai` as a `custom_domain` route. That matters — the
+domain already exists on the zone, and omitting it here would let a later deploy quietly
+fall back to a `*.workers.dev` URL.
 
 ### DNS
 
-Cloudflare adds the CNAME itself when you attach the custom domain. If adding it by hand:
-
-```
-chat.jarvisclaw.ai  CNAME  <project>.pages.dev   (proxied)
-```
+Nothing to add by hand. Attaching the custom domain to the Worker is what routes the
+hostname; there is no CNAME record for `chat` on the zone, and none is needed.
 
 `chat` and `app` were both unused before this; nothing else answers on either.
+
+### One expected console error
+
+Cloudflare injects its analytics beacon (`static.cloudflareinsights.com/beacon.min.js`)
+into the response, and our `script-src 'self'` refuses it. That refusal is the policy
+working as intended, not a defect — but it means "no console errors" is the wrong check
+for this site. Count errors that are not the beacon; `probe/live_probe.py` and the check
+in this repo's history both do that.
 
 ## What the edge serves
 

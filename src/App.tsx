@@ -19,7 +19,13 @@ import { ChatList } from './ui/ChatList'
 import { Composer } from './ui/Composer'
 import { ConsentDialog, type PendingSpend } from './ui/ConsentDialog'
 import { Marketplace } from './ui/Marketplace'
-import { isUserRejection, signPayment, type WalletAccount } from './lib/wallet'
+import {
+  isUserRejection,
+  selectEvmRequirement,
+  signPayment,
+  type Challenge,
+  type WalletAccount,
+} from './lib/wallet'
 import { Sidebar } from './ui/Sidebar'
 import { Transcript, type Turn } from './ui/Transcript'
 
@@ -43,7 +49,9 @@ export function App() {
   // could not work from a deployed browser anyway — Authorization was blocked by the
   // gateway's CORS policy. Paid calls are signed by the visitor's own wallet.
   const [wallet, setWallet] = useState<WalletAccount | null>(null)
-  const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL)
+  // Constant, not state: the gateway is not a user preference. Kept as a local so the
+  // call sites below read the same in dev (VITE_GATEWAY_URL) and in production.
+  const baseUrl = DEFAULT_BASE_URL
   const [pending, setPending] = useState<PendingSpend | null>(null)
 
   const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations())
@@ -136,6 +144,68 @@ export function App() {
       })
     },
     [],
+  )
+
+  /**
+   * Pays for one paid chat call: approve the price, then sign it in the wallet.
+   *
+   * Returns null for either refusal, so the agent reports a cancellation rather than an
+   * error — declining to spend is a choice, not a failure.
+   */
+  const payForChat = useCallback(
+    async (challenge: Challenge, chatModel: string): Promise<string | null> => {
+      if (wallet === null) return null
+
+      const req = (() => {
+        try {
+          return selectEvmRequirement(challenge)
+        } catch {
+          return null
+        }
+      })()
+      if (req === null) {
+        setTurns((t) => [
+          ...t,
+          {
+            kind: 'error',
+            text: 'The gateway quoted no EVM payment option, so a browser wallet cannot pay for this call.',
+          },
+        ])
+        return null
+      }
+
+      const atomic = Number(req.amount ?? req.maxAmountRequired ?? '0')
+      const usd = Number.isFinite(atomic) ? atomic / 1_000_000 : NaN
+      if (!Number.isFinite(usd) || usd <= 0) {
+        setTurns((t) => [
+          ...t,
+          { kind: 'error', text: 'The gateway quoted an unreadable price for this model.' },
+        ])
+        return null
+      }
+
+      const approved = await confirmSpend({
+        tool: chatModel,
+        description: 'One chat completion from this model',
+        usd,
+      })
+      if (!approved) return null
+
+      try {
+        const signed = await signPayment(challenge, `${baseUrl}/v1/chat/completions`, wallet)
+        tracker.current.record(chatModel, signed.usd)
+        setSpendVersion((v) => v + 1)
+        return signed.header
+      } catch (err) {
+        if (isUserRejection(err)) return null
+        setTurns((t) => [
+          ...t,
+          { kind: 'error', text: err instanceof Error ? err.message : String(err) },
+        ])
+        return null
+      }
+    },
+    [baseUrl, confirmSpend, wallet],
   )
 
   /** Generation (image/video/music): quote, ask, then run. */
@@ -331,9 +401,11 @@ export function App() {
               t.model = e.model
             })
             break
+          // Both render as a notice, not an error: nothing failed from the user's point of
+          // view. A downgrade means the answer is coming from a different model; a notice
+          // is something the agent needs to say, such as a paid model's price.
           case 'downgrade':
-            // Its own turn kind, not an error: nothing failed from the user's point of
-            // view, the answer is just coming from a different model.
+          case 'notice':
             setTurns((t) => [...t, { kind: 'notice', text: e.text ?? '' }])
             break
           case 'error':
@@ -360,6 +432,9 @@ export function App() {
           // "let the router decide", which is what it was doing before the picker existed.
           model: model === FREE_MODEL ? undefined : model,
           confirmSpend,
+          // Only when a wallet is connected. Absent means the agent reports a paid model's
+          // price instead of dumping the raw 402 challenge into the transcript.
+          payForChat: wallet === null ? undefined : payForChat,
           signal: controller.signal,
         })) {
           apply(event)
@@ -516,10 +591,8 @@ export function App() {
 
       <Sidebar
         wallet={wallet}
-        baseUrl={baseUrl}
         spend={spend}
         onWallet={setWallet}
-        onBaseUrl={setBaseUrl}
       />
 
       {pending && (

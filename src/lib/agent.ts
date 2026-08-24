@@ -5,7 +5,14 @@
  * spending money the user has not approved and never running away with turns.
  */
 
-import { streamChat, type ChatMessage, type ToolCall } from './gateway'
+import {
+  FREE_MODEL,
+  isPaymentRequired,
+  paymentChallenge,
+  streamChat,
+  type ChatMessage,
+  type ToolCall,
+} from './gateway'
 import { ModelRouter } from './route'
 import { tools, toolSchemas, type ToolContext } from './tools'
 
@@ -33,7 +40,7 @@ export const SYSTEM_PROMPT = [
 ].join('\n')
 
 export interface AgentEvent {
-  type: 'text' | 'reasoning' | 'tool-start' | 'tool-end' | 'error' | 'done' | 'downgrade'
+  type: 'text' | 'reasoning' | 'tool-start' | 'tool-end' | 'error' | 'done' | 'downgrade' | 'notice'
   /** For text/reasoning: the increment. For error: the message. */
   text?: string
   /** For tool-start/tool-end. */
@@ -61,6 +68,17 @@ export interface AgentOptions extends ToolContext {
    * subsequent message. Created here if absent, which keeps single-shot callers simple.
    */
   router?: ModelRouter
+  /**
+   * Pays for one chat call and returns the X-PAYMENT header, or null if the user declined.
+   *
+   * Injected rather than imported so this module stays free of wallet code: signing needs a
+   * browser extension and a user gesture, neither of which belongs in the agent loop. Absent
+   * means "cannot pay" — a paid model then reports its price instead of failing.
+   */
+  payForChat?: (
+    challenge: { accepts?: Array<Record<string, unknown>> },
+    model: string,
+  ) => Promise<string | null>
   /**
    * How many model turns one user message may take.
    *
@@ -137,6 +155,53 @@ export async function* runAgent(
         )
         break
       } catch (err) {
+        // A 402 is a price, not a failure. Handled before the downgrade logic because a
+        // paid model answering 402 is working exactly as intended — retiring it as
+        // "unavailable" and falling back to a free model would silently give the user a
+        // different model than the one they picked.
+        //
+        // Without this the raw challenge JSON was rendered into the transcript: a wall of
+        // `accepts`, `payTo` and base64 where a price should be. It read as a broken app.
+        const challenge = paymentChallenge(err)
+        if (challenge !== null) {
+          if (opts.payForChat === undefined) {
+            yield {
+              type: 'notice',
+              text: `${model} is a paid model. Connect a wallet to use it, or pick a free one — ${FREE_MODEL} always works without payment.`,
+            }
+            return
+          }
+          const paid = await opts.payForChat(challenge, model)
+          if (paid === null) {
+            yield { type: 'notice', text: 'Payment cancelled — nothing was charged.' }
+            return
+          }
+          // Retried once with the signature, on the same model. Not looped: a second 402
+          // means the payment was refused, and re-signing would ask the user to authorise
+          // another transfer for a call that already failed to settle.
+          try {
+            result = await streamChat(
+              { messages: history, model, tools: schemas },
+              (delta) => {
+                if (delta.content) pending.push({ type: 'text', text: delta.content })
+                if (delta.reasoning) pending.push({ type: 'reasoning', text: delta.reasoning })
+              },
+              { baseUrl: opts.baseUrl, cred: { ...opts.cred, payment: paid }, signal: opts.signal },
+            )
+            break
+          } catch (payErr) {
+            yield {
+              type: 'error',
+              text: isPaymentRequired(payErr)
+                ? 'The gateway did not accept the payment. Check the wallet has USDC on Base.'
+                : payErr instanceof Error
+                  ? payErr.message
+                  : String(payErr),
+            }
+            return
+          }
+        }
+
         // A pinned model is reported, never swapped: the user chose it.
         const outcome = router ? await router.markFailed(model, err) : 'not-a-model-problem'
 

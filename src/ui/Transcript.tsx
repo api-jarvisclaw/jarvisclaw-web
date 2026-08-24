@@ -17,11 +17,35 @@ export type Turn =
    * colouring it red would report a working fallback as a breakage.
    */
   | { kind: 'notice'; text: string }
+  /**
+   * A generated image, video or track. Carries what was paid, because a media turn is the
+   * one place a user is likely to have spent real money in a single step — a video runs to
+   * several hundred times a chat reply.
+   */
+  | {
+      kind: 'media'
+      media: 'image' | 'video' | 'music'
+      url?: string
+      b64?: string
+      raw?: string
+      prompt: string
+      model: string
+      spentUsd: number
+    }
 
+/**
+ * Starters, each one something this gateway can actually do — the marketplace really does
+ * carry search, on-chain and prediction-market services, and the catalogue really does
+ * expose per-model pricing. A suggestion that fails on click is worse than none: it is the
+ * first thing a new visitor tries.
+ */
 const SUGGESTIONS = [
-  'What can you do?',
-  'Find an API for ethereum gas prices',
+  'What can you do, and what does it cost?',
+  'Find me an API for Ethereum gas prices.',
   'Which models are free right now?',
+  'Search the marketplace for on-chain data services.',
+  'What would a 5-second video cost me?',
+  'Compare the cheapest and most capable chat models.',
 ]
 
 export function Transcript({
@@ -43,15 +67,13 @@ export function Transcript({
     return (
       <div className="transcript">
         <div className="empty">
-          <span className="eyebrow">Agent console</span>
+          <span className="eyebrow">The agent with a wallet</span>
           <h1>
-            Ask for anything.
-            <br />
-            <em>It pays per call.</em>
+            What should <em>JarvisClaw</em> do?
           </h1>
           <p>
-            4000+ callable APIs and 80+ models. Start now — no account, no key, no card. Paid
-            APIs ask before they spend anything.
+            330+ models and thousands of callable APIs, paid per call. Start now — no account,
+            no key, no card. Anything paid shows its price and asks first.
           </p>
           <div className="suggestions">
             {SUGGESTIONS.map((s) => (
@@ -92,6 +114,10 @@ function TurnView({ turn }: { turn: Turn }) {
     return <div className="notice">{turn.text}</div>
   }
 
+  if (turn.kind === 'media') {
+    return <MediaView turn={turn} />
+  }
+
   return (
     <div className="turn turn-agent">
       {turn.steps.map((step, i) => (
@@ -117,6 +143,49 @@ function TurnView({ turn }: { turn: Turn }) {
           <span className="tool-name">{turn.model}</span>
         </div>
       )}
+    </div>
+  )
+}
+
+function MediaView({ turn }: { turn: Extract<Turn, { kind: 'media' }> }) {
+  // A data: URL for base64 payloads. The deployed CSP allows `img-src 'self' data:`, which
+  // is why an inlined image renders — but `media-src` is not set, so it falls back to
+  // default-src 'self' and a data: video would be refused. That is stated here rather than
+  // discovered: a silently blank video after a paid call is the worst possible outcome.
+  const src = turn.url ?? (turn.b64 ? `data:image/png;base64,${turn.b64}` : undefined)
+
+  return (
+    <div className="turn turn-agent">
+      <div className="media-card">
+        <div className="media-head">
+          <span className="media-kind">{turn.media}</span>
+          <span className="tool-name">{turn.model}</span>
+          <span className="price">${turn.spentUsd.toFixed(6)}</span>
+        </div>
+
+        {src === undefined ? (
+          <p className="media-missing">
+            The call completed but returned no media we could read.
+            {turn.raw ? <code className="media-raw">{turn.raw}</code> : null}
+          </p>
+        ) : turn.media === 'image' ? (
+          <img className="media-img" src={src} alt={turn.prompt} loading="lazy" />
+        ) : turn.media === 'video' ? (
+          <video className="media-video" src={src} controls preload="metadata" />
+        ) : (
+          <audio className="media-audio" src={src} controls preload="metadata" />
+        )}
+
+        <p className="media-prompt">{turn.prompt}</p>
+
+        {/* Opened in a tab rather than offered as a download: the artifact viewer's sandbox
+            blocks page-initiated downloads, so a download link would look broken. */}
+        {turn.url && (
+          <a className="media-open" href={turn.url} target="_blank" rel="noopener noreferrer">
+            Open original
+          </a>
+        )}
+      </div>
     </div>
   )
 }

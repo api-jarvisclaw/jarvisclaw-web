@@ -1,11 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { runAgent, type AgentEvent } from './lib/agent'
-import { DEFAULT_BASE_URL, type ChatMessage } from './lib/gateway'
+import { listCatalogue, type CatalogueModel } from './lib/catalogue'
+import {
+  deriveTitle,
+  loadConversations,
+  newId,
+  remove,
+  saveConversations,
+  upsert,
+  type Conversation,
+} from './lib/conversations'
+import { DEFAULT_BASE_URL, FREE_MODEL, type ChatMessage } from './lib/gateway'
+import { GENERATIONS, generate, quoteGeneration, type GenerationKind } from './lib/modality'
 import { ModelRouter } from './lib/route'
 import { SpendTracker } from './lib/spend'
+import { ChatList } from './ui/ChatList'
 import { Composer } from './ui/Composer'
 import { ConsentDialog, type PendingSpend } from './ui/ConsentDialog'
+import { Marketplace } from './ui/Marketplace'
 import { Sidebar } from './ui/Sidebar'
 import { Transcript, type Turn } from './ui/Transcript'
 
@@ -19,7 +32,8 @@ import { Transcript, type Turn } from './ui/Transcript'
  *
  * The API key lives in component state and nothing else. Not localStorage: a key
  * persisted by this page would outlive the session on a shared machine, and a key is
- * enough to mint more keys and read the account.
+ * enough to mint more keys and read the account. Conversations ARE persisted — see
+ * lib/conversations.ts for what is and is not written.
  */
 export function App() {
   const [turns, setTurns] = useState<Turn[]>([])
@@ -27,6 +41,16 @@ export function App() {
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL)
   const [pending, setPending] = useState<PendingSpend | null>(null)
+
+  const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations())
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const [view, setView] = useState<'chat' | 'marketplace'>('chat')
+  const [railOpen, setRailOpen] = useState(true)
+
+  const [models, setModels] = useState<CatalogueModel[]>([])
+  const [modelsLoading, setModelsLoading] = useState(true)
+  const [model, setModel] = useState<string>(FREE_MODEL)
+  const [mode, setMode] = useState<GenerationKind | 'chat'>('chat')
 
   const history = useRef<ChatMessage[]>([])
   const tracker = useRef(new SpendTracker())
@@ -48,6 +72,37 @@ export function App() {
     router.current = null
   }, [apiKey, baseUrl])
 
+  useEffect(() => {
+    const ac = new AbortController()
+    setModelsLoading(true)
+    listCatalogue({ baseUrl, signal: ac.signal })
+      .then((rows) => setModels(rows))
+      // A failed catalogue is not worth an error turn: the picker degrades to the free
+      // default, which is what an anonymous visitor would have used anyway.
+      .catch(() => undefined)
+      .finally(() => {
+        if (!ac.signal.aborted) setModelsLoading(false)
+      })
+    return () => ac.abort()
+  }, [baseUrl])
+
+  /** Writes the current transcript into the conversation list. */
+  const persist = useCallback((id: string, nextTurns: Turn[], nextHistory: ChatMessage[]) => {
+    if (nextTurns.length === 0) return
+    setConversations((prev) => {
+      const conv: Conversation = {
+        id,
+        title: deriveTitle(nextTurns),
+        updatedAt: Date.now(),
+        turns: nextTurns,
+        history: nextHistory,
+      }
+      const next = upsert(prev, conv)
+      saveConversations(next)
+      return next
+    })
+  }, [])
+
   /**
    * Asks the user about one charge and resolves with their answer.
    *
@@ -61,10 +116,7 @@ export function App() {
       if (decision.kind === 'refuse') {
         // Not shown as a prompt: the session budget is a stop, not a question. Prompting
         // here would let a spent-out session talk its way past its own budget.
-        setTurns((t) => [
-          ...t,
-          { kind: 'error', text: `Refused: ${decision.reason}.` },
-        ])
+        setTurns((t) => [...t, { kind: 'error', text: `Refused: ${decision.reason}.` }])
         return Promise.resolve(false)
       }
       return new Promise<boolean>((resolve) => {
@@ -80,13 +132,116 @@ export function App() {
     [],
   )
 
+  /** Generation (image/video/music): quote, ask, then run. */
+  const runGeneration = useCallback(
+    async (kind: GenerationKind, prompt: string, convId: string) => {
+      const spec = GENERATIONS[kind]
+      // A model chosen for chat cannot make a video, so the mode's own default is used
+      // unless the picked model is of that modality.
+      const chosen = models.find((m) => m.model === model)
+      const useModel = chosen?.modality === kind ? model : spec.defaultModel
+
+      setTurns((t) => [...t, { kind: 'user', text: prompt }])
+
+      let quoted: number
+      try {
+        quoted = await quoteGeneration(kind, prompt, {
+          baseUrl,
+          cred: anonymous ? {} : { apiKey },
+          model: useModel,
+        })
+      } catch (err) {
+        setTurns((t) => [
+          ...t,
+          { kind: 'error', text: err instanceof Error ? err.message : String(err) },
+        ])
+        return
+      }
+
+      const approved = await confirmSpend({
+        tool: `${spec.label} · ${useModel}`,
+        description: `Generate one ${spec.unit} from your prompt`,
+        usd: quoted,
+      })
+      if (!approved) {
+        setTurns((t) => [...t, { kind: 'notice', text: `${spec.label} generation declined.` }])
+        return
+      }
+
+      if (anonymous) {
+        // Reached only after approval, so the user is not told "needs a key" for something
+        // they never agreed to pay for.
+        setTurns((t) => [
+          ...t,
+          {
+            kind: 'error',
+            text: `Paying for a ${spec.unit} needs an API key — the free tier covers text models only. Paste a key in the panel on the right.`,
+          },
+        ])
+        return
+      }
+
+      try {
+        const media = await generate(kind, prompt, {
+          baseUrl,
+          cred: { apiKey },
+          model: useModel,
+        })
+        tracker.current.record(spec.label, quoted)
+        setSpendVersion((v) => v + 1)
+        setTurns((t) => {
+          const next: Turn[] = [
+            ...t,
+            {
+              kind: 'media',
+              media: kind,
+              url: media.url,
+              b64: media.b64,
+              raw: media.raw,
+              prompt,
+              model: useModel,
+              spentUsd: quoted,
+            },
+          ]
+          persist(convId, next, history.current)
+          return next
+        })
+      } catch (err) {
+        setTurns((t) => [
+          ...t,
+          { kind: 'error', text: err instanceof Error ? err.message : String(err) },
+        ])
+      }
+    },
+    [anonymous, apiKey, baseUrl, confirmSpend, model, models, persist],
+  )
+
   const send = useCallback(
     async (text: string) => {
       const message = text.trim()
       if (message === '' || busy) return
 
+      // A conversation id is minted on the first message rather than on mount, so an
+      // opened-and-abandoned tab does not leave an empty row in the list.
+      const convId = activeId ?? newId()
+      if (activeId === null) setActiveId(convId)
+      setView('chat')
       setBusy(true)
-      setTurns((t) => [...t, { kind: 'user', text: message }, { kind: 'agent', text: '', reasoning: '', steps: [] }])
+
+      if (mode !== 'chat') {
+        try {
+          await runGeneration(mode, message, convId)
+        } finally {
+          setBusy(false)
+        }
+        return
+      }
+
+      setTurns((t) => [
+        ...t,
+        { kind: 'user', text: message },
+        { kind: 'agent', text: '', reasoning: '', steps: [] },
+      ])
 
       const controller = new AbortController()
       abort.current = controller
@@ -172,6 +327,9 @@ export function App() {
           cred,
           anonymous,
           router: router.current,
+          // An explicitly chosen model overrides the router's own pick; auto/free means
+          // "let the router decide", which is what it was doing before the picker existed.
+          model: model === FREE_MODEL ? undefined : model,
           confirmSpend,
           signal: controller.signal,
         })) {
@@ -188,9 +346,15 @@ export function App() {
       } finally {
         setBusy(false)
         abort.current = null
+        // Read through a state setter: `turns` in this closure is the value from before
+        // the run, so persisting it directly would save an empty transcript.
+        setTurns((t) => {
+          persist(convId, t, history.current)
+          return t
+        })
       }
     },
-    [anonymous, apiKey, baseUrl, busy, confirmSpend],
+    [activeId, anonymous, apiKey, baseUrl, busy, confirmSpend, mode, model, persist, runGeneration],
   )
 
   const stop = useCallback(() => {
@@ -203,7 +367,7 @@ export function App() {
     })
   }, [])
 
-  const reset = useCallback(() => {
+  const startNew = useCallback(() => {
     stop()
     history.current = []
     // A fresh router too: "new chat" should give the free tier another chance rather
@@ -212,7 +376,39 @@ export function App() {
     tracker.current = new SpendTracker()
     setSpendVersion((v) => v + 1)
     setTurns([])
+    setActiveId(null)
+    setMode('chat')
+    setView('chat')
   }, [stop])
+
+  const openConversation = useCallback(
+    (id: string) => {
+      stop()
+      const conv = conversations.find((c) => c.id === id)
+      if (!conv) return
+      // Restores BOTH sides: the visible turns and the model's own history. Restoring only
+      // the transcript would look resumed while the model re-planned from nothing.
+      history.current = [...conv.history]
+      router.current = null
+      setTurns(conv.turns)
+      setActiveId(id)
+      setView('chat')
+      setMode('chat')
+    },
+    [conversations, stop],
+  )
+
+  const deleteConversation = useCallback(
+    (id: string) => {
+      setConversations((prev) => {
+        const next = remove(prev, id)
+        saveConversations(next)
+        return next
+      })
+      if (id === activeId) startNew()
+    },
+    [activeId, startNew],
+  )
 
   const spend = useMemo(
     () => ({
@@ -226,15 +422,29 @@ export function App() {
   )
 
   return (
-    <div className="shell">
+    <div className={railOpen ? 'shell' : 'shell shell-rail-closed'}>
+      {railOpen && (
+        <ChatList
+          conversations={conversations}
+          activeId={activeId}
+          view={view}
+          onNew={startNew}
+          onOpen={openConversation}
+          onDelete={deleteConversation}
+          onView={setView}
+        />
+      )}
+
       <div className="main">
         <header className="topbar">
-          <span className="brand">
-            {/* Decorative: the word "JarvisClaw" beside it already names the product, so
-                announcing the chip again would just repeat it to a screen reader. */}
-            <span className="brand-mark" aria-hidden="true" />
-            JarvisClaw
-          </span>
+          <button
+            className="rail-toggle"
+            onClick={() => setRailOpen((o) => !o)}
+            aria-label={railOpen ? 'Hide conversations' : 'Show conversations'}
+            aria-expanded={railOpen}
+          >
+            ▤
+          </button>
           <span className={anonymous ? 'tag tag-free' : 'tag'}>
             {anonymous ? 'free · no sign-in' : 'signed in'}
           </span>
@@ -244,13 +454,35 @@ export function App() {
               Stop
             </button>
           )}
-          <button className="ghost-btn" onClick={reset} disabled={turns.length === 0}>
+          <button className="ghost-btn" onClick={startNew} disabled={turns.length === 0}>
             New chat
           </button>
         </header>
 
-        <Transcript turns={turns} onSuggestion={send} />
-        <Composer busy={busy} anonymous={anonymous} onSend={send} />
+        {view === 'marketplace' ? (
+          <Marketplace
+            baseUrl={baseUrl}
+            onAsk={(prompt) => {
+              setView('chat')
+              void send(prompt)
+            }}
+          />
+        ) : (
+          <>
+            <Transcript turns={turns} onSuggestion={send} />
+            <Composer
+              busy={busy}
+              anonymous={anonymous}
+              models={models}
+              modelsLoading={modelsLoading}
+              model={model}
+              mode={mode}
+              onModel={setModel}
+              onMode={setMode}
+              onSend={send}
+            />
+          </>
+        )}
       </div>
 
       <Sidebar

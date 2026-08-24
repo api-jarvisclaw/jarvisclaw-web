@@ -62,7 +62,10 @@ async def main() -> int:
         await page.goto(DEV_URL, wait_until="domcontentloaded")
 
         print("== 1. loads without an account ==")
-        await page.wait_for_selector("text=Ask for anything.", timeout=15_000)
+        # Waits for the empty state's structure, not its wording. Pinning the headline text
+        # made this probe fail on a copy change while the console worked perfectly — a
+        # false alarm that costs more than the assertion was ever worth.
+        await page.wait_for_selector(".empty h1", timeout=15_000)
         tag = await page.inner_text(".tag")
         print(f"   badge: {tag!r}")
         if "free" not in tag.lower():

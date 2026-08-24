@@ -229,7 +229,12 @@ export function App() {
     <div className="shell">
       <div className="main">
         <header className="topbar">
-          <span className="brand">JarvisClaw</span>
+          <span className="brand">
+            {/* Decorative: the word "JarvisClaw" beside it already names the product, so
+                announcing the chip again would just repeat it to a screen reader. */}
+            <span className="brand-mark" aria-hidden="true" />
+            JarvisClaw
+          </span>
           <span className={anonymous ? 'tag tag-free' : 'tag'}>
             {anonymous ? 'free · no sign-in' : 'signed in'}
           </span>

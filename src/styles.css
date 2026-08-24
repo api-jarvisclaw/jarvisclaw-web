@@ -37,7 +37,16 @@
   --sidebar: oklch(0.16 0.02 293);
   --sidebar-border: oklch(0.35 0.025 285 / 40%);
 
-  --gradient-brand: linear-gradient(135deg, oklch(0.7 0.15 258), oklch(0.55 0.12 285));
+  /* The console's gradient ends at L=0.55. Here it stops at 0.62, because this page puts
+     *text* on the fill — Send, Approve, and every user bubble — and 0.55 leaves the
+     label at 3.93:1, under the 4.5 minimum. The console only ever uses the darker end
+     behind wordless surfaces (switches, progress bars), where nothing has to be read.
+     Same hue travel, so it still reads as the same gradient. */
+  --gradient-brand: linear-gradient(135deg, oklch(0.7 0.15 258), oklch(0.62 0.12 285));
+  /* Text on that fill. Taken from the console's --primary-foreground rather than white:
+     white measures 2.7:1 on the light end of this gradient, which is worse than the dark
+     ink on either end. Bright fill + dark ink is the console's own pairing. */
+  --on-brand: oklch(0.15 0.02 275);
   --glow-brand: oklch(0.7 0.15 258);
   --glow-accent: oklch(0.6 0.12 275);
   --mesh-1: oklch(0.24 0.04 260);
@@ -340,7 +349,7 @@ button:not(:disabled):active {
 .turn-user .bubble {
   align-self: flex-end;
   background: var(--gradient-brand);
-  color: white;
+  color: var(--on-brand);
   border: none;
   border-bottom-right-radius: var(--radius-sm);
   box-shadow: 0 0 22px -10px var(--glow-brand);
@@ -532,7 +541,7 @@ button:not(:disabled):active {
 
 .send-btn {
   background: var(--gradient-brand);
-  color: white;
+  color: var(--on-brand);
   border: none;
   border-radius: var(--radius-xl);
   padding: 13px 24px;
@@ -753,7 +762,7 @@ button:not(:disabled):active {
 
 .approve {
   background: var(--gradient-brand);
-  color: white;
+  color: var(--on-brand);
   border: none;
   font-weight: 600;
   box-shadow: 0 0 18px -8px var(--glow-brand);

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { extractMedia, generate, GENERATIONS, quoteGeneration } from './modality'
+import { challengeGeneration, extractMedia, generate, GENERATIONS } from './modality'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -25,70 +25,103 @@ function sentBody(spy: ReturnType<typeof stubResponse>, n = 0): Record<string, u
   return JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
 }
 
-describe('quoteGeneration', () => {
-  it('reads the price out of the 402 challenge', async () => {
-    // 64000 atomic USDC is what the live gateway quoted for openai/gpt-image-2. Getting
-    // the 6-decimal conversion wrong here would show $64,000 or $0.000064 to someone
-    // deciding whether to spend.
-    stubResponse(402, { accepts: [{ amount: '64000', asset: '0x833589f' }] })
-    await expect(quoteGeneration('image', 'a red cube')).resolves.toBeCloseTo(0.064, 6)
-  })
-
-  it('converts a video quote at the right magnitude', async () => {
-    stubResponse(402, { accepts: [{ amount: '1136480' }] })
-    await expect(quoteGeneration('video', 'a cat walking')).resolves.toBeCloseTo(1.13648, 5)
-  })
-
-  it('sends duration for video, because the price depends on it', async () => {
-    // Quoting without duration would price a different call than the one that runs.
-    const spy = stubResponse(402, { accepts: [{ amount: '1' }] })
-    await quoteGeneration('video', 'a cat', { model: 'bytedance/seedance-2.0-mini' })
-    const body = sentBody(spy)
-    expect(body).toMatchObject({ duration: 5, model: 'bytedance/seedance-2.0-mini' })
-  })
-
-  it('does not send duration for an image', async () => {
-    const spy = stubResponse(402, { accepts: [{ amount: '1' }] })
-    await quoteGeneration('image', 'a red cube')
-    const body = sentBody(spy)
-    expect(body).not.toHaveProperty('duration')
-  })
-
-  it('names the unservable model on a 400 instead of repeating a cause-free message', async () => {
-    // The gateway answers a deliberately cause-free 400 here, and the actual fix is
-    // choosing another model — `auto/music` and `ali/qwen-image` are both advertised in
-    // the catalogue and both refuse. Passing the gateway's wording through would leave the
-    // user with nothing to act on.
-    stubResponse(400, { error: { message: 'Request rejected: this request was not accepted as-is.' } })
-    await expect(
-      quoteGeneration('music', 'a synth loop', { model: 'auto/music' }),
-    ).rejects.toThrow(/auto\/music is listed but not currently servable/)
-  })
-
-  it('refuses a quote with no amount rather than treating it as free', async () => {
-    stubResponse(402, { accepts: [{}] })
-    await expect(quoteGeneration('image', 'x')).rejects.toThrow(/quoted no price/)
-  })
-
-  it('refuses an unparseable amount rather than passing NaN to a consent dialog', async () => {
-    // NaN would render as "$NaN" in the approval prompt, and NaN comparisons are false —
-    // so a budget check on it would silently allow the spend.
-    stubResponse(402, { accepts: [{ amount: 'not-a-number' }] })
-    await expect(quoteGeneration('image', 'x')).rejects.toThrow(/unreadable price/)
-  })
-})
-
 describe('generate', () => {
-  it('says a funded key is needed when the call still answers 402', async () => {
+  it('says the payment was not accepted when the call still answers 402', async () => {
+    // A second 402 after paying means the signature was refused — a funded wallet is the
+    // fix, and the message has to say so rather than repeat the price.
     stubResponse(402, { accepts: [{ amount: '64000' }] })
     await expect(
-      generate('image', 'a red cube', { cred: { apiKey: 'k' } }),
-    ).rejects.toThrow(/needs a funded key/)
+      generate('image', 'a red cube', { cred: { payment: 'eyJ4NDAy' } }),
+    ).rejects.toThrow(/did not accept the payment/)
+  })
+
+  it('sends the payment as X-PAYMENT', async () => {
+    const spy = stubResponse(200, { data: [{ url: 'https://cdn/x.png' }] })
+    await generate('image', 'x', { cred: { payment: 'PAYLOAD' } })
+    const headers = (spy.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>
+    expect(headers['X-PAYMENT']).toBe('PAYLOAD')
+  })
+
+  it('spends the signature on the exact body it was issued for', async () => {
+    // A payment signed for one body and spent on another is a signature the facilitator may
+    // settle while the gateway serves something else. The caller passes the challenge's own
+    // url and body through, and they must be used verbatim.
+    const spy = stubResponse(200, { data: [{ url: 'https://cdn/x.png' }] })
+    await generate('video', 'ignored prompt', {
+      cred: { payment: 'P' },
+      url: 'https://api.example/v1/videos/generations',
+      body: { model: 'bytedance/seedance-2.0-mini', prompt: 'the quoted prompt', duration: 5 },
+    })
+    expect(spy.mock.calls[0]?.[0]).toBe('https://api.example/v1/videos/generations')
+    expect(sentBody(spy)).toMatchObject({ prompt: 'the quoted prompt', duration: 5 })
   })
 
   it('reports a failure status rather than returning an empty result', async () => {
     stubResponse(500, { error: 'upstream exploded' })
-    await expect(generate('image', 'x', { cred: { apiKey: 'k' } })).rejects.toThrow(/failed \(500\)/)
+    await expect(generate('image', 'x', { cred: { payment: 'P' } })).rejects.toThrow(/failed \(500\)/)
+  })
+})
+
+describe('challengeGeneration', () => {
+  it('returns the whole challenge, so a wallet can sign the gateway’s own terms', async () => {
+    // Not just the price: the signature is made over payTo, asset and network as the gateway
+    // stated them. Re-deriving those from a price would be inventing them.
+    stubResponse(402, {
+      accepts: [
+        { amount: '64000', payTo: '0xDC59', asset: '0x8335', network: 'eip155:8453', scheme: 'exact' },
+      ],
+    })
+    const q = await challengeGeneration('image', 'a red cube')
+    expect(q.usd).toBeCloseTo(0.064, 6)
+    expect(q.challenge.accepts?.[0]).toMatchObject({ payTo: '0xDC59', network: 'eip155:8453' })
+    expect(q.url).toContain('/v1/images/generations')
+    expect(q.body).toMatchObject({ prompt: 'a red cube' })
+  })
+
+  it('asks for the price with no credential at all', async () => {
+    // The quote must work for an unconnected visitor: that is how someone learns a video
+    // costs $0.40 before deciding whether to connect a wallet.
+    const spy = stubResponse(402, { accepts: [{ amount: '1000' }] })
+    await challengeGeneration('image', 'x')
+    const headers = (spy.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>
+    expect(headers.Authorization).toBeUndefined()
+    expect(headers['X-PAYMENT']).toBeUndefined()
+  })
+
+  it('refuses a challenge with no usable amount', async () => {
+    stubResponse(402, { accepts: [{ payTo: '0xDC59' }] })
+    await expect(challengeGeneration('image', 'x')).rejects.toThrow(/no usable price/)
+  })
+
+  it('converts a video quote at the right magnitude', async () => {
+    // 6-decimal atomic USDC. Getting this wrong shows $1,136,480 or $0.0000011 to someone
+    // deciding whether to sign.
+    stubResponse(402, { accepts: [{ amount: '1136480' }] })
+    await expect(challengeGeneration('video', 'a cat')).resolves.toMatchObject({
+      usd: expect.closeTo(1.13648, 5),
+    })
+  })
+
+  it('sends duration for video, because the price depends on it', async () => {
+    // Quoting without duration prices a different call than the one the signature pays for.
+    const spy = stubResponse(402, { accepts: [{ amount: '1' }] })
+    await challengeGeneration('video', 'a cat', { model: 'bytedance/seedance-2.0-mini' })
+    expect(sentBody(spy)).toMatchObject({ duration: 5, model: 'bytedance/seedance-2.0-mini' })
+  })
+
+  it('does not send duration for an image', async () => {
+    const spy = stubResponse(402, { accepts: [{ amount: '1' }] })
+    await challengeGeneration('image', 'a red cube')
+    expect(sentBody(spy)).not.toHaveProperty('duration')
+  })
+
+  it('names the unservable model on a 400 instead of repeating a cause-free message', async () => {
+    // The gateway answers a deliberately cause-free 400, and the actual fix is choosing
+    // another model — `auto/music` and `ali/qwen-image` are both advertised and both refuse.
+    stubResponse(400, { error: { message: 'Request rejected: this request was not accepted as-is.' } })
+    await expect(
+      challengeGeneration('music', 'a synth loop', { model: 'auto/music' }),
+    ).rejects.toThrow(/auto\/music is listed but not currently servable/)
   })
 })
 

@@ -46,8 +46,23 @@ export interface ToolSchema {
 }
 
 export interface Credential {
-  /** A gateway API key. Absent means anonymous — see authHeaders. */
+  /**
+   * A gateway API key.
+   *
+   * Retained for local development only — the UI no longer collects one. It cannot work
+   * from a deployed browser page anyway: `Authorization` was absent from the gateway's
+   * Access-Control-Allow-Headers, so a keyed request was blocked by CORS before it left the
+   * page. Paid calls in the browser go through a wallet signature instead (lib/wallet.ts).
+   */
   apiKey?: string
+  /**
+   * A base64 x402 payment payload, sent as X-PAYMENT.
+   *
+   * One signature authorises one call: it names the amount, recipient and expiry, and the
+   * gateway settles exactly that. It is therefore never reused across requests — a reused
+   * signature is a replay, and the gateway has already seen one payment serve two calls.
+   */
+  payment?: string
 }
 
 /**
@@ -111,6 +126,11 @@ export function authHeaders(cred: Credential): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (cred.apiKey && cred.apiKey.trim() !== '') {
     headers.Authorization = `Bearer ${cred.apiKey.trim()}`
+  }
+  if (cred.payment && cred.payment.trim() !== '') {
+    // X-PAYMENT rather than PAYMENT-SIGNATURE: both are accepted, and this is the spelling
+    // our own discovery document advertises.
+    headers['X-PAYMENT'] = cred.payment.trim()
   }
   return headers
 }

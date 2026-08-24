@@ -11,6 +11,14 @@ import {
   upsert,
   type Conversation,
 } from './lib/conversations'
+import {
+  addToGallery,
+  archive,
+  loadGallery,
+  removeFromGallery,
+  saveGallery,
+  type GalleryItem,
+} from './lib/gallery'
 import { DEFAULT_BASE_URL, FREE_MODEL, type ChatMessage } from './lib/gateway'
 import {
   challengeGeneration,
@@ -20,10 +28,17 @@ import {
   type GenerationKind,
 } from './lib/modality'
 import { ModelRouter } from './lib/route'
+import {
+  loadSettings,
+  normalizeSettings,
+  saveSettings,
+  type Settings,
+} from './lib/settings'
 import { SpendTracker, TYPICAL_AGENT_STEPS } from './lib/spend'
 import { ChatList } from './ui/ChatList'
 import { Composer } from './ui/Composer'
 import { ConsentDialog, type PendingSpend } from './ui/ConsentDialog'
+import { Gallery } from './ui/Gallery'
 import { Marketplace } from './ui/Marketplace'
 import {
   isUserRejection,
@@ -60,9 +75,15 @@ export function App() {
   const baseUrl = DEFAULT_BASE_URL
   const [pending, setPending] = useState<PendingSpend | null>(null)
 
+  // Loaded once from storage. Persisted because limits that reset on reload are limits nobody
+  // can actually change — the user asked not to be prompted repeatedly, and a preference that
+  // forgets itself reproduces the nagging every visit.
+  const [settings, setSettings] = useState<Settings>(() => loadSettings())
+
   const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations())
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [view, setView] = useState<'chat' | 'marketplace'>('chat')
+  const [view, setView] = useState<'chat' | 'marketplace' | 'gallery'>('chat')
+  const [gallery, setGallery] = useState<GalleryItem[]>(() => loadGallery())
   const [railOpen, setRailOpen] = useState(true)
 
   const [models, setModels] = useState<CatalogueModel[]>([])
@@ -71,7 +92,11 @@ export function App() {
   const [mode, setMode] = useState<GenerationKind | 'chat'>('chat')
 
   const history = useRef<ChatMessage[]>([])
-  const tracker = useRef(new SpendTracker())
+  // Seeded from the stored settings, so a reload keeps the budget the user chose rather than
+  // silently reverting to $1.00 mid-task.
+  const tracker = useRef(
+    new SpendTracker({ perCallUsd: settings.perCallUsd, sessionUsd: settings.sessionUsd }),
+  )
   const abort = useRef<AbortController | null>(null)
   // Held across messages so a model that already proved unservable is not retried first
   // every time. Rebuilt when the gateway or credential changes, since both change which
@@ -105,6 +130,21 @@ export function App() {
       })
     return () => ac.abort()
   }, [baseUrl])
+
+  /**
+   * Applies new limits: normalised, persisted, and pushed into the live tracker.
+   *
+   * The tracker is UPDATED rather than replaced. Building a new one would reset the running
+   * total, so raising the budget mid-session would also forgive every charge already made and
+   * hand back a full allowance — the ledger records real money that left the wallet.
+   */
+  const applySettings = useCallback((next: Settings) => {
+    const clean = normalizeSettings(next)
+    setSettings(clean)
+    saveSettings(clean)
+    tracker.current.setPolicy({ perCallUsd: clean.perCallUsd, sessionUsd: clean.sessionUsd })
+    setSpendVersion((v) => v + 1)
+  }, [])
 
   /** Writes the current transcript into the conversation list. */
   const persist = useCallback((id: string, nextTurns: Turn[], nextHistory: ChatMessage[]) => {
@@ -198,7 +238,12 @@ export function App() {
       if (!approved) return null
 
       try {
-        const signed = await signPayment(challenge, `${baseUrl}/v1/chat/completions`, wallet)
+        const signed = await signPayment(
+          challenge,
+          `${baseUrl}/v1/chat/completions`,
+          wallet,
+          settings.perSignatureUsd,
+        )
         tracker.current.record(chatModel, signed.usd)
         setSpendVersion((v) => v + 1)
         return signed.header
@@ -211,7 +256,7 @@ export function App() {
         return null
       }
     },
-    [baseUrl, confirmSpend, wallet],
+    [baseUrl, confirmSpend, settings.perSignatureUsd, wallet],
   )
 
   /** Generation (image/video/music): quote, ask, then run. */
@@ -271,7 +316,9 @@ export function App() {
       // the wallet's own UI, which no page can fake.
       let payment: string
       try {
-        payment = (await signPayment(quote.challenge, quote.url, wallet)).header
+        payment = (
+          await signPayment(quote.challenge, quote.url, wallet, settings.perSignatureUsd)
+        ).header
       } catch (err) {
         setTurns((t) => [
           ...t,
@@ -295,13 +342,38 @@ export function App() {
         })
         tracker.current.record(spec.label, quoted)
         setSpendVersion((v) => v + 1)
+
+        // Archived to R2 before rendering, so the gallery holds a permanent URL rather than the
+        // upstream's temporary one — a $1.14 video whose link expires overnight is a receipt for
+        // nothing. Returns null on failure, and the original URL is used instead: losing the
+        // archive must not lose the media the user just paid for.
+        const stored = media.url ? await archive(media.url) : null
+        const shownUrl = stored ?? media.url
+
+        if (shownUrl) {
+          const item: GalleryItem = {
+            id: newId(),
+            kind,
+            url: shownUrl,
+            prompt,
+            model: useModel,
+            usd: quoted,
+            createdAt: Date.now(),
+          }
+          setGallery((g) => {
+            const next = addToGallery(g, item)
+            saveGallery(next)
+            return next
+          })
+        }
+
         setTurns((t) => {
           const next: Turn[] = [
             ...t,
             {
               kind: 'media',
               media: kind,
-              url: media.url,
+              url: shownUrl,
               b64: media.b64,
               raw: media.raw,
               prompt,
@@ -319,7 +391,7 @@ export function App() {
         ])
       }
     },
-    [anonymous, baseUrl, confirmSpend, model, models, persist, wallet],
+    [anonymous, baseUrl, confirmSpend, model, models, persist, settings.perSignatureUsd, wallet],
   )
 
   const send = useCallback(
@@ -522,13 +594,19 @@ export function App() {
     // A fresh router too: "new chat" should give the free tier another chance rather
     // than inheriting a candidate list this session had already used up.
     router.current = null
-    tracker.current = new SpendTracker()
+    // A fresh budget, but the USER'S limits — not the built-in defaults. Constructing this
+    // bare would quietly undo their settings on every "New chat", which is the same nagging
+    // they asked to be rid of, arriving one click later.
+    tracker.current = new SpendTracker({
+      perCallUsd: settings.perCallUsd,
+      sessionUsd: settings.sessionUsd,
+    })
     setSpendVersion((v) => v + 1)
     setTurns([])
     setActiveId(null)
     setMode('chat')
     setView('chat')
-  }, [stop])
+  }, [settings.perCallUsd, settings.sessionUsd, stop])
 
   const openConversation = useCallback(
     (id: string) => {
@@ -577,6 +655,7 @@ export function App() {
           conversations={conversations}
           activeId={activeId}
           view={view}
+          galleryCount={gallery.length}
           onNew={startNew}
           onOpen={openConversation}
           onDelete={deleteConversation}
@@ -608,7 +687,18 @@ export function App() {
           </button>
         </header>
 
-        {view === 'marketplace' ? (
+        {view === 'gallery' ? (
+          <Gallery
+            items={gallery}
+            onRemove={(id) =>
+              setGallery((g) => {
+                const next = removeFromGallery(g, id)
+                saveGallery(next)
+                return next
+              })
+            }
+          />
+        ) : view === 'marketplace' ? (
           <Marketplace
             baseUrl={baseUrl}
             onAsk={(prompt) => {
@@ -637,6 +727,8 @@ export function App() {
       <Sidebar
         wallet={wallet}
         spend={spend}
+        settings={settings}
+        onSettings={applySettings}
         onWallet={setWallet}
       />
 

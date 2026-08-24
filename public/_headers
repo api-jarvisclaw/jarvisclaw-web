@@ -31,7 +31,10 @@
   # indistinguishable from a charge that produced nothing. `data:` covers inlined base64
   # (speech upstreams return bytes, not a URL) and `https:` covers the CDN the gateway
   # rewrites media URLs to. img-src carries https: for the same reason.
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' data: https:; connect-src 'self' https://api.jarvisclaw.ai http://localhost:3000 http://127.0.0.1:3000; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; object-src 'none'
+  # cdn.jarvisclaw.ai is in connect-src because the gallery POSTs there to archive a paid
+  # artifact into R2. Without it that request is blocked before it is sent and every generated
+  # file silently keeps its expiring upstream URL.
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' data: https:; connect-src 'self' https://api.jarvisclaw.ai https://cdn.jarvisclaw.ai http://localhost:3000 http://127.0.0.1:3000; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; object-src 'none'
 
 # Hashed asset filenames, so these are safe to cache permanently. index.html is
 # deliberately NOT in this rule: it must be revalidated or a deploy would not reach

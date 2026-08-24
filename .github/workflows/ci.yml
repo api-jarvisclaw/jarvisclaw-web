@@ -77,4 +77,14 @@ jobs:
           for token in ("'self'", 'data:'):
               assert token in media, f'media-src is missing {token}: {media}'
           print(f'media-src allows {media}')
+
+          # The gallery POSTs each paid artifact to the CDN to store it permanently. If that
+          # host is missing from connect-src the request is blocked before it is sent, and every
+          # generated file silently keeps an upstream URL that expires within hours — a gallery
+          # of dead links, with nothing in the UI to say why.
+          gallery = pathlib.Path('src/lib/gallery.ts').read_text(encoding='utf-8')
+          mc = re.search(r"CDN_BASE_URL\s*=\s*(?:.*\?\?\s*)?'([^']+)'", gallery, re.S)
+          assert mc is not None, 'could not read CDN_BASE_URL from src/lib/gallery.ts'
+          assert mc.group(1) in connect, f'CSP connect-src does not allow {mc.group(1)}: {connect}'
+          print(f'connect-src allows {mc.group(1)}')
           PY

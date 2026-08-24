@@ -181,6 +181,17 @@ export async function signPayment(
   challenge: Challenge,
   resourceUrl: string,
   account: WalletAccount,
+  /**
+   * The user's own per-signature cap, when they have set one.
+   *
+   * Passed in rather than read from storage here: this module must stay callable from a test
+   * and from a non-browser context, and a function that silently consults localStorage for a
+   * safety limit is one whose behaviour cannot be reasoned about at the call site.
+   *
+   * Absent means the built-in cap. A supplied value is still bounded by it below — the
+   * setting can only ever be as permissive as the hard ceiling, never more.
+   */
+  capUsd: number = PER_SIGNATURE_CAP_USDC,
 ): Promise<SignedPayment> {
   const provider = window.ethereum
   if (!provider) throw new Error('No wallet found.')
@@ -199,11 +210,18 @@ export async function signPayment(
     throw new Error(`The gateway quoted an invalid amount (${amount}).`)
   }
   const usd = atomicToUsd(amount)
-  if (usd > PER_SIGNATURE_CAP_USDC) {
+  // The user's cap, but never looser than the built-in one. Taking the minimum rather than
+  // trusting the argument is what keeps a tampered localStorage value — or a caller that
+  // forgot to validate — from raising the ceiling this function exists to enforce.
+  const effectiveCap = Math.min(
+    PER_SIGNATURE_CAP_USDC,
+    Number.isFinite(capUsd) && capUsd > 0 ? capUsd : PER_SIGNATURE_CAP_USDC,
+  )
+  if (usd > effectiveCap) {
     // Checked here as well as in the UI, because this is the function that produces a
     // spendable signature. A cap enforced only by a dialog is a cap that a bug bypasses.
     throw new Error(
-      `Refusing to sign $${usd.toFixed(2)} — above the $${PER_SIGNATURE_CAP_USDC.toFixed(2)} per-signature cap.`,
+      `Refusing to sign $${usd.toFixed(2)} — above your $${effectiveCap.toFixed(2)} per-signature cap. Raise it in Limits if you meant to.`,
     )
   }
   if (asset.toLowerCase() !== USDC_BASE.toLowerCase()) {

@@ -92,8 +92,30 @@ export function decideSpend(
 export class SpendTracker {
   private total = 0
   private readonly entries: Array<{ label: string; usd: number }> = []
+  private current: SpendPolicy
 
-  constructor(readonly policy: SpendPolicy = DEFAULT_POLICY) {}
+  constructor(policy: SpendPolicy = DEFAULT_POLICY) {
+    this.current = { ...policy }
+  }
+
+  get policy(): SpendPolicy {
+    return this.current
+  }
+
+  /**
+   * Adopt new limits WITHOUT resetting what has been spent.
+   *
+   * Mutating rather than rebuilding is the point: the alternative — a fresh tracker on every
+   * settings change — would zero the running total, so raising a budget mid-session would also
+   * silently forgive everything already charged and hand back a full allowance. The ledger is
+   * a record of real money that left the wallet; a preference change must not erase it.
+   *
+   * Lowering below what is already spent is allowed and leaves `remainingUsd` at 0, which then
+   * refuses further charges. That is the honest outcome of "stop at less than I have spent".
+   */
+  setPolicy(policy: SpendPolicy): void {
+    this.current = { ...policy }
+  }
 
   get spentUsd(): number {
     return this.total

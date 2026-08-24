@@ -103,3 +103,54 @@ describe('SpendTracker', () => {
     expect(t.decide(0.04).kind).toBe('refuse')
   })
 })
+
+describe('SpendTracker.setPolicy', () => {
+  it('raising the per-call limit stops the prompting', () => {
+    // The user's actual complaint: being asked about every charge with no way to say "stop
+    // asking below X".
+    const t = new SpendTracker({ perCallUsd: 0.001, sessionUsd: 1 })
+    expect(t.decide(0.01).kind).toBe('ask')
+    t.setPolicy({ perCallUsd: 0.5, sessionUsd: 1 })
+    expect(t.decide(0.01).kind).toBe('allow')
+  })
+
+  it('does NOT forgive what has already been spent', () => {
+    // The load-bearing one. Rebuilding the tracker on a settings change would zero the total,
+    // so raising the budget would also erase a real ledger of money that left the wallet —
+    // and the user could spend the same allowance twice by nudging a setting.
+    const t = new SpendTracker({ perCallUsd: 0.05, sessionUsd: 1 })
+    t.record('a paid call', 0.4)
+    t.setPolicy({ perCallUsd: 0.05, sessionUsd: 2 })
+    expect(t.spentUsd).toBeCloseTo(0.4, 6)
+    expect(t.history).toHaveLength(1)
+    // 2.0 budget minus the 0.4 already spent, not a fresh 2.0.
+    expect(t.remainingUsd).toBeCloseTo(1.6, 6)
+  })
+
+  it('lowering the budget below what is spent leaves nothing and refuses', () => {
+    // The honest reading of "stop at less than I have already spent". Reporting a negative
+    // remainder, or silently ignoring the new limit, would both be worse.
+    const t = new SpendTracker({ perCallUsd: 0.05, sessionUsd: 1 })
+    t.record('a', 0.8)
+    t.setPolicy({ perCallUsd: 0.05, sessionUsd: 0.5 })
+    expect(t.remainingUsd).toBe(0)
+    expect(t.decide(0.01).kind).toBe('refuse')
+  })
+
+  it('reports the new limits through the policy getter', () => {
+    // The sidebar reads this to render the budget meter; a stale copy would show a bar that
+    // disagrees with the decisions being made.
+    const t = new SpendTracker({ perCallUsd: 0.05, sessionUsd: 1 })
+    t.setPolicy({ perCallUsd: 0.2, sessionUsd: 7 })
+    expect(t.policy).toEqual({ perCallUsd: 0.2, sessionUsd: 7 })
+  })
+
+  it('copies the policy rather than aliasing the caller’s object', () => {
+    // Otherwise a caller mutating its own settings object would silently change the live
+    // spend gate with no call into this class at all.
+    const mine = { perCallUsd: 0.05, sessionUsd: 1 }
+    const t = new SpendTracker(mine)
+    mine.sessionUsd = 999
+    expect(t.policy.sessionUsd).toBe(1)
+  })
+})

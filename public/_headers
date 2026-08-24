@@ -1,0 +1,35 @@
+# Cloudflare Pages serves these headers with the deployed site.
+#
+# The CSP is the important one, and it is deliberately tight: this page holds an API key
+# in memory and talks to a payment gateway, so the damage from injected script here is a
+# stolen credential and a drained wallet, not a defaced page.
+
+/*
+  # No framing. A console that can be embedded can be clickjacked into approving a
+  # charge — the consent dialog is a button, and a button is all an attacker needs.
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+  # Nothing here needs a camera, a microphone, or a location, and the wallet flows do
+  # not use the browser payment APIs.
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()
+
+  # connect-src is the whole point: the app is allowed to reach the gateway and nothing
+  # else. An injected script cannot post the user's key or prompts to another host.
+  #
+  # 'unsafe-inline' for style-src only, because the composer sets the textarea's height
+  # inline as the user types. Scripts get no such exemption: 'self' only, no inline, no
+  # eval, so a stored-XSS payload has nowhere to execute.
+  #
+  # localhost is listed so `bun run dev` behaves like production rather than only
+  # failing once deployed. It costs nothing here: a page served from chat.jarvisclaw.ai
+  # cannot be made to reach a visitor's own localhost by an attacker who does not
+  # already control that machine.
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.jarvisclaw.ai http://localhost:3000 http://127.0.0.1:3000; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; object-src 'none'
+
+# Hashed asset filenames, so these are safe to cache permanently. index.html is
+# deliberately NOT in this rule: it must be revalidated or a deploy would not reach
+# anyone still holding the old one.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

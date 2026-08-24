@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun run test
+
+      - name: Build
+        run: bun run build
+
+      - name: The deployed headers ship with the build
+        # Cloudflare applies public/_headers at the edge, and it reaches the edge only by
+        # being copied into dist/. A build that drops it deploys a site with no CSP at
+        # all — which fails open, silently, on the page that holds an API key.
+        run: |
+          test -f dist/_headers
+          grep -q 'Content-Security-Policy' dist/_headers
+
+      - name: The bundle is reachable under the deployed CSP
+        # The unit tests read _headers as text; only a browser enforces it. A CSP whose
+        # connect-src does not cover the gateway builds clean, passes every test, and
+        # fails in production as an opaque network error.
+        #
+        # This step does not call the live gateway — CI must not depend on a third party
+        # being up, and the free tier is rate-limited per IP, which a shared runner would
+        # trip. It checks the one thing that is decidable offline: that the policy the
+        # edge will send permits the origin the code will call.
+        run: |
+          python3 - <<'PY'
+          import json, re, pathlib
+          headers = pathlib.Path('dist/_headers').read_text(encoding='utf-8')
+          csp = re.search(r'Content-Security-Policy:\s*(.+)', headers).group(1)
+          connect = next(d for d in csp.split(';') if d.strip().startswith('connect-src'))
+          src = pathlib.Path('src/lib/gateway.ts').read_text(encoding='utf-8')
+          base = re.search(r"DEFAULT_BASE_URL = '([^']+)'", src).group(1)
+          assert base in connect, f'CSP connect-src does not allow {base}: {connect}'
+          print(f'connect-src allows {base}')
+          PY

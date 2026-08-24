@@ -93,6 +93,16 @@ export function Sidebar({
             onChange={(e) => onBaseUrl(e.target.value)}
           />
         </label>
+        {/*
+          The deployed site ships a Content-Security-Policy whose connect-src names the
+          gateway explicitly — that is what stops injected script from posting the user's
+          key somewhere else. The cost is that a different host is refused by the browser
+          with an opaque network error, so it has to be said here rather than discovered.
+        */}
+        <p style={{ fontSize: 12, color: 'var(--muted)', margin: 0 }}>
+          A different host works when you run this locally. The hosted build's security
+          policy only allows the JarvisClaw gateway.
+        </p>
       </section>
     </aside>
   )

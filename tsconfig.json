@@ -15,7 +15,10 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "types": ["vite/client", "vitest/globals"]
+    // node is needed by src/deploy.test.ts, which reads public/_headers off disk —
+    // that file is served by Cloudflare and never imported, so a test is the only
+    // thing that can check it.
+    "types": ["vite/client", "vitest/globals", "node"]
   },
   "include": ["src"]
 }

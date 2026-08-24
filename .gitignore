@@ -1,0 +1,5 @@
+node_modules/
+dist/
+probe/*.png
+*.log
+.DS_Store

@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { challengeGeneration, extractMedia, generate, GENERATIONS } from './modality'
+import {
+  challengeGeneration,
+  extractMedia,
+  generate,
+  GENERATIONS,
+  mediaMimeType,
+  modeForModel,
+  UNSERVABLE_VIRTUALS,
+} from './modality'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -177,6 +185,7 @@ describe('GENERATIONS defaults', () => {
     expect(GENERATIONS.image.path).toBe('/v1/images/generations')
     expect(GENERATIONS.video.path).toBe('/v1/videos/generations')
     expect(GENERATIONS.music.path).toBe('/v1/audio/generations')
+    expect(GENERATIONS.speech.path).toBe('/v1/audio/speech')
   })
 
   it('avoids auto/* defaults, which the gateway advertises but cannot serve', () => {
@@ -185,5 +194,129 @@ describe('GENERATIONS defaults', () => {
     for (const spec of Object.values(GENERATIONS)) {
       expect(spec.defaultModel.startsWith('auto/')).toBe(false)
     }
+  })
+
+  it('never defaults to a model on the known-unservable list', () => {
+    // Stronger than the auto/* check and aimed at the same class of bug: the list is what was
+    // MEASURED to 400, and a default drawn from it breaks a button for every visitor.
+    for (const spec of Object.values(GENERATIONS)) {
+      expect(UNSERVABLE_VIRTUALS).not.toContain(spec.defaultModel)
+    }
+  })
+})
+
+describe('speech is its own endpoint, not a chat model', () => {
+  /**
+   * THE BUG THIS PINS, and it cost real money.
+   *
+   * Asked to speak a phrase, the app had no speech endpoint, so `auto/tts` went to
+   * /v1/chat/completions — where it is a PAID CHAT MODEL. Measured on the live gateway:
+   *
+   *   auto/tts @ /v1/chat/completions  -> 402, $0.001   (bills, answers in words)
+   *   auto/tts @ /v1/audio/speech      -> 400           (not servable at all)
+   *
+   * Five agent steps, five wallet signatures, $0.068 spent, no audio. The correct call is
+   * one signature for $0.002 against elevenlabs/turbo-v2.5.
+   */
+  it('sends the text as `input`, because /v1/audio/speech 400s on `prompt`', async () => {
+    const spy = stubResponse(402, { accepts: [{ amount: '2000' }] })
+    await challengeGeneration('speech', '你好，欢迎使用')
+    const body = sentBody(spy)
+    expect(body.input).toBe('你好，欢迎使用')
+    expect(body).not.toHaveProperty('prompt')
+  })
+
+  it('quotes speech at the measured price, not a chat price', async () => {
+    stubResponse(402, { accepts: [{ amount: '2000' }] })
+    // $0.002 for the clip, against $0.068 spent on five chat steps that produced none.
+    await expect(challengeGeneration('speech', 'hello')).resolves.toMatchObject({
+      usd: expect.closeTo(0.002, 6),
+    })
+  })
+
+  it('still sends `prompt` for the other modes', async () => {
+    // The field is per-endpoint, so a shared helper must not have flipped them all.
+    const spy = stubResponse(402, { accepts: [{ amount: '1' }] })
+    await challengeGeneration('image', 'a red cube')
+    expect(sentBody(spy).prompt).toBe('a red cube')
+  })
+})
+
+describe('modeForModel', () => {
+  /**
+   * The wiring whose ABSENCE caused the charge above: the picker offered audio and image
+   * models, and choosing one only ever changed the chat model.
+   */
+  it('splits audio into music and speech, which are different endpoints', () => {
+    // Not a cosmetic distinction: /v1/audio/generations prices per track and 400s on a voice
+    // model, /v1/audio/speech prices per clip and 400s on a music model. Both measured.
+    expect(modeForModel('minimax/music-2.5+', 'audio')).toBe('music')
+    expect(modeForModel('elevenlabs/turbo-v2.5', 'audio')).toBe('speech')
+    expect(modeForModel('openai/gpt-4o-mini-tts', 'audio')).toBe('speech')
+  })
+
+  it('routes image and video models to their own endpoints', () => {
+    expect(modeForModel('openai/gpt-image-2', 'image')).toBe('image')
+    expect(modeForModel('bytedance/seedance-2.0-mini', 'video')).toBe('video')
+  })
+
+  it('leaves a text model on chat', () => {
+    // null is the signal to run the agent loop. A text model routed to a media endpoint
+    // would 400 on every message.
+    expect(modeForModel('anthropic/claude-haiku-4.5', 'text')).toBeNull()
+    expect(modeForModel('auto/free', 'text')).toBeNull()
+  })
+
+  it('routes every audio model in the catalogue somewhere real', () => {
+    // The names the gateway actually advertises, so a naming convention this function does
+    // not know about shows up here rather than as a 400 the user pays to discover.
+    const audio = [
+      'elevenlabs/v3',
+      'elevenlabs/flash-v2.5',
+      'elevenlabs/multilingual-v2',
+      'bytedance/seed-audio-1.0',
+      'google/gemini-2.5-flash-preview-tts',
+      'minimax/music-2.5+',
+    ]
+    for (const name of audio) {
+      expect(['music', 'speech']).toContain(modeForModel(name, 'audio'))
+    }
+  })
+})
+
+describe('mediaMimeType', () => {
+  it('does not label a clip as a PNG', () => {
+    // It used to: every b64 payload was rendered `data:image/png`. Right for an image, and a
+    // dead <audio> player for a clip — which after a real charge looks like nothing happened.
+    expect(mediaMimeType('speech')).toBe('audio/mpeg')
+    expect(mediaMimeType('music')).toBe('audio/mpeg')
+    expect(mediaMimeType('image')).toBe('image/png')
+    expect(mediaMimeType('video')).toBe('video/mp4')
+  })
+})
+
+describe('extractMedia for speech', () => {
+  it('reads inlined audio bytes under the names upstreams actually use', () => {
+    // No contract promises any of these. A paid clip that renders blank because the field was
+    // called `audio` instead of `b64_json` is the outcome worth spending a test on.
+    expect(extractMedia('speech', { data: [{ audio: 'QUJD' }] })).toEqual({
+      kind: 'speech',
+      b64: 'QUJD',
+    })
+    expect(extractMedia('speech', { b64_json: 'QUJD' })).toEqual({ kind: 'speech', b64: 'QUJD' })
+    expect(extractMedia('speech', { audio_base64: 'QUJD' })).toEqual({ kind: 'speech', b64: 'QUJD' })
+  })
+
+  it('prefers a URL over inlined bytes when both are present', () => {
+    expect(extractMedia('speech', { data: [{ url: 'https://cdn/a.mp3', audio: 'QUJD' }] })).toEqual({
+      kind: 'speech',
+      url: 'https://cdn/a.mp3',
+    })
+  })
+
+  it('ignores an empty audio string rather than rendering a silent player', () => {
+    const out = extractMedia('speech', { audio: '' })
+    expect(out.b64).toBeUndefined()
+    expect(out.raw).toBeDefined()
   })
 })

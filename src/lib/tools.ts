@@ -285,6 +285,26 @@ export const tools: Record<string, Tool> = {
 }
 
 /**
+ * What the model must be told it CANNOT do, so it stops trying.
+ *
+ * Measured failure this addresses: asked to speak a phrase, the model searched the catalogue,
+ * found paid TTS APIs, could not call them, and then answered with a suggestion to use the
+ * browser's Web Speech API — after four paid chat steps. It had no way to know that the page
+ * itself has a Speech button that does exactly this for $0.002.
+ *
+ * So the instruction is not "you cannot make audio". It is "the page can, and you should say
+ * so instead of spending turns finding out you can't".
+ */
+export const MODALITY_HINT = [
+  'Media generation is NOT available to you as a tool. The page has its own buttons for it:',
+  'Image, Video, Music and Speech, below the message box. Each one quotes a price and takes',
+  'one wallet signature.',
+  'So if the user asks for a picture, a video, music, or for something to be spoken aloud:',
+  'tell them to press that button, in one short sentence. Do not search the catalogue for it,',
+  'do not call an API for it, and do not offer code that does it in their browser instead.',
+].join(' ')
+
+/**
  * The schemas to advertise for this session.
  *
  * An anonymous session is offered only the free tools. Advertising call_api to a

@@ -14,7 +14,7 @@ import {
   type ToolCall,
 } from './gateway'
 import { ModelRouter } from './route'
-import { tools, toolSchemas, type ToolContext } from './tools'
+import { MODALITY_HINT, tools, toolSchemas, type ToolContext } from './tools'
 
 /**
  * The instruction the model runs under.
@@ -37,6 +37,10 @@ export const SYSTEM_PROMPT = [
   '- Call the tools directly. Do not describe what you are about to do instead of doing it.',
   '- When a tool returns data, answer the question with it. Do not dump raw JSON at the user.',
   '- If a tool result says the user declined a charge, respect it and do not retry that call.',
+  // Third bullet-worthy rule, and the one that came from a measured cost: without it, "turn
+  // this into speech" burned four paid steps hunting the catalogue and ended in a suggestion
+  // to use the browser's own speech API. The page has a Speech button that does it for $0.002.
+  `- ${MODALITY_HINT}`,
 ].join('\n')
 
 export interface AgentEvent {

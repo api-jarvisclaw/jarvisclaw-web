@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react'
 
+import { mediaMimeType } from '../lib/modality'
+
 export interface ToolStep {
   tool: string
   running: boolean
@@ -24,7 +26,7 @@ export type Turn =
    */
   | {
       kind: 'media'
-      media: 'image' | 'video' | 'music'
+      media: 'image' | 'video' | 'music' | 'speech'
       url?: string
       b64?: string
       raw?: string
@@ -148,11 +150,15 @@ function TurnView({ turn }: { turn: Turn }) {
 }
 
 function MediaView({ turn }: { turn: Extract<Turn, { kind: 'media' }> }) {
-  // A data: URL for base64 payloads. The deployed CSP allows `img-src 'self' data:`, which
-  // is why an inlined image renders — but `media-src` is not set, so it falls back to
-  // default-src 'self' and a data: video would be refused. That is stated here rather than
-  // discovered: a silently blank video after a paid call is the worst possible outcome.
-  const src = turn.url ?? (turn.b64 ? `data:image/png;base64,${turn.b64}` : undefined)
+  // A data: URL for base64 payloads, with the mime type of the actual medium. It used to be
+  // hardcoded `image/png`, which is right for an image and silently broken for a clip: an
+  // <audio> element handed an image mime type renders a dead player, so a paid speech call
+  // looked like it produced nothing.
+  //
+  // The deployed CSP now sets `media-src 'self' data: https:`. Without it a data: clip is
+  // refused by default-src, which is the same dead player by a different cause — stated here
+  // rather than discovered, because a blank result after a real charge is the worst outcome.
+  const src = turn.url ?? (turn.b64 ? `data:${mediaMimeType(turn.media)};base64,${turn.b64}` : undefined)
 
   return (
     <div className="turn turn-agent">

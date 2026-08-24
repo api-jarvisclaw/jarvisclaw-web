@@ -12,9 +12,15 @@ import {
   type Conversation,
 } from './lib/conversations'
 import { DEFAULT_BASE_URL, FREE_MODEL, type ChatMessage } from './lib/gateway'
-import { challengeGeneration, GENERATIONS, generate, type GenerationKind } from './lib/modality'
+import {
+  challengeGeneration,
+  GENERATIONS,
+  generate,
+  modeForModel,
+  type GenerationKind,
+} from './lib/modality'
 import { ModelRouter } from './lib/route'
-import { SpendTracker } from './lib/spend'
+import { SpendTracker, TYPICAL_AGENT_STEPS } from './lib/spend'
 import { ChatList } from './ui/ChatList'
 import { Composer } from './ui/Composer'
 import { ConsentDialog, type PendingSpend } from './ui/ConsentDialog'
@@ -214,8 +220,12 @@ export function App() {
       const spec = GENERATIONS[kind]
       // A model chosen for chat cannot make a video, so the mode's own default is used
       // unless the picked model is of that modality.
+      // Compared on the resolved MODE, not the raw modality: `audio` covers both music and
+      // speech, and they are different endpoints. Comparing modality alone would send a
+      // voice model to /v1/audio/generations, which prices per track and 400s on it.
       const chosen = models.find((m) => m.model === model)
-      const useModel = chosen?.modality === kind ? model : spec.defaultModel
+      const chosenMode = chosen ? modeForModel(chosen.model, chosen.modality) : null
+      const useModel = chosenMode === kind ? model : spec.defaultModel
 
       setTurns((t) => [...t, { kind: 'user', text: prompt }])
 
@@ -324,9 +334,16 @@ export function App() {
       setView('chat')
       setBusy(true)
 
-      if (mode !== 'chat') {
+      // Where this message runs. The mode button wins when set, but a picked non-text model
+      // routes on its own — WITHOUT this, choosing a voice model only changed the CHAT model,
+      // so `auto/tts` went to /v1/chat/completions where it is a paid chat model that answers
+      // in words. That cost a real user five signatures and $0.068 for no audio.
+      const picked = models.find((m) => m.model === model)
+      const target = mode !== 'chat' ? mode : picked ? modeForModel(picked.model, picked.modality) : null
+
+      if (target !== null) {
         try {
-          await runGeneration(mode, message, convId)
+          await runGeneration(target, message, convId)
         } finally {
           setBusy(false)
         }
@@ -414,9 +431,24 @@ export function App() {
         }
       }
 
-      // Chat runs on the free tier: text models cost nothing, so no signature is needed.
-      // A paid chat model would need a per-call signature the same way generation does,
-      // which the picker does not offer yet — see the notice in the composer hint.
+      // A paid chat model needs one wallet signature PER AGENT STEP, because one x402 `exact`
+      // signature authorises exactly one HTTP request and each step is a request. That is a
+      // protocol floor, not a UI choice: the facilitator advertises the `upto` scheme only on
+      // Base Sepolia, while the gateway quotes `exact` on mainnet.
+      //
+      // Said before the run rather than discovered during it. A user asked for one thing and
+      // got five wallet prompts with no warning, which reads as the page malfunctioning.
+      if (picked && !picked.free && wallet !== null) {
+        setTurns((t) => [
+          ...t,
+          {
+            kind: 'notice',
+            text: `${model} is paid, and an agent run takes a few steps — each one needs its own wallet signature (usually ${TYPICAL_AGENT_STEPS}, sometimes more). Free models need none.`,
+          },
+        ])
+      }
+
+      // No API key: paid chat is signed per call by the wallet, free models need nothing.
       const cred = {}
       if (!router.current) {
         router.current = new ModelRouter({ baseUrl, cred })
@@ -458,7 +490,20 @@ export function App() {
         })
       }
     },
-    [activeId, anonymous, baseUrl, busy, confirmSpend, mode, model, persist, runGeneration],
+    [
+      activeId,
+      anonymous,
+      baseUrl,
+      busy,
+      confirmSpend,
+      mode,
+      model,
+      models,
+      payForChat,
+      persist,
+      runGeneration,
+      wallet,
+    ],
   )
 
   const stop = useCallback(() => {

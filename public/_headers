@@ -1,8 +1,8 @@
 # Cloudflare Pages serves these headers with the deployed site.
 #
-# The CSP is the important one, and it is deliberately tight: this page holds an API key
-# in memory and talks to a payment gateway, so the damage from injected script here is a
-# stolen credential and a drained wallet, not a defaced page.
+# The CSP is the important one, and it is deliberately tight: this page asks a wallet to
+# sign payment authorisations, so the damage from injected script here is a drained wallet,
+# not a defaced page. (It no longer holds an API key — that box is gone.)
 
 /*
   # No framing. A console that can be embedded can be clickjacked into approving a
@@ -26,7 +26,12 @@
   # failing once deployed. It costs nothing here: a page served from chat.jarvisclaw.ai
   # cannot be made to reach a visitor's own localhost by an attacker who does not
   # already control that machine.
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.jarvisclaw.ai http://localhost:3000 http://127.0.0.1:3000; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; object-src 'none'
+  # media-src is required for the generated audio and video to play at all. Without it
+  # both fall back to default-src 'self', and a paid clip renders a dead player — which is
+  # indistinguishable from a charge that produced nothing. `data:` covers inlined base64
+  # (speech upstreams return bytes, not a URL) and `https:` covers the CDN the gateway
+  # rewrites media URLs to. img-src carries https: for the same reason.
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' data: https:; connect-src 'self' https://api.jarvisclaw.ai http://localhost:3000 http://127.0.0.1:3000; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; object-src 'none'
 
 # Hashed asset filenames, so these are safe to cache permanently. index.html is
 # deliberately NOT in this rule: it must be revalidated or a deploy would not reach

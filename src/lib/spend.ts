@@ -28,6 +28,21 @@ export const DEFAULT_POLICY: SpendPolicy = {
   sessionUsd: DEFAULT_SESSION_USD,
 }
 
+/**
+ * How many wallet signatures one agent run on a PAID chat model is expected to need.
+ *
+ * Not a limit — an estimate, used to warn before the run rather than during it. It exists
+ * because of a measured failure: one request produced FIVE signature prompts in a row, and
+ * nothing had said it would.
+ *
+ * The prompts cannot be batched away. One x402 `exact` signature authorises exactly one HTTP
+ * request, and an agent turn is one request; the facilitator advertises the `upto` scheme
+ * only on Base Sepolia (measured against its /supported), while the gateway quotes `exact`
+ * on mainnet. So per-call signing is a protocol floor, and the honest fix is to say so up
+ * front instead of surprising someone mid-run.
+ */
+export const TYPICAL_AGENT_STEPS = 3
+
 export type SpendDecision =
   /** Under both limits: run it, no prompt. */
   | { kind: 'allow' }

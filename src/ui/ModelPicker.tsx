@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { displayPrice, type CatalogueModel, type Modality } from '../lib/catalogue'
+import { UNSERVABLE_VIRTUALS } from '../lib/modality'
 
 /**
  * Model chooser.
@@ -52,7 +53,14 @@ export function ModelPicker({
     // Free first, then virtual (auto/*), then alphabetical. Cheapest-first would be
     // misleading: the per-call models all report 0 and would sort to the front while
     // actually being the expensive ones.
+    //
+    // The unservable virtuals are the exception, sorted last despite being "free" and
+    // virtual. They are the most attractive-looking rows in the list and the only ones that
+    // cannot work: `auto/tts` 400s on the speech endpoint while billing happily as chat.
     return rows.sort((a, b) => {
+      const aBad = UNSERVABLE_VIRTUALS.includes(a.model)
+      const bBad = UNSERVABLE_VIRTUALS.includes(b.model)
+      if (aBad !== bBad) return aBad ? 1 : -1
       if (a.free !== b.free) return a.free ? -1 : 1
       if (a.virtual !== b.virtual) return a.virtual ? -1 : 1
       return a.model.localeCompare(b.model)
@@ -117,9 +125,16 @@ export function ModelPicker({
                   }}
                 >
                   <span className="picker-row-name">{m.model}</span>
-                  <span className={m.free ? 'picker-row-price is-free' : 'picker-row-price'}>
-                    {displayPrice(m)}
-                  </span>
+                  {UNSERVABLE_VIRTUALS.includes(m.model) ? (
+                    // Labelled rather than hidden. Hiding it would leave someone searching for
+                    // a name the catalogue advertises and concluding the picker is broken;
+                    // this says the catalogue is the thing that is wrong.
+                    <span className="picker-row-price is-broken">not servable</span>
+                  ) : (
+                    <span className={m.free ? 'picker-row-price is-free' : 'picker-row-price'}>
+                      {displayPrice(m)}
+                    </span>
+                  )}
                 </button>
               ))
             )}

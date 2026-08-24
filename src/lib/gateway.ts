@@ -141,7 +141,7 @@ export function isRateLimited(err: unknown): boolean {
   return err instanceof GatewayError && err.status === 429
 }
 
-interface RequestOptions {
+export interface RequestOptions {
   baseUrl?: string
   cred?: Credential
   signal?: AbortSignal

@@ -89,7 +89,11 @@ async def main() -> int:
                 failures.append(f"no answer arrived: {exc}")
 
         print("== 3. which model answered is reported ==")
-        rows = await page.query_selector_all(".turn-agent .tool-row")
+        # Both selectors on purpose. `.answered-by` is where the attribution lives; the
+        # `.tool-row` fallback is what it shared before it had its own class. Matching on
+        # the text keeps this honest either way — a probe pinned to one class reports a
+        # restyle as a missing feature, which is how this check first failed.
+        rows = await page.query_selector_all(".turn-agent .answered-by, .turn-agent .tool-row")
         texts = [await r.inner_text() for r in rows]
         answered_by = [t for t in texts if "answered by" in t]
         print(f"   {answered_by}")

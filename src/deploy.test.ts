@@ -77,6 +77,24 @@ describe('deployed CSP', () => {
     expect(directive('form-action')).toContain("'none'")
     expect(directive('object-src')).toContain("'none'")
   })
+
+  it('serves every font the stylesheet asks for from an origin it permits', () => {
+    // The failure this catches is invisible in dev and silent in CI: a stylesheet that
+    // @imports Google Fonts builds fine and passes every other test here, then the
+    // deployed page drops to a fallback face because font-src is 'self'. Nobody sees it
+    // until they look at production, and it reads as a design regression rather than a
+    // policy one.
+    //
+    // Checked in the direction that can actually break: for each remote host the CSS
+    // references, the policy must name it. Fonts bundled by the build are 'self' and
+    // reference no host at all, so the correct setup asserts trivially.
+    const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
+    const remoteHosts = [...css.matchAll(/https?:\/\/([a-z0-9.-]+)/gi)].map((m) => m[1])
+    const fontPolicy = `${directive('font-src')} ${directive('style-src')} ${directive('default-src')}`
+    for (const host of remoteHosts) {
+      expect(fontPolicy).toContain(host)
+    }
+  })
 })
 
 describe('deployed caching', () => {

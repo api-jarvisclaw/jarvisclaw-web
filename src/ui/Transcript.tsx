@@ -43,7 +43,12 @@ export function Transcript({
     return (
       <div className="transcript">
         <div className="empty">
-          <h1>Ask for anything.</h1>
+          <span className="eyebrow">Agent console</span>
+          <h1>
+            Ask for anything.
+            <br />
+            <em>It pays per call.</em>
+          </h1>
           <p>
             4000+ callable APIs and 80+ models. Start now — no account, no key, no card. Paid
             APIs ask before they spend anything.
@@ -105,7 +110,7 @@ function TurnView({ turn }: { turn: Turn }) {
       {turn.text.trim() !== '' && <div className="bubble">{turn.text}</div>}
 
       {turn.model && (
-        <div className="tool-row">
+        <div className="answered-by">
           {/* auto/free resolves per request, so naming the concrete model is the only
               way the user learns which one answered. */}
           <span>answered by</span>
@@ -118,8 +123,8 @@ function TurnView({ turn }: { turn: Turn }) {
 
 function StepView({ step }: { step: ToolStep }) {
   return (
-    <div className="tool-row">
-      <span>{step.running ? '⋯' : '✓'}</span>
+    <div className={step.running ? 'tool-row is-running' : 'tool-row'}>
+      <span className="tool-glyph">{step.running ? '◇' : '◆'}</span>
       <span className="tool-name">{step.tool}</span>
       {step.declined ? (
         <span className="declined">declined</span>

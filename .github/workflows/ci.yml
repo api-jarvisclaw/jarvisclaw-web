@@ -45,12 +45,36 @@ jobs:
         # edge will send permits the origin the code will call.
         run: |
           python3 - <<'PY'
-          import json, re, pathlib
+          import re, pathlib
+
           headers = pathlib.Path('dist/_headers').read_text(encoding='utf-8')
           csp = re.search(r'Content-Security-Policy:\s*(.+)', headers).group(1)
-          connect = next(d for d in csp.split(';') if d.strip().startswith('connect-src'))
+          directives = {}
+          for part in csp.split(';'):
+              name, _, value = part.strip().partition(' ')
+              if name:
+                  directives[name] = value
+
           src = pathlib.Path('src/lib/gateway.ts').read_text(encoding='utf-8')
-          base = re.search(r"DEFAULT_BASE_URL = '([^']+)'", src).group(1)
+          # The fallback after `??`, not the whole expression. This regex used to require a
+          # bare string literal, so when DEFAULT_BASE_URL gained a VITE_GATEWAY_URL override
+          # it matched nothing and `.group(1)` raised AttributeError — the step went red for
+          # two PRs while appearing to be a real CSP failure. Anchored on the fallback because
+          # that is the origin a production build actually calls.
+          m = re.search(r"DEFAULT_BASE_URL\s*=\s*(?:.*\?\?\s*)?'([^']+)'", src, re.S)
+          assert m is not None, 'could not read DEFAULT_BASE_URL from src/lib/gateway.ts'
+          base = m.group(1)
+          connect = directives.get('connect-src', '')
           assert base in connect, f'CSP connect-src does not allow {base}: {connect}'
           print(f'connect-src allows {base}')
+
+          # media-src must exist and allow data:, or generated audio and video are refused by
+          # the default-src fallback. That failure is invisible in the markup — the src
+          # attribute reads correctly while the player stays dead, which after a real charge
+          # is indistinguishable from a call that produced nothing.
+          media = directives.get('media-src')
+          assert media is not None, f'CSP has no media-src, so paid audio and video cannot play: {csp}'
+          for token in ("'self'", 'data:'):
+              assert token in media, f'media-src is missing {token}: {media}'
+          print(f'media-src allows {media}')
           PY

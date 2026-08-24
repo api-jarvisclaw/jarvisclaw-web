@@ -4,13 +4,10 @@ import { WalletPanel } from './WalletPanel'
 
 export function Sidebar({
   wallet,
-  baseUrl,
   spend,
   onWallet,
-  onBaseUrl,
 }: {
   wallet: WalletAccount | null
-  baseUrl: string
   spend: {
     spentUsd: number
     remainingUsd: number
@@ -18,7 +15,6 @@ export function Sidebar({
     policy: SpendPolicy
   }
   onWallet: (a: WalletAccount | null) => void
-  onBaseUrl: (v: string) => void
 }) {
   const budget = spend.policy.sessionUsd
   const usedPct = budget > 0 ? Math.min(100, Math.max(0, (spend.spentUsd / budget) * 100)) : 0
@@ -75,28 +71,14 @@ export function Sidebar({
 
       <WalletPanel account={wallet} onAccount={onWallet} />
 
-      <section>
-        <h2>Gateway</h2>
-        <label className="field">
-          Base URL
-          <input
-            type="text"
-            value={baseUrl}
-            spellCheck={false}
-            onChange={(e) => onBaseUrl(e.target.value)}
-          />
-        </label>
-        {/*
-          The deployed site ships a Content-Security-Policy whose connect-src names the
-          gateway explicitly — that is what stops injected script from posting the user's
-          key somewhere else. The cost is that a different host is refused by the browser
-          with an opaque network error, so it has to be said here rather than discovered.
-        */}
-        <p style={{ margin: 0 }}>
-          A different host works when you run this locally. The hosted build's security
-          policy only allows the JarvisClaw gateway.
-        </p>
-      </section>
+      {/*
+        No gateway field. Which host this talks to is not a user's decision — it is
+        infrastructure, and putting it in the sidebar invited someone to point a page that
+        signs payments at a host of their choosing. The deployed CSP would refuse any other
+        origin anyway, so the input could only ever break the app or mislead.
+
+        Local development overrides it with VITE_GATEWAY_URL instead (see lib/gateway.ts).
+      */}
     </aside>
   )
 }

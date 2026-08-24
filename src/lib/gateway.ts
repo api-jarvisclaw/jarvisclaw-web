@@ -1,14 +1,28 @@
 /**
  * The gateway calls this app makes, and the rules that are easy to get wrong.
  *
- * Everything here talks to the JarvisClaw gateway directly from the browser. That
- * works because the gateway answers CORS with `access-control-allow-origin: *` and
- * exposes the x402 headers, so no proxy of our own is needed and no server-side
- * secret exists to protect.
+ * Everything here talks to the JarvisClaw gateway directly from the browser, with no proxy
+ * of ours in between and no server-side secret to protect.
+ *
+ * The CORS picture is narrower than it looks, and this comment used to state it wrongly.
+ * `access-control-allow-origin: *` is returned only for ANONYMOUS requests to the public
+ * surfaces. The moment a request carries a credential — Authorization, X-PAYMENT — the
+ * gateway falls through to an origin whitelist, and this page's origin has to be on it.
+ * Getting that wrong is not a subtle failure: every credentialed request was blocked by the
+ * browser before it was sent, so both the API key box and wallet payments were dead.
+ * See api-server#528 and CORS_ALLOWED_ORIGINS on the gateway host.
  */
 
-/** Default gateway. Overridable so a self-hosted instance can be pointed at. */
-export const DEFAULT_BASE_URL = 'https://api.jarvisclaw.ai'
+/**
+ * The gateway.
+ *
+ * Not user-editable. Which host a page that signs payments talks to is infrastructure, not
+ * a preference — an input for it invites pointing this app at someone else's host, and the
+ * deployed CSP would refuse any other origin regardless. `VITE_GATEWAY_URL` overrides it at
+ * build time for local development against a dev gateway.
+ */
+export const DEFAULT_BASE_URL =
+  (import.meta.env?.VITE_GATEWAY_URL as string | undefined) ?? 'https://api.jarvisclaw.ai'
 
 /**
  * The virtual model that routes to whatever is free right now.
@@ -154,6 +168,22 @@ export function isAuthError(err: unknown): boolean {
 /** True when a failure is the gateway asking for payment before it will answer. */
 export function isPaymentRequired(err: unknown): boolean {
   return err instanceof GatewayError && err.status === 402
+}
+
+/**
+ * The x402 challenge carried by a 402, or null if this is not one.
+ *
+ * Needed because a 402 body is a payment offer, not an error message. Without this the
+ * whole challenge JSON was rendered into the transcript verbatim — a wall of `accepts`,
+ * `payTo` and base64 in place of a price. The user saw it as a broken app, and there was
+ * no way to act on it.
+ */
+export function paymentChallenge(err: unknown): { accepts?: Array<Record<string, unknown>> } | null {
+  if (!(err instanceof GatewayError) || err.status !== 402) return null
+  const body = err.body
+  if (typeof body !== 'object' || body === null) return null
+  const accepts = (body as { accepts?: unknown }).accepts
+  return Array.isArray(accepts) ? (body as { accepts: Array<Record<string, unknown>> }) : null
 }
 
 /** True when a failure is the free tier's per-IP rate limit. */

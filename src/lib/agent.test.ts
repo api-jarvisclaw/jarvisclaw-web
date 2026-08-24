@@ -378,3 +378,150 @@ describe('SYSTEM_PROMPT', () => {
     expect(SYSTEM_PROMPT.toLowerCase()).toContain('search_apis before')
   })
 })
+
+/**
+ * A 402 in the chat path.
+ *
+ * The bug these cover, reported from the deployed site: picking a paid chat model rendered
+ * the entire x402 challenge into the transcript — `accepts`, `payTo`, base64 and all — where
+ * a price should have been. It read as a broken app, and there was nothing to act on.
+ */
+const CHALLENGE = {
+  accepts: [
+    {
+      scheme: 'exact',
+      network: 'eip155:8453',
+      amount: '5282',
+      asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      payTo: '0xDC59fa7b64988B846e76eC9849bb68f889071506',
+      maxTimeoutSeconds: 300,
+      extra: { name: 'USD Coin', version: '2' },
+    },
+    // The gateway quotes Solana alongside Base. An EVM wallet cannot sign it.
+    {
+      scheme: 'exact',
+      network: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+      amount: '5282',
+      asset: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+      payTo: '596XUXmD8PXxvrxXUfqYH4qAozYDqqMwmHQ1C7BuDZ3E',
+    },
+  ],
+  x402Version: 2,
+}
+
+function stub402ThenOk(frames: string[]) {
+  let n = 0
+  const mock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+    n++
+    const headers = (init?.headers ?? {}) as Record<string, string>
+    // Second call is only served when it actually carries the payment, so a test cannot
+    // pass by retrying without one.
+    if (n === 1 || headers['X-PAYMENT'] === undefined) {
+      return new Response(JSON.stringify(CHALLENGE), { status: 402 })
+    }
+    return sseResponse(frames)
+  })
+  vi.stubGlobal('fetch', mock)
+  return mock
+}
+
+describe('paid chat models', () => {
+  it('reports the price instead of the raw challenge when there is no wallet', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(CHALLENGE), { status: 402 })),
+    )
+    const history: ChatMessage[] = []
+    const events = await collect(
+      runAgent(history, 'hi', { ...baseOpts, anonymous: true, model: 'openai/gpt-4o-mini' }),
+    )
+
+    const errors = events.filter((e) => e.type === 'error')
+    const notices = events.filter((e) => e.type === 'notice')
+    // The failing behaviour: a raw challenge body arriving as an error.
+    for (const e of errors) {
+      expect(e.text ?? '').not.toContain('accepts')
+      expect(e.text ?? '').not.toContain('payTo')
+    }
+    expect(notices).toHaveLength(1)
+    expect(notices[0].text).toContain('paid model')
+    // Names the way out. A price with no next step is only half an answer.
+    expect(notices[0].text).toContain('auto/free')
+  })
+
+  it('does not retire a paid model as unavailable', async () => {
+    // A 402 means the model is working exactly as intended. Treating it as unservable would
+    // silently answer from a free model instead of the one the user picked.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(CHALLENGE), { status: 402 })),
+    )
+    const events = await collect(
+      runAgent([], 'hi', { ...baseOpts, anonymous: true, model: 'openai/gpt-4o-mini' }),
+    )
+    expect(events.filter((e) => e.type === 'downgrade')).toHaveLength(0)
+  })
+
+  it('pays and retries on the same model when a wallet can sign', async () => {
+    const mock = stub402ThenOk([
+      frame({ choices: [{ delta: { content: 'paid answer' } }] }),
+      'data: [DONE]\n\n',
+    ])
+    const payForChat = vi.fn(
+      async (_c: { accepts?: Array<Record<string, unknown>> }, _m: string) => 'BASE64PAYLOAD',
+    )
+
+    const events = await collect(
+      runAgent([], 'hi', { ...baseOpts, model: 'openai/gpt-4o-mini', payForChat }),
+    )
+
+    expect(payForChat).toHaveBeenCalledTimes(1)
+    // The challenge is handed over whole: the signature is made over the gateway's own
+    // payTo and network, and re-deriving those from a price would be inventing them.
+    expect(payForChat.mock.calls[0][0]).toMatchObject({ accepts: expect.any(Array) })
+    expect(payForChat.mock.calls[0][1]).toBe('openai/gpt-4o-mini')
+
+    const text = events.filter((e) => e.type === 'text').map((e) => e.text).join('')
+    expect(text).toBe('paid answer')
+
+    // Retried on the SAME model, with the payment attached.
+    const second = mock.mock.calls[1]
+    expect(JSON.parse(String((second[1] as RequestInit).body)).model).toBe('openai/gpt-4o-mini')
+    expect(((second[1] as RequestInit).headers as Record<string, string>)['X-PAYMENT']).toBe(
+      'BASE64PAYLOAD',
+    )
+  })
+
+  it('reports a cancellation, not an error, when the user declines', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(CHALLENGE), { status: 402 })),
+    )
+    const events = await collect(
+      runAgent([], 'hi', { ...baseOpts, model: 'openai/gpt-4o-mini', payForChat: async () => null }),
+    )
+    expect(events.filter((e) => e.type === 'error')).toHaveLength(0)
+    const notices = events.filter((e) => e.type === 'notice')
+    expect(notices.some((n) => (n.text ?? '').toLowerCase().includes('cancel'))).toBe(true)
+  })
+
+  it('does not ask for a second signature when the payment is refused', async () => {
+    // A second 402 means settlement failed. Re-signing would ask the user to authorise
+    // another transfer for a call that already did not go through.
+    const payForChat = vi.fn(
+      async (_c: { accepts?: Array<Record<string, unknown>> }, _m: string) => 'PAYLOAD',
+    )
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify(CHALLENGE), { status: 402 })),
+    )
+    const events = await collect(
+      runAgent([], 'hi', { ...baseOpts, model: 'openai/gpt-4o-mini', payForChat }),
+    )
+    expect(payForChat).toHaveBeenCalledTimes(1)
+    const errors = events.filter((e) => e.type === 'error')
+    expect(errors).toHaveLength(1)
+    expect(errors[0].text).toContain('did not accept the payment')
+    expect(errors[0].text ?? '').not.toContain('accepts')
+  })
+})

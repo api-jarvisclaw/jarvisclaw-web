@@ -129,7 +129,19 @@ async def main() -> int:
         # Transport-layer noise is not an app defect: a dropped QUIC connection to
         # Cloudflare says nothing about this code, and treating it as a failure makes the
         # probe report the network's bad minute as a broken console.
-        ignorable = ("favicon", "err_quic", "err_network_changed", "err_connection_reset")
+        #
+        # cloudflareinsights is different again — it is *expected* on the deployed site.
+        # Cloudflare injects its analytics beacon into the response and our
+        # `script-src 'self'` refuses it, so the error proves the CSP is working. Left
+        # unfiltered it fails every run against production, and a probe that always fails
+        # is a probe nobody reads — which is how a real error would get through.
+        ignorable = (
+            "favicon",
+            "err_quic",
+            "err_network_changed",
+            "err_connection_reset",
+            "cloudflareinsights",
+        )
         real = [e for e in console_errors if not any(i in e.lower() for i in ignorable)]
         for e in real[:5]:
             print(f"   {e[:160]}")

@@ -1,4 +1,5 @@
 import { authHeaders, DEFAULT_BASE_URL, type Credential, type RequestOptions } from './gateway'
+import type { Challenge } from './wallet'
 
 /**
  * Image, video and music generation.
@@ -76,46 +77,6 @@ function atomicToUsd(amount: string): number {
   return Number.isFinite(n) ? n / 1_000_000 : NaN
 }
 
-/**
- * Asks the gateway what this generation costs, without paying.
- *
- * An unpaid request answers 402 with the exact price for this exact call, which is far
- * better than a table: per-video pricing varies with duration and model, and a quoted
- * figure cannot drift from what settlement will charge.
- */
-export async function quoteGeneration(
-  kind: GenerationKind,
-  prompt: string,
-  opts: RequestOptions & { cred?: Credential; model?: string } = {},
-): Promise<number> {
-  const spec = GENERATIONS[kind]
-  const res = await fetch(`${opts.baseUrl ?? DEFAULT_BASE_URL}${spec.path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders(opts.cred ?? {}) },
-    body: JSON.stringify(buildBody(kind, prompt, opts.model ?? spec.defaultModel)),
-    signal: opts.signal,
-  })
-
-  if (res.status === 402) {
-    const body = (await res.json()) as { accepts?: Array<{ amount?: string }> }
-    const amount = body.accepts?.[0]?.amount
-    if (typeof amount !== 'string') throw new Error('the gateway quoted no price for this call')
-    const usd = atomicToUsd(amount)
-    if (!Number.isFinite(usd)) throw new Error('the gateway quoted an unreadable price')
-    return usd
-  }
-
-  // A 400 here is usually a model the gateway advertises but cannot serve. Say that,
-  // rather than repeating the gateway's cause-free wording — the actionable fix is
-  // choosing another model, and nothing in the response says so.
-  if (res.status === 400) {
-    throw new Error(
-      `${opts.model ?? spec.defaultModel} is listed but not currently servable — pick another model`,
-    )
-  }
-  throw new Error(`the gateway answered ${res.status} when asked to price this ${spec.unit}`)
-}
-
 function buildBody(kind: GenerationKind, prompt: string, model: string): Record<string, unknown> {
   if (kind === 'video') {
     // duration is not optional in the video DTO's semantics: the price depends on it, so
@@ -126,31 +87,83 @@ function buildBody(kind: GenerationKind, prompt: string, model: string): Record<
 }
 
 /**
- * Runs the generation for real. Requires a credential: an anonymous caller can be quoted
- * but cannot pay, and the free tier covers text models only.
+ * Fetches the 402 challenge for a generation, so a wallet can sign exactly this call.
+ *
+ * Returns the whole challenge rather than just the price: the signature has to be made over
+ * the gateway's own `accepts` entry — its payTo, asset and network — and re-deriving those
+ * from a price would be inventing them.
  */
-export async function generate(
+export async function challengeGeneration(
   kind: GenerationKind,
   prompt: string,
-  opts: RequestOptions & { cred: Credential; model?: string },
-): Promise<GenerationResult> {
+  opts: RequestOptions & { model?: string } = {},
+): Promise<{ challenge: Challenge; usd: number; url: string; body: Record<string, unknown> }> {
   const spec = GENERATIONS[kind]
-  const res = await fetch(`${opts.baseUrl ?? DEFAULT_BASE_URL}${spec.path}`, {
+  const url = `${opts.baseUrl ?? DEFAULT_BASE_URL}${spec.path}`
+  const body = buildBody(kind, prompt, opts.model ?? spec.defaultModel)
+
+  const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders(opts.cred) },
-    body: JSON.stringify(buildBody(kind, prompt, opts.model ?? spec.defaultModel)),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
     signal: opts.signal,
   })
 
   if (res.status === 402) {
-    throw new Error('this needs a funded key — the free tier covers text models only')
+    const challenge = (await res.json()) as Challenge
+    const amount = challenge.accepts?.[0]?.amount ?? challenge.accepts?.[0]?.maxAmountRequired
+    const usd = typeof amount === 'string' ? atomicToUsd(amount) : NaN
+    if (!Number.isFinite(usd) || usd <= 0) {
+      throw new Error('the gateway quoted no usable price for this call')
+    }
+    return { challenge, usd, url, body }
+  }
+
+  if (res.status === 400) {
+    throw new Error(
+      `${opts.model ?? spec.defaultModel} is listed but not currently servable — pick another model`,
+    )
+  }
+  throw new Error(`the gateway answered ${res.status} when asked to price this ${spec.unit}`)
+}
+
+/**
+ * Runs the generation, paying with a signature the caller already obtained.
+ *
+ * The signature is passed in rather than produced here: signing is the wallet's job and must
+ * happen in response to the user's own click, and keeping the two apart is what lets the
+ * price be shown and approved between them.
+ */
+export async function generate(
+  kind: GenerationKind,
+  prompt: string,
+  opts: RequestOptions & { cred: Credential; model?: string; url?: string; body?: Record<string, unknown> },
+): Promise<GenerationResult> {
+  const spec = GENERATIONS[kind]
+  // Re-uses the exact URL and body the challenge was issued for when given them. A payment
+  // signed for one body and spent on another is a signature the facilitator may settle
+  // while the gateway serves something else.
+  const url = opts.url ?? `${opts.baseUrl ?? DEFAULT_BASE_URL}${spec.path}`
+  const body = opts.body ?? buildBody(kind, prompt, opts.model ?? spec.defaultModel)
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders(opts.cred) },
+    body: JSON.stringify(body),
+    signal: opts.signal,
+  })
+
+  if (res.status === 402) {
+    throw new Error(
+      'the gateway did not accept the payment — connect a wallet with USDC on Base and try again',
+    )
   }
   if (!res.ok) {
     throw new Error(`${spec.label} generation failed (${res.status})`)
   }
 
-  const body = (await res.json()) as Record<string, unknown>
-  return extractMedia(kind, body)
+  const body_ = (await res.json()) as Record<string, unknown>
+  return extractMedia(kind, body_)
 }
 
 /**

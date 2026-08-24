@@ -113,10 +113,10 @@ export function Composer({
 
       <div className="hint">
         {mode !== 'chat'
-          ? `${GENERATIONS[mode].label} generation is paid per ${GENERATIONS[mode].unit}. You'll see the exact price before anything is spent.`
+          ? `${GENERATIONS[mode].label} generation is paid per ${GENERATIONS[mode].unit}. You'll see the exact price, and sign it in your wallet, before anything is spent.`
           : anonymous
-            ? 'Free tier — no key needed. Paid APIs will ask before spending anything.'
-            : 'Signed in. Paid API calls are charged to your wallet, with a prompt above your per-call limit.'}
+            ? 'Free tier — no wallet needed. Anything paid shows its price and asks first.'
+            : 'Wallet connected. Every charge is signed by you, showing the amount before it happens.'}
       </div>
     </div>
   )

@@ -1,15 +1,15 @@
 import type { SpendPolicy } from '../lib/spend'
+import type { WalletAccount } from '../lib/wallet'
+import { WalletPanel } from './WalletPanel'
 
 export function Sidebar({
-  anonymous,
-  apiKey,
+  wallet,
   baseUrl,
   spend,
-  onApiKey,
+  onWallet,
   onBaseUrl,
 }: {
-  anonymous: boolean
-  apiKey: string
+  wallet: WalletAccount | null
   baseUrl: string
   spend: {
     spentUsd: number
@@ -17,7 +17,7 @@ export function Sidebar({
     history: Array<{ label: string; usd: number }>
     policy: SpendPolicy
   }
-  onApiKey: (v: string) => void
+  onWallet: (a: WalletAccount | null) => void
   onBaseUrl: (v: string) => void
 }) {
   const budget = spend.policy.sessionUsd
@@ -73,31 +73,7 @@ export function Sidebar({
         </section>
       )}
 
-      <section>
-        <h2>Access</h2>
-        {anonymous ? (
-          <p>
-            Running on the free tier. Free models and catalogue search work with no account.
-            Paste a key to reach paid models and callable APIs.
-          </p>
-        ) : null}
-        <label className="field">
-          API key
-          <input
-            type="password"
-            value={apiKey}
-            placeholder="leave empty for the free tier"
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(e) => onApiKey(e.target.value)}
-          />
-        </label>
-        <p style={{ margin: 0 }}>
-          {/* Deliberate: a key can mint more keys and read the account, so persisting it
-              in this page would outlive the session on a shared machine. */}
-          Kept in this tab only — never saved to your browser.
-        </p>
-      </section>
+      <WalletPanel account={wallet} onAccount={onWallet} />
 
       <section>
         <h2>Gateway</h2>

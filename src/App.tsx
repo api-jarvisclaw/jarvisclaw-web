@@ -12,13 +12,14 @@ import {
   type Conversation,
 } from './lib/conversations'
 import { DEFAULT_BASE_URL, FREE_MODEL, type ChatMessage } from './lib/gateway'
-import { GENERATIONS, generate, quoteGeneration, type GenerationKind } from './lib/modality'
+import { challengeGeneration, GENERATIONS, generate, type GenerationKind } from './lib/modality'
 import { ModelRouter } from './lib/route'
 import { SpendTracker } from './lib/spend'
 import { ChatList } from './ui/ChatList'
 import { Composer } from './ui/Composer'
 import { ConsentDialog, type PendingSpend } from './ui/ConsentDialog'
 import { Marketplace } from './ui/Marketplace'
+import { isUserRejection, signPayment, type WalletAccount } from './lib/wallet'
 import { Sidebar } from './ui/Sidebar'
 import { Transcript, type Turn } from './ui/Transcript'
 
@@ -38,7 +39,10 @@ import { Transcript, type Turn } from './ui/Transcript'
 export function App() {
   const [turns, setTurns] = useState<Turn[]>([])
   const [busy, setBusy] = useState(false)
-  const [apiKey, setApiKey] = useState('')
+  // No API key state. A key pasted into a page is a plaintext bearer credential, and it
+  // could not work from a deployed browser anyway — Authorization was blocked by the
+  // gateway's CORS policy. Paid calls are signed by the visitor's own wallet.
+  const [wallet, setWallet] = useState<WalletAccount | null>(null)
   const [baseUrl, setBaseUrl] = useState(DEFAULT_BASE_URL)
   const [pending, setPending] = useState<PendingSpend | null>(null)
 
@@ -62,7 +66,9 @@ export function App() {
   // Rerender key for the tracker, which is a mutable object the sidebar reads.
   const [spendVersion, setSpendVersion] = useState(0)
 
-  const anonymous = apiKey.trim() === ''
+  // Anonymous means "cannot pay": free models and catalogue reads still work, and that is
+  // the state a first visit is in.
+  const anonymous = wallet === null
 
   useEffect(() => () => abort.current?.abort(), [])
 
@@ -70,7 +76,7 @@ export function App() {
   // the old settings no longer describes anything.
   useEffect(() => {
     router.current = null
-  }, [apiKey, baseUrl])
+  }, [wallet, baseUrl])
 
   useEffect(() => {
     const ac = new AbortController()
@@ -143,17 +149,30 @@ export function App() {
 
       setTurns((t) => [...t, { kind: 'user', text: prompt }])
 
-      let quoted: number
+      // Priced anonymously first. The 402 challenge is what a wallet signs over, so it has
+      // to be fetched before any wallet prompt — and it costs nothing, which means an
+      // unconnected visitor still learns the price.
+      let quote
       try {
-        quoted = await quoteGeneration(kind, prompt, {
-          baseUrl,
-          cred: anonymous ? {} : { apiKey },
-          model: useModel,
-        })
+        quote = await challengeGeneration(kind, prompt, { baseUrl, model: useModel })
       } catch (err) {
         setTurns((t) => [
           ...t,
           { kind: 'error', text: err instanceof Error ? err.message : String(err) },
+        ])
+        return
+      }
+      const quoted = quote.usd
+
+      if (anonymous) {
+        // Told BEFORE any approval prompt: asking someone to approve a charge they have no
+        // way to pay is a dialog that can only end in disappointment.
+        setTurns((t) => [
+          ...t,
+          {
+            kind: 'notice',
+            text: `One ${spec.unit} from ${useModel} costs $${quoted.toFixed(6)}. Connect a wallet in the panel on the right to pay for it — free models need no wallet.`,
+          },
         ])
         return
       }
@@ -168,15 +187,17 @@ export function App() {
         return
       }
 
-      if (anonymous) {
-        // Reached only after approval, so the user is not told "needs a key" for something
-        // they never agreed to pay for.
+      // The wallet prompt is the real consent: it shows the amount, recipient and expiry in
+      // the wallet's own UI, which no page can fake.
+      let payment: string
+      try {
+        payment = (await signPayment(quote.challenge, quote.url, wallet)).header
+      } catch (err) {
         setTurns((t) => [
           ...t,
-          {
-            kind: 'error',
-            text: `Paying for a ${spec.unit} needs an API key — the free tier covers text models only. Paste a key in the panel on the right.`,
-          },
+          isUserRejection(err)
+            ? { kind: 'notice', text: 'Payment cancelled in your wallet — nothing was charged.' }
+            : { kind: 'error', text: err instanceof Error ? err.message : String(err) },
         ])
         return
       }
@@ -184,8 +205,13 @@ export function App() {
       try {
         const media = await generate(kind, prompt, {
           baseUrl,
-          cred: { apiKey },
+          cred: { payment },
           model: useModel,
+          // The exact URL and body the signature was issued for. Signing one body and
+          // spending it on another is a payment the facilitator may settle for a call the
+          // gateway never priced.
+          url: quote.url,
+          body: quote.body,
         })
         tracker.current.record(spec.label, quoted)
         setSpendVersion((v) => v + 1)
@@ -213,7 +239,7 @@ export function App() {
         ])
       }
     },
-    [anonymous, apiKey, baseUrl, confirmSpend, model, models, persist],
+    [anonymous, baseUrl, confirmSpend, model, models, persist, wallet],
   )
 
   const send = useCallback(
@@ -316,7 +342,10 @@ export function App() {
         }
       }
 
-      const cred = anonymous ? {} : { apiKey }
+      // Chat runs on the free tier: text models cost nothing, so no signature is needed.
+      // A paid chat model would need a per-call signature the same way generation does,
+      // which the picker does not offer yet — see the notice in the composer hint.
+      const cred = {}
       if (!router.current) {
         router.current = new ModelRouter({ baseUrl, cred })
       }
@@ -354,7 +383,7 @@ export function App() {
         })
       }
     },
-    [activeId, anonymous, apiKey, baseUrl, busy, confirmSpend, mode, model, persist, runGeneration],
+    [activeId, anonymous, baseUrl, busy, confirmSpend, mode, model, persist, runGeneration],
   )
 
   const stop = useCallback(() => {
@@ -486,11 +515,10 @@ export function App() {
       </div>
 
       <Sidebar
-        anonymous={anonymous}
-        apiKey={apiKey}
+        wallet={wallet}
         baseUrl={baseUrl}
         spend={spend}
-        onApiKey={setApiKey}
+        onWallet={setWallet}
         onBaseUrl={setBaseUrl}
       />
 

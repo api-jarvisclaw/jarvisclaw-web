@@ -167,6 +167,32 @@ describe('signPayment', () => {
     await expect(signPayment(tooMuch, 'https://x', BASE)).rejects.toThrow(/per-signature cap/)
   })
 
+  it('honours a tighter cap the user set', async () => {
+    stubWallet()
+    // $2 is fine by the built-in $5 ceiling, and must still be refused when the user said $1.
+    const two = challenge({ amount: '2000000' })
+    await expect(signPayment(two, 'https://x', BASE, 1)).rejects.toThrow(/\$1\.00 per-signature cap/)
+  })
+
+  it('never lets a user cap exceed the built-in ceiling', async () => {
+    // The direction that matters. A tampered localStorage value, or a caller that forgot to
+    // validate, must not be able to raise the limit this function exists to enforce.
+    stubWallet()
+    const huge = challenge({ amount: String((PER_SIGNATURE_CAP_USDC + 1) * 1_000_000) })
+    await expect(signPayment(huge, 'https://x', BASE, 1_000_000)).rejects.toThrow(
+      /per-signature cap/,
+    )
+  })
+
+  it('ignores a nonsensical cap instead of disabling the check', async () => {
+    // NaN and zero both fail every comparison or block everything. Falling back to the
+    // built-in cap keeps a corrupt setting from either opening the gate or jamming it shut.
+    stubWallet()
+    const ok = challenge({ amount: '2000000' })
+    await expect(signPayment(ok, 'https://x', BASE, Number.NaN)).resolves.toMatchObject({ usd: 2 })
+    await expect(signPayment(ok, 'https://x', BASE, 0)).resolves.toMatchObject({ usd: 2 })
+  })
+
   it('refuses a zero or negative amount', async () => {
     stubWallet()
     await expect(signPayment(challenge({ amount: '0' }), 'https://x', BASE)).rejects.toThrow(/invalid amount/)

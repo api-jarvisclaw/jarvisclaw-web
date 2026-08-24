@@ -1,0 +1,32 @@
+{
+  // The media CDN Worker. It already existed on the account — created 2026-06-07 with source
+  // "Upload", meaning by hand, with no repository behind it. This config exists so a deploy is
+  // reproducible from the repo instead of depending on whoever last uploaded a bundle.
+  //
+  // The name must match the deployed Worker exactly, or `wrangler deploy` creates a SECOND
+  // Worker and the custom domain keeps serving the old one.
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "jarvisclaw-media-cdn",
+  "main": "worker.js",
+  "compatibility_date": "2026-08-20",
+
+  // MEDIA_BUCKET is the binding name the deployed code already used. Renaming it would make
+  // every `env.MEDIA_BUCKET` call undefined at runtime while the deploy itself succeeded.
+  "r2_buckets": [
+    {
+      "binding": "MEDIA_BUCKET",
+      "bucket_name": "jarvisclaw-media"
+    }
+  ],
+
+  "routes": [
+    {
+      "pattern": "cdn.jarvisclaw.ai",
+      "custom_domain": true
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  }
+}

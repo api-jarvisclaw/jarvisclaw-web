@@ -8,10 +8,13 @@ import { relativeAge, search, type Conversation } from '../lib/conversations'
  * The list is the reason this exists. Without it every reload threw the session away, and
  * a console you cannot come back to is a demo rather than a product.
  */
+export type RailView = 'chat' | 'marketplace' | 'gallery'
+
 export function ChatList({
   conversations,
   activeId,
   view,
+  galleryCount,
   onNew,
   onOpen,
   onDelete,
@@ -19,11 +22,12 @@ export function ChatList({
 }: {
   conversations: Conversation[]
   activeId: string | null
-  view: 'chat' | 'marketplace'
+  view: RailView
+  galleryCount: number
   onNew: () => void
   onOpen: (id: string) => void
   onDelete: (id: string) => void
-  onView: (v: 'chat' | 'marketplace') => void
+  onView: (v: RailView) => void
 }) {
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
@@ -74,6 +78,19 @@ export function ChatList({
           ▤
         </span>
         Marketplace
+      </button>
+
+      <button
+        className={view === 'gallery' ? 'rail-item rail-item-active' : 'rail-item'}
+        onClick={() => onView('gallery')}
+      >
+        <span className="rail-glyph" aria-hidden="true">
+          ▩
+        </span>
+        Gallery
+        {/* Counted in the rail because the gallery is the only view whose contents cost money
+            to produce — knowing something is in there is worth a glance. */}
+        {galleryCount > 0 && <span className="rail-count">{galleryCount}</span>}
       </button>
 
       {/* An external link, not a route: the CLI lives on npm and the docs are their own

@@ -3,3 +3,7 @@ dist/
 probe/*.png
 *.log
 .DS_Store
+
+# Local wrangler state: the simulated R2 bucket that `wrangler r2 object put`
+# writes to without --remote. Machine-local scratch, not shared state.
+.wrangler/

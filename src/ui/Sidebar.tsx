@@ -1,10 +1,14 @@
+import type { Settings } from '../lib/settings'
 import type { SpendPolicy } from '../lib/spend'
 import type { WalletAccount } from '../lib/wallet'
+import { LimitsPanel } from './LimitsPanel'
 import { WalletPanel } from './WalletPanel'
 
 export function Sidebar({
   wallet,
   spend,
+  settings,
+  onSettings,
   onWallet,
 }: {
   wallet: WalletAccount | null
@@ -14,6 +18,8 @@ export function Sidebar({
     history: Array<{ label: string; usd: number }>
     policy: SpendPolicy
   }
+  settings: Settings
+  onSettings: (next: Settings) => void
   onWallet: (a: WalletAccount | null) => void
 }) {
   const budget = spend.policy.sessionUsd
@@ -44,14 +50,9 @@ export function Sidebar({
           >
             <div className="meter-fill" style={{ width: `${usedPct}%` }} />
           </div>
-          <div className="kv">
-            <span>Asks above</span>
-            <span>${spend.policy.perCallUsd.toFixed(2)}</span>
-          </div>
-          <div className="kv">
-            <span>Stops at</span>
-            <span>${spend.policy.sessionUsd.toFixed(2)}</span>
-          </div>
+          {/* The thresholds themselves live in Limits below, where they can be changed.
+              Repeating them read-only here left the reader with two places showing the same
+              number and only one that responds — which looks like the edit did not take. */}
         </div>
       </section>
 
@@ -70,6 +71,8 @@ export function Sidebar({
       )}
 
       <WalletPanel account={wallet} onAccount={onWallet} />
+
+      <LimitsPanel settings={settings} onChange={onSettings} />
 
       {/*
         No gateway field. Which host this talks to is not a user's decision — it is

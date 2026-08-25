@@ -1,5 +1,5 @@
 import { AudioLinesIcon, ImageIcon, MusicIcon, SendIcon, VideoIcon } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import type { CatalogueModel } from '../lib/catalogue'
 import {
@@ -45,6 +45,7 @@ export function Composer({
   onMode,
   onOptions,
   onSend,
+  draft,
 }: {
   busy: boolean
   anonymous: boolean
@@ -57,9 +58,36 @@ export function Composer({
   onMode: (m: GenerationKind | 'chat') => void
   onOptions: (o: GenOptions) => void
   onSend: (text: string) => void
+  /**
+   * Text pushed in from outside — a prompt picked in the showcase gallery.
+   *
+   * Carries a counter rather than being a bare string, so choosing the SAME prompt twice still
+   * lands. A repeated identical value is a no-op to React, and the second attempt would do
+   * nothing at all, which reads as a broken button.
+   */
+  draft?: { text: string; n: number } | null
 }) {
   const [text, setText] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
+
+  /**
+   * Accepts an incoming draft, focuses the box and grows it to fit.
+   *
+   * Keyed on the counter, not the text. Focus is part of the point: a prompt that appears in a
+   * box the user has not been moved to is a prompt they may not notice arrived, and these run to
+   * 4000 characters — without the height reset the box shows one line of a page-long prompt.
+   */
+  useEffect(() => {
+    if (!draft) return
+    setText(draft.text)
+    const el = ref.current
+    if (!el) return
+    el.focus()
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 180)}px`
+    // The caret goes to the end so typing continues the prompt rather than inserting at the top.
+    el.setSelectionRange(draft.text.length, draft.text.length)
+  }, [draft?.n])
 
   // What the picked model actually is, and therefore where it will run. Computed from the
   // catalogue rather than the name so a repriced or renamed model needs no change here.

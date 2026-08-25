@@ -39,6 +39,26 @@ function stub(status: number, body: unknown) {
   return spy
 }
 
+/**
+ * Routes each path to its own response.
+ *
+ * `whoami` makes TWO calls now — `/api/user/session` to learn the id, then `/api/user/self` with
+ * it — and the single-response `stub` above answers both with the same body. Every existing test
+ * still passed after that change, because `{id: 7}` happens to satisfy both shapes. Passing for
+ * the wrong reason is the failure mode this helper exists to avoid: with it, a test can assert
+ * that the id from the FIRST call is what the second one sends.
+ */
+function stubPaths(routes: Record<string, { status: number; body: unknown }>) {
+  const spy = vi.fn(async (u: string | URL | Request, _i?: RequestInit) => {
+    const url = String(u)
+    const hit = Object.keys(routes).find((path) => url.includes(path))
+    if (!hit) return new Response(JSON.stringify({ success: false, message: 'no stub' }), { status: 404 })
+    return new Response(JSON.stringify(routes[hit].body), { status: routes[hit].status })
+  })
+  vi.stubGlobal('fetch', spy)
+  return spy
+}
+
 describe('whoami', () => {
   it('reads the platform’s own field names', () => {
     // The response uses snake_case and `display_name`; guessing camelCase here would render
@@ -91,6 +111,67 @@ describe('whoami', () => {
     const headers = (spy.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>
     expect(headers.Authorization).toBeUndefined()
   })
+
+  it('learns the user id from the session route before asking for the account', async () => {
+    // The bug this pins, measured against production from https://chat.jarvisclaw.ai:
+    //
+    //   /api/user/self WITHOUT New-Api-User -> 401 "New-Api-User header not provided"
+    //   /api/user/self WITH    New-Api-User -> 200
+    //
+    // UserAuth requires that header to carry the caller's own id, so the FIRST call could never
+    // succeed — it is asking who the session belongs to and cannot send an id it does not have.
+    // A signed-in user pressed "I've signed in" and was told, permanently, that they were not.
+    const spy = stubPaths({
+      '/api/user/session': { status: 200, body: { success: true, data: { id: 42, username: 'ada' } } },
+      '/api/user/self': {
+        status: 200,
+        body: { success: true, data: { id: 42, username: 'ada', display_name: 'Ada L', quota: 500_000 } },
+      },
+    })
+
+    await expect(whoami()).resolves.toMatchObject({ id: 42, displayName: 'Ada L' })
+
+    // The session call must NOT send the header — that is the whole point.
+    const first = spy.mock.calls[0]
+    expect(String(first[0])).toContain('/api/user/session')
+    expect((first[1]?.headers as Record<string, string>)['New-Api-User']).toBeUndefined()
+
+    // And the account call must send the id the session call returned.
+    const second = spy.mock.calls[1]
+    expect(String(second[0])).toContain('/api/user/self')
+    expect((second[1]?.headers as Record<string, string>)['New-Api-User']).toBe('42')
+  })
+
+  it('sends the session cookie on the identity call', async () => {
+    // Without credentials:'include' the cookie is not sent at all and the route answers
+    // "no session" in a browser that is signed in.
+    const spy = stubPaths({
+      '/api/user/session': { status: 200, body: { success: true, data: { id: 1 } } },
+      '/api/user/self': { status: 200, body: { success: true, data: { id: 1, username: 'x' } } },
+    })
+    await whoami()
+    expect(spy.mock.calls[0][1]?.credentials).toBe('include')
+  })
+
+  it('returns null without calling /self when there is no session', async () => {
+    // A 401 from the identity route is the ordinary signed-out state. Going on to call /self
+    // would produce a second guaranteed-401 on every page load.
+    const spy = stubPaths({
+      '/api/user/session': { status: 401, body: { success: false, message: 'no session' } },
+    })
+    await expect(whoami()).resolves.toBeNull()
+    expect(spy.mock.calls.every((c) => !String(c[0]).includes('/api/user/self'))).toBe(true)
+  })
+
+  it('refuses an id of zero from the identity route', async () => {
+    // user 0 is not a user. Trusting it would show a signed-in panel for an account that cannot
+    // exist, and then fail on every keyed call afterwards.
+    stubPaths({
+      '/api/user/session': { status: 200, body: { success: true, data: { id: 0 } } },
+    })
+    await expect(whoami()).resolves.toBeNull()
+  })
+
 })
 
 describe('listKeys', () => {

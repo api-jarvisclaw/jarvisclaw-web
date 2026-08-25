@@ -7,6 +7,7 @@ import {
   listKeys,
   quotaToUsd,
   revealKey,
+  SIGN_IN_HOST,
   SIGN_IN_URL,
   whoami,
   type Account,
@@ -112,9 +113,13 @@ export function AccountPanel({
             Already have a JarvisClaw account? Sign in on the main site and use your existing API
             key here — your quota works the same as it does on the platform.
           </p>
+          {/* Named for the host the link actually opens. It said "jarvisclaw.ai" while pointing at
+              api.jarvisclaw.ai — a different host, and the one the session cookie belongs to.
+              A label that disagrees with its own href is the sort of mismatch that makes someone
+              wonder whether they signed in to the right place. */}
           <a className="panel-btn" href={SIGN_IN_URL} target="_blank" rel="noopener noreferrer">
             <UserIcon size={14} aria-hidden="true" />
-            Sign in on jarvisclaw.ai
+            Sign in on {SIGN_IN_HOST}
             <ExternalLinkIcon size={12} aria-hidden="true" />
           </a>
           {available ? (

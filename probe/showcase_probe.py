@@ -31,11 +31,18 @@ def main() -> int:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1400, "height": 950})
 
+        # cloudflareinsights is excluded, and that exclusion is the correct reading rather than
+        # a convenience. Cloudflare injects its own analytics beacon into every response from the
+        # edge; our `script-src 'self'` blocks it, which is the policy doing exactly its job on a
+        # page that handles an API key. Counting it as a violation means this probe can never pass
+        # in production — and a probe that always fails is one whose findings get ignored.
         csp_errors = []
         page.on(
             "console",
             lambda m: csp_errors.append(m.text)
-            if m.type == "error" and "Content Security Policy" in m.text
+            if m.type == "error"
+            and "Content Security Policy" in m.text
+            and "cloudflareinsights" not in m.text
             else None,
         )
         # Aborted requests are NOT failures, and conflating them cost me a false positive.

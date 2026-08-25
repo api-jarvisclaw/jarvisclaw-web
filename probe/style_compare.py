@@ -51,9 +51,9 @@ def main():
             # console at 0 gradients and 0 blurs, a page I had measured at 36 and 4 moments
             # earlier. So "nothing found" is now treated as a probe failure, not a finding.
             try:
-                page.wait_for_selector("button", timeout=30000)
+                page.wait_for_selector("button", timeout=60000)
                 page.wait_for_function(
-                    "() => document.querySelectorAll('*').length > 120", timeout=30000
+                    "() => document.querySelectorAll('*').length > 120", timeout=60000
                 )
             except Exception as exc:
                 print(f"   !! {name}: page never rendered ({type(exc).__name__})")

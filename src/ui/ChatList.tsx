@@ -19,6 +19,23 @@ import { relativeAge, search, type Conversation } from '../lib/conversations'
  */
 export type RailView = 'chat' | 'marketplace' | 'gallery'
 
+/**
+ * True when a conversation holds a paid generation that has not produced its media yet.
+ *
+ * Exported for its own test. This is the only indication anywhere on the page that money is out
+ * and a result is still coming, once the user has moved to another chat — and moving away during
+ * a four-minute video is the normal thing to do.
+ *
+ * A turn with a url or b64 is finished even if the job field survived, so both are checked: the
+ * marker has to disappear when the media lands, or it becomes a permanent decoration that says
+ * nothing.
+ */
+export function hasPendingMedia(conv: Conversation): boolean {
+  return conv.turns.some(
+    (t) => t.kind === 'media' && t.job !== undefined && !t.url && !t.b64 && !t.failed,
+  )
+}
+
 export function ChatList({
   conversations,
   activeId,
@@ -129,6 +146,17 @@ export function ChatList({
             >
               <button className="rail-row-open" onClick={() => onOpen(c.id)} title={c.title}>
                 <span className="rail-row-title">{c.title}</span>
+                {/* A dot when this conversation is still waiting on paid media.
+                    A generation takes minutes and its transcript may not be the one on screen,
+                    so without a marker in the list there is nothing anywhere on the page saying
+                    money is out and a result is coming. */}
+                {hasPendingMedia(c) && (
+                  <span
+                    className="rail-row-pending"
+                    title="A generation is still running in this chat"
+                    aria-label="generating"
+                  />
+                )}
                 <span className="rail-row-age">{relativeAge(c.updatedAt)}</span>
               </button>
               {/* Labelled per row: a bare "×" in a list of twenty tells a screen reader

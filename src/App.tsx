@@ -90,7 +90,22 @@ export function App() {
   const [settings, setSettings] = useState<Settings>(() => loadSettings())
 
   const [conversations, setConversations] = useState<Conversation[]>(() => loadConversations())
-  const [activeId, setActiveId] = useState<string | null>(null)
+
+  /**
+   * Reopens the most recent conversation instead of starting blank.
+   *
+   * This used to be `null`, and it is the worst of the three state-loss bugs. Conversations
+   * were saved correctly and the list was rebuilt on load — but a reload always landed on an
+   * empty chat, so the transcript looked deleted. Measured mid-video-wait: reloading gave
+   * `turns after reload: []`, with a paid job still running upstream.
+   *
+   * A four-minute wait is exactly when someone reloads. Losing the transcript at that moment
+   * loses the only on-screen record of a charge, which is the one thing this app must never do.
+   *
+   * `loadConversations` returns newest-first, so index 0 is the one they were last in.
+   */
+  const [activeId, setActiveId] = useState<string | null>(() => loadConversations()[0]?.id ?? null)
+  const [turnsRestored, setTurnsRestored] = useState(false)
   const [view, setView] = useState<'chat' | 'marketplace' | 'gallery'>('chat')
   const [gallery, setGallery] = useState<GalleryItem[]>(() => loadGallery())
   const [railOpen, setRailOpen] = useState(true)
@@ -428,6 +443,55 @@ export function App() {
     },
     [baseUrl, patchMediaTurn, settleMedia],
   )
+
+  /**
+   * Restores the last conversation on load, and picks up any generation still in flight.
+   *
+   * Three separate gaps closed here, all of them "state lost during a long wait":
+   *
+   *  1. The transcript came back blank. Conversations were saved and the list rebuilt, but
+   *     `activeId` started null, so a reload showed an empty chat and the record of a paid job
+   *     looked deleted.
+   *  2. Nothing resumed the polling. A page that reloaded mid-wait left the turn frozen at
+   *     whatever second it had reached, forever — the media existed and nothing went to get it.
+   *     This is the same defect as the original $0.83 video, just reached by reloading.
+   *  3. A job that finished while the tab was closed was never collected. The gateway keeps
+   *     polling upstream on its own and stores the result, so the media is usually THERE by
+   *     the time the page comes back — resuming finds it immediately.
+   *
+   * Runs once. The restored turns are what a resume reads, so doing this on every render would
+   * start a second poll for the same job on every keystroke.
+   */
+  useEffect(() => {
+    if (turnsRestored) return
+    setTurnsRestored(true)
+    if (activeId === null) return
+    const conv = conversations.find((c) => c.id === activeId)
+    if (!conv) return
+
+    history.current = [...conv.history]
+    setTurns(conv.turns)
+
+    for (const turn of conv.turns) {
+      // Only turns that were still waiting. A finished or failed one has no job left, and
+      // re-polling a completed job would be a pointless request against a paid endpoint.
+      if (turn.kind !== 'media' || !turn.job || turn.url || turn.b64) continue
+      // Cleared before resuming: the stored `waitedMs` measured the PREVIOUS session's wait, so
+      // leaving it would show a counter that jumps backwards the moment the first poll lands.
+      // `timedOut` goes too — a wait that has just restarted has not timed out.
+      patchMediaTurn(turn.id, conv.id, { waitedMs: undefined, timedOut: false, resumed: true })
+      void waitForJob(
+        turn.id,
+        turn.media,
+        turn.job,
+        turn.prompt,
+        turn.model,
+        turn.spentUsd,
+        conv.id,
+      )
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on mount, by design
+  }, [])
 
   /** Generation (image/video/music): quote, ask, then run. */
   const runGeneration = useCallback(

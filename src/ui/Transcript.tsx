@@ -1,3 +1,4 @@
+import { CheckIcon, LoaderIcon } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
 import { mediaMimeType } from '../lib/modality'
@@ -199,7 +200,11 @@ function MediaView({ turn }: { turn: Extract<Turn, { kind: 'media' }> }) {
 function StepView({ step }: { step: ToolStep }) {
   return (
     <div className={step.running ? 'tool-row is-running' : 'tool-row'}>
-      <span className="tool-glyph">{step.running ? '◇' : '◆'}</span>
+      {step.running ? (
+        <LoaderIcon className="tool-glyph is-spinning" size={13} aria-hidden="true" />
+      ) : (
+        <CheckIcon className="tool-glyph" size={13} aria-hidden="true" />
+      )}
       <span className="tool-name">{step.tool}</span>
       {step.declined ? (
         <span className="declined">declined</span>

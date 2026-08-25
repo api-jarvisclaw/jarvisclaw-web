@@ -1,3 +1,4 @@
+import { PanelLeftIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { runAgent, type AgentEvent } from './lib/agent'
@@ -19,13 +20,16 @@ import {
   saveGallery,
   type GalleryItem,
 } from './lib/gallery'
-import { DEFAULT_BASE_URL, FREE_MODEL, type ChatMessage } from './lib/gateway'
+import { DEFAULT_BASE_URL, FREE_MODEL, type ChatMessage, type Credential } from './lib/gateway'
+import type { Account } from './lib/account'
 import {
   challengeGeneration,
+  DEFAULT_OPTIONS,
   GENERATIONS,
   generate,
   modeForModel,
   type GenerationKind,
+  type GenerationOptions as GenOptions,
 } from './lib/modality'
 import { ModelRouter } from './lib/route'
 import {
@@ -90,6 +94,16 @@ export function App() {
   const [modelsLoading, setModelsLoading] = useState(true)
   const [model, setModel] = useState<string>(FREE_MODEL)
   const [mode, setMode] = useState<GenerationKind | 'chat'>('chat')
+  // Per-mode, so switching from Image to Video and back does not lose the size you chose. Not
+  // persisted: these are per-task choices, unlike the spend limits.
+  const [genOptions, setGenOptions] = useState<Record<GenerationKind, GenOptions>>(DEFAULT_OPTIONS)
+
+  // A main-site account, and the API key chosen from it. The key is held HERE and nowhere else:
+  // component state for the tab's lifetime, never localStorage. It is a bearer credential that
+  // can mint more keys and read the account, so persisting it would leave it behind on a shared
+  // machine. See lib/account.ts for why a key works from a browser at all now.
+  const [account, setAccount] = useState<Account | null>(null)
+  const [apiKey, setApiKey] = useState<{ key: string; name: string } | null>(null)
 
   const history = useRef<ChatMessage[]>([])
   // Seeded from the stored settings, so a reload keeps the budget the user chose rather than
@@ -107,7 +121,10 @@ export function App() {
 
   // Anonymous means "cannot pay": free models and catalogue reads still work, and that is
   // the state a first visit is in.
-  const anonymous = wallet === null
+  // "Cannot pay" — the state a first visit is in. Either an API key or a wallet lifts it, and
+  // they are genuinely different payment rails: a key spends the account's quota server-side
+  // with no signature, a wallet signs each call on-chain.
+  const anonymous = wallet === null && apiKey === null
 
   useEffect(() => () => abort.current?.abort(), [])
 
@@ -115,7 +132,7 @@ export function App() {
   // the old settings no longer describes anything.
   useEffect(() => {
     router.current = null
-  }, [wallet, baseUrl])
+  }, [apiKey, wallet, baseUrl])
 
   useEffect(() => {
     const ac = new AbortController()
@@ -279,7 +296,13 @@ export function App() {
       // unconnected visitor still learns the price.
       let quote
       try {
-        quote = await challengeGeneration(kind, prompt, { baseUrl, model: useModel })
+        quote = await challengeGeneration(kind, prompt, {
+          baseUrl,
+          model: useModel,
+          // The chosen size/length/voice are part of the QUOTED body, so the price returned is
+          // the price for exactly this request — and the same body is what gets sent below.
+          options: genOptions[kind],
+        })
       } catch (err) {
         setTurns((t) => [
           ...t,
@@ -291,12 +314,13 @@ export function App() {
 
       if (anonymous) {
         // Told BEFORE any approval prompt: asking someone to approve a charge they have no
-        // way to pay is a dialog that can only end in disappointment.
+        // way to pay is a dialog that can only end in disappointment. Both rails are named,
+        // because an existing customer's answer is "sign in", not "install a wallet".
         setTurns((t) => [
           ...t,
           {
             kind: 'notice',
-            text: `One ${spec.unit} from ${useModel} costs $${quoted.toFixed(6)}. Connect a wallet in the panel on the right to pay for it — free models need no wallet.`,
+            text: `One ${spec.unit} from ${useModel} costs $${quoted.toFixed(6)}. Sign in with your JarvisClaw account to use its quota, or connect a wallet to pay per call — free models need neither.`,
           },
         ])
         return
@@ -312,27 +336,45 @@ export function App() {
         return
       }
 
-      // The wallet prompt is the real consent: it shows the amount, recipient and expiry in
-      // the wallet's own UI, which no page can fake.
-      let payment: string
-      try {
-        payment = (
-          await signPayment(quote.challenge, quote.url, wallet, settings.perSignatureUsd)
-        ).header
-      } catch (err) {
+      // Two payment rails, and only one of them signs anything.
+      //
+      // With an API key the gateway bills the account server-side, so the call carries the key
+      // and no signature exists to make. With a wallet, the prompt IS the consent: it shows the
+      // amount, recipient and expiry in the wallet's own UI, which no page can fake.
+      let cred: Credential
+      if (apiKey !== null) {
+        cred = { apiKey: apiKey.key }
+      } else if (wallet === null) {
+        // Unreachable today: `anonymous` is false and apiKey is null, so a wallet exists. Kept
+        // as a real branch rather than a non-null assertion, so a future change that lets both
+        // rails be absent reports it instead of throwing on a null.
         setTurns((t) => [
           ...t,
-          isUserRejection(err)
-            ? { kind: 'notice', text: 'Payment cancelled in your wallet — nothing was charged.' }
-            : { kind: 'error', text: err instanceof Error ? err.message : String(err) },
+          { kind: 'error', text: 'No way to pay for this call — sign in or connect a wallet.' },
         ])
         return
+      } else {
+        try {
+          cred = {
+            payment: (
+              await signPayment(quote.challenge, quote.url, wallet, settings.perSignatureUsd)
+            ).header,
+          }
+        } catch (err) {
+          setTurns((t) => [
+            ...t,
+            isUserRejection(err)
+              ? { kind: 'notice', text: 'Payment cancelled in your wallet — nothing was charged.' }
+              : { kind: 'error', text: err instanceof Error ? err.message : String(err) },
+          ])
+          return
+        }
       }
 
       try {
         const media = await generate(kind, prompt, {
           baseUrl,
-          cred: { payment },
+          cred,
           model: useModel,
           // The exact URL and body the signature was issued for. Signing one body and
           // spending it on another is a payment the facilitator may settle for a call the
@@ -391,7 +433,18 @@ export function App() {
         ])
       }
     },
-    [anonymous, baseUrl, confirmSpend, model, models, persist, settings.perSignatureUsd, wallet],
+    [
+      anonymous,
+      apiKey,
+      baseUrl,
+      confirmSpend,
+      genOptions,
+      model,
+      models,
+      persist,
+      settings.perSignatureUsd,
+      wallet,
+    ],
   )
 
   const send = useCallback(
@@ -510,7 +563,10 @@ export function App() {
       //
       // Said before the run rather than discovered during it. A user asked for one thing and
       // got five wallet prompts with no warning, which reads as the page malfunctioning.
-      if (picked && !picked.free && wallet !== null) {
+      // Only when paying by WALLET. An API key spends the account's quota server-side, so a
+      // paid model costs one HTTP request per step and no signatures at all — warning about
+      // signature prompts that will not happen is its own kind of wrong.
+      if (picked && !picked.free && wallet !== null && apiKey === null) {
         setTurns((t) => [
           ...t,
           {
@@ -520,8 +576,10 @@ export function App() {
         ])
       }
 
-      // No API key: paid chat is signed per call by the wallet, free models need nothing.
-      const cred = {}
+      // The key when there is one; otherwise nothing, and a paid model is signed per call by
+      // the wallet. Sending an empty Authorization header instead of none would 401 the free
+      // tier, which recognises a request by the ABSENCE of the header (see gateway.authHeaders).
+      const cred: Credential = apiKey === null ? {} : { apiKey: apiKey.key }
       if (!router.current) {
         router.current = new ModelRouter({ baseUrl, cred })
       }
@@ -536,9 +594,11 @@ export function App() {
           // "let the router decide", which is what it was doing before the picker existed.
           model: model === FREE_MODEL ? undefined : model,
           confirmSpend,
-          // Only when a wallet is connected. Absent means the agent reports a paid model's
-          // price instead of dumping the raw 402 challenge into the transcript.
-          payForChat: wallet === null ? undefined : payForChat,
+          // Wallet only. With a key there is no 402 to answer — the gateway bills the account
+          // and returns the completion — so handing over a signer would be dead code that
+          // could only fire if the key were rejected, and re-paying a rejected call on-chain is
+          // not a recovery anyone asked for.
+          payForChat: wallet === null || apiKey !== null ? undefined : payForChat,
           signal: controller.signal,
         })) {
           apply(event)
@@ -567,6 +627,7 @@ export function App() {
       anonymous,
       baseUrl,
       busy,
+      apiKey,
       confirmSpend,
       mode,
       model,
@@ -671,7 +732,7 @@ export function App() {
             aria-label={railOpen ? 'Hide conversations' : 'Show conversations'}
             aria-expanded={railOpen}
           >
-            ▤
+            <PanelLeftIcon size={16} aria-hidden="true" />
           </button>
           <span className={anonymous ? 'tag tag-free' : 'tag'}>
             {anonymous ? 'free · no sign-in' : 'signed in'}
@@ -716,8 +777,12 @@ export function App() {
               modelsLoading={modelsLoading}
               model={model}
               mode={mode}
+              options={mode === 'chat' ? {} : genOptions[mode]}
               onModel={setModel}
               onMode={setMode}
+              onOptions={(o) => {
+                if (mode !== 'chat') setGenOptions((prev) => ({ ...prev, [mode]: o }))
+              }}
               onSend={send}
             />
           </>
@@ -728,7 +793,11 @@ export function App() {
         wallet={wallet}
         spend={spend}
         settings={settings}
+        account={account}
+        keyName={apiKey?.name ?? null}
         onSettings={applySettings}
+        onAccount={setAccount}
+        onKey={setApiKey}
         onWallet={setWallet}
       />
 

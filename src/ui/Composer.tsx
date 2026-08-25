@@ -1,8 +1,30 @@
+import { AudioLinesIcon, ImageIcon, MusicIcon, SendIcon, VideoIcon } from 'lucide-react'
 import { useRef, useState } from 'react'
 
 import type { CatalogueModel } from '../lib/catalogue'
-import { GENERATIONS, modeForModel, type GenerationKind } from '../lib/modality'
+import {
+  GENERATIONS,
+  modeForModel,
+  type GenerationKind,
+  type GenerationOptions as GenOptions,
+} from '../lib/modality'
+import { GenerationOptions } from './GenerationOptions'
 import { ModelPicker } from './ModelPicker'
+
+/**
+ * Mode icons, from lucide-react — the same library the main site uses in 340 files.
+ *
+ * These were unicode glyphs (◧ ▷ ♪ ◔). Glyphs are not a styling choice so much as a
+ * rendering gamble: each one falls back to whatever font on the machine happens to carry it,
+ * so weight, size and baseline all drift per platform, and ◔ in particular reads as nothing
+ * recognisable. Real icons render identically everywhere and match the rest of the product.
+ */
+const MODE_ICONS = {
+  image: ImageIcon,
+  video: VideoIcon,
+  music: MusicIcon,
+  speech: AudioLinesIcon,
+} as const
 
 /**
  * The composer: text box, model picker, and the generation modes.
@@ -18,8 +40,10 @@ export function Composer({
   modelsLoading,
   model,
   mode,
+  options,
   onModel,
   onMode,
+  onOptions,
   onSend,
 }: {
   busy: boolean
@@ -28,8 +52,10 @@ export function Composer({
   modelsLoading: boolean
   model: string
   mode: GenerationKind | 'chat'
+  options: GenOptions
   onModel: (m: string) => void
   onMode: (m: GenerationKind | 'chat') => void
+  onOptions: (o: GenOptions) => void
   onSend: (text: string) => void
 }) {
   const [text, setText] = useState('')
@@ -95,22 +121,31 @@ export function Composer({
             onSelect={onModel}
           />
 
-          {(['image', 'video', 'music', 'speech'] as const).map((kind) => (
-            <button
-              key={kind}
-              className={mode === kind ? 'mode-btn mode-btn-active' : 'mode-btn'}
-              // Toggles: pressing the active mode returns to chat, so there is always a
-              // way back without hunting for a "chat" button that would otherwise be the
-              // only unlabelled state.
-              onClick={() => onMode(mode === kind ? 'chat' : kind)}
-              aria-pressed={mode === kind}
-            >
-              <span className="mode-glyph" aria-hidden="true">
-                {kind === 'image' ? '◧' : kind === 'video' ? '▷' : kind === 'music' ? '♪' : '◔'}
-              </span>
-              {GENERATIONS[kind].label}
-            </button>
-          ))}
+          {(['image', 'video', 'music', 'speech'] as const).map((kind) => {
+            const Icon = MODE_ICONS[kind]
+            return (
+              <button
+                key={kind}
+                className={mode === kind ? 'mode-btn mode-btn-active' : 'mode-btn'}
+                // Toggles: pressing the active mode returns to chat, so there is always a
+                // way back without hunting for a "chat" button that would otherwise be the
+                // only unlabelled state.
+                onClick={() => onMode(mode === kind ? 'chat' : kind)}
+                aria-pressed={mode === kind}
+              >
+                {/* aria-hidden because the label right beside it already names the mode; a
+                    screen reader announcing "image image" is worse than silence. */}
+                <Icon className="mode-glyph" size={15} aria-hidden="true" />
+                {GENERATIONS[kind].label}
+              </button>
+            )
+          })}
+
+          {/* Only in a generation mode. In chat these fields mean nothing, and a disabled
+              knob is a worse explanation of that than no knob. */}
+          {mode !== 'chat' && (
+            <GenerationOptions mode={mode} options={options} onChange={onOptions} />
+          )}
 
           <span className="spacer" />
 
@@ -120,7 +155,7 @@ export function Composer({
             disabled={busy || text.trim() === ''}
             aria-label="Send"
           >
-            {busy ? '…' : '↑'}
+            {busy ? <span className="send-busy" aria-hidden="true" /> : <SendIcon size={15} aria-hidden="true" />}
           </button>
         </div>
       </div>

@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   challengeGeneration,
+  DEFAULT_OPTIONS,
+  GENERATION_CHOICES,
   extractMedia,
   generate,
   GENERATIONS,
@@ -239,6 +241,99 @@ describe('speech is its own endpoint, not a chat model', () => {
     const spy = stubResponse(402, { accepts: [{ amount: '1' }] })
     await challengeGeneration('image', 'a red cube')
     expect(sentBody(spy).prompt).toBe('a red cube')
+  })
+})
+
+describe('generation options', () => {
+  it('sends image size, quality and count', async () => {
+    const spy = stubResponse(402, { accepts: [{ amount: '64000' }] })
+    await challengeGeneration('image', 'a cube', {
+      options: { size: '1792x1024', quality: 'hd', n: 2 },
+    })
+    expect(sentBody(spy)).toMatchObject({ size: '1792x1024', quality: 'hd', n: 2 })
+  })
+
+  it('sends speech voice and speed', async () => {
+    const spy = stubResponse(402, { accepts: [{ amount: '2000' }] })
+    await challengeGeneration('speech', 'hello', { options: { voice: 'nova', speed: 1.25 } })
+    expect(sentBody(spy)).toMatchObject({ voice: 'nova', speed: 1.25, input: 'hello' })
+  })
+
+  it('does not put image fields on a speech call, or vice versa', async () => {
+    // Each endpoint has its own DTO, and a field it does not know is at best ignored and at
+    // worst a 400 on a call that was already quoted.
+    const spy = stubResponse(402, { accepts: [{ amount: '2000' }] })
+    await challengeGeneration('speech', 'hi', { options: { size: '1792x1024', voice: 'nova' } })
+    const body = sentBody(spy)
+    expect(body).not.toHaveProperty('size')
+    expect(body.voice).toBe('nova')
+
+    const spy2 = stubResponse(402, { accepts: [{ amount: '64000' }] })
+    await challengeGeneration('image', 'x', { options: { voice: 'nova', size: '1024x1024' } })
+    expect(sentBody(spy2)).not.toHaveProperty('voice')
+  })
+
+  it('refuses n=0, which would ask for nothing and still be charged', async () => {
+    const spy = stubResponse(402, { accepts: [{ amount: '64000' }] })
+    await challengeGeneration('image', 'x', { options: { n: 0 } })
+    expect(sentBody(spy)).not.toHaveProperty('n')
+  })
+
+  it('refuses a non-integer count, which the *uint DTO rejects', async () => {
+    const spy = stubResponse(402, { accepts: [{ amount: '64000' }] })
+    await challengeGeneration('image', 'x', { options: { n: 2.5 } })
+    expect(sentBody(spy)).not.toHaveProperty('n')
+  })
+
+  it('drops a speed outside the accepted range', async () => {
+    // Out of range is a 400 on a call the user has already been quoted for — the worst moment
+    // to discover a validation error.
+    const spy = stubResponse(402, { accepts: [{ amount: '2000' }] })
+    await challengeGeneration('speech', 'hi', { options: { speed: 99 } })
+    expect(sentBody(spy)).not.toHaveProperty('speed')
+
+    const spy2 = stubResponse(402, { accepts: [{ amount: '2000' }] })
+    await challengeGeneration('speech', 'hi', { options: { speed: 0.1 } })
+    expect(sentBody(spy2)).not.toHaveProperty('speed')
+  })
+
+  it('always sends a video duration, defaulting to 5', async () => {
+    // The price does not vary with it (measured), but the upstream still needs it — omitting it
+    // leaves the length to whatever the channel defaults to, which is not what the UI says.
+    const spy = stubResponse(402, { accepts: [{ amount: '1' }] })
+    await challengeGeneration('video', 'a cat', {})
+    expect(sentBody(spy).duration).toBe(5)
+
+    const spy2 = stubResponse(402, { accepts: [{ amount: '1' }] })
+    await challengeGeneration('video', 'a cat', { options: { duration: 10 } })
+    expect(sentBody(spy2).duration).toBe(10)
+  })
+
+  it('ignores a non-positive duration rather than sending it', async () => {
+    const spy = stubResponse(402, { accepts: [{ amount: '1' }] })
+    await challengeGeneration('video', 'x', { options: { duration: 0 } })
+    expect(sentBody(spy).duration).toBe(5)
+  })
+
+  it('offers only choices the request body can carry', () => {
+    // The invariant that keeps a control from being decoration: every advertised choice must be
+    // a field buildBody actually sends, checked by round-tripping each one.
+    expect(GENERATION_CHOICES.image.size.length).toBeGreaterThan(1)
+    expect(GENERATION_CHOICES.speech.voice).toContain('nova')
+    for (const speed of GENERATION_CHOICES.speech.speed) {
+      expect(speed).toBeGreaterThanOrEqual(0.25)
+      expect(speed).toBeLessThanOrEqual(4)
+    }
+    for (const n of GENERATION_CHOICES.image.n) {
+      expect(Number.isInteger(n) && n > 0).toBe(true)
+    }
+  })
+
+  it('every default is actually sent', async () => {
+    // A default that the body drops is a UI that shows a setting nothing honours.
+    const spy = stubResponse(402, { accepts: [{ amount: '64000' }] })
+    await challengeGeneration('image', 'x', { options: DEFAULT_OPTIONS.image })
+    expect(sentBody(spy)).toMatchObject({ size: '1024x1024', quality: 'standard', n: 1 })
   })
 })
 

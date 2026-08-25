@@ -1,3 +1,12 @@
+import {
+  BookOpenIcon,
+  LayoutGridIcon,
+  PlusIcon,
+  SearchIcon,
+  StoreIcon,
+  TerminalIcon,
+  XIcon,
+} from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import { relativeAge, search, type Conversation } from '../lib/conversations'
@@ -42,9 +51,7 @@ export function ChatList({
       </div>
 
       <button className="rail-item rail-item-strong" onClick={onNew}>
-        <span className="rail-glyph" aria-hidden="true">
-          +
-        </span>
+        <PlusIcon className="rail-glyph" size={16} aria-hidden="true" />
         New chat
       </button>
 
@@ -53,9 +60,7 @@ export function ChatList({
         onClick={() => setSearching((s) => !s)}
         aria-expanded={searching}
       >
-        <span className="rail-glyph" aria-hidden="true">
-          ⌕
-        </span>
+        <SearchIcon className="rail-glyph" size={16} aria-hidden="true" />
         Search chats
       </button>
 
@@ -74,9 +79,7 @@ export function ChatList({
         className={view === 'marketplace' ? 'rail-item rail-item-active' : 'rail-item'}
         onClick={() => onView('marketplace')}
       >
-        <span className="rail-glyph" aria-hidden="true">
-          ▤
-        </span>
+        <StoreIcon className="rail-glyph" size={16} aria-hidden="true" />
         Marketplace
       </button>
 
@@ -84,9 +87,7 @@ export function ChatList({
         className={view === 'gallery' ? 'rail-item rail-item-active' : 'rail-item'}
         onClick={() => onView('gallery')}
       >
-        <span className="rail-glyph" aria-hidden="true">
-          ▩
-        </span>
+        <LayoutGridIcon className="rail-glyph" size={16} aria-hidden="true" />
         Gallery
         {/* Counted in the rail because the gallery is the only view whose contents cost money
             to produce — knowing something is in there is worth a glance. */}
@@ -101,9 +102,7 @@ export function ChatList({
         target="_blank"
         rel="noopener noreferrer"
       >
-        <span className="rail-glyph" aria-hidden="true">
-          ❯_
-        </span>
+        <TerminalIcon className="rail-glyph" size={16} aria-hidden="true" />
         Install CLI
       </a>
 
@@ -113,9 +112,7 @@ export function ChatList({
         target="_blank"
         rel="noopener noreferrer"
       >
-        <span className="rail-glyph" aria-hidden="true">
-          ◈
-        </span>
+        <BookOpenIcon className="rail-glyph" size={16} aria-hidden="true" />
         Docs
       </a>
 
@@ -142,7 +139,7 @@ export function ChatList({
                 aria-label={`Delete ${c.title}`}
                 title="Delete"
               >
-                ×
+                <XIcon size={14} aria-hidden="true" />
               </button>
             </div>
           ))

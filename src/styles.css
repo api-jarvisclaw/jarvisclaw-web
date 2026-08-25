@@ -1,57 +1,109 @@
 /**
  * Design layer, sharing the gateway console's tokens.
  *
- * The values below are transcribed from web/default/src/styles/theme.css (the `.dark`
- * block) rather than re-picked by eye, so this page reads as the same product. oklch is
- * kept as-is: converting to hex would drift the moment the console's palette changes,
+ * BOTH themes, transcribed from web/default/src/styles/theme.css — the `:root` block into
+ * `:root` here and the `.dark` block into `.dark`. Light is the default because the console's
+ * ThemeProvider has `DEFAULT_THEME = 'light'`.
+ *
+ * That last point is the fix, and it is worth writing down because I got it wrong twice. I
+ * transcribed only the `.dark` block and then told the user the palettes matched, having
+ * compared this file's tokens against the console's `.dark` values — they were byte-identical,
+ * so the check passed. The check was measuring the wrong thing: a visitor to the console sees
+ * `html.light` and its light palette, so "identical to .dark" said nothing about what anyone
+ * actually looks at. Measured in a browser through canvas, every one of 17 shared tokens
+ * differed, --primary-foreground by 242 of 255.
+ *
+ * The lesson is in the comparison, not the colours: comparing against the values I had chosen
+ * to copy could only ever confirm I had copied them. The rendered pixels of both live pages
+ * were the only thing that could disagree with me.
+ *
+ * oklch is kept as-is: converting to hex would drift the moment the console's palette changes,
  * and every browser that runs this app supports it.
  *
  * Fonts are bundled, not fetched from Google. The console loads Public Sans the same way
- * (@fontsource-variable), and self-hosting keeps `font-src 'self'` intact — this page
- * holds an API key, so widening the policy to a third-party origin for a typeface is not
- * a trade worth making.
+ * (@fontsource-variable), and self-hosting keeps `font-src 'self'` intact — this page handles
+ * an API key, so widening the policy to a third-party origin for a typeface is not a trade
+ * worth making.
  */
 
 @import '@fontsource-variable/public-sans';
 @import '@fontsource-variable/jetbrains-mono';
 
 :root {
-  /* ── palette: JarvisClaw deep purple-black + ice mist ── */
-  --background: oklch(0.165 0.019 278);
-  --foreground: oklch(0.95 0.01 270);
-  --card: oklch(0.205 0.023 276);
-  --popover: oklch(0.205 0.023 276);
-  --primary: oklch(0.68 0.17 256);
-  --primary-foreground: oklch(0.15 0.02 275);
-  --secondary: oklch(0.27 0.03 276);
-  --muted: oklch(0.25 0.027 274);
-  --muted-foreground: oklch(0.75 0.018 262);
-  --accent: oklch(0.31 0.05 268);
-  --accent-2: oklch(0.8 0.13 208);
-  --accent-3: oklch(0.66 0.19 300);
-  --destructive: oklch(0.65 0.25 15);
-  --success: oklch(0.75 0.2 155);
-  --warning: oklch(0.85 0.18 85);
-  --highlight: oklch(0.83 0.16 88);
-  --border: oklch(0.35 0.025 285 / 45%);
-  --sidebar: oklch(0.16 0.02 293);
-  --sidebar-border: oklch(0.35 0.025 285 / 40%);
+  /* ── light: JarvisClaw neutral white + cobalt ──
+     The console keeps its neutrals achromatic on purpose (hue collapses under alpha
+     compositing), so --border and --input carry no chroma at all. */
+  --background: oklch(0.98 0.006 250);
+  --foreground: oklch(0.24 0.028 270);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.24 0.028 270);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.24 0.028 270);
+  --primary: oklch(0.5 0.19 258);
+  --primary-foreground: oklch(0.99 0.006 250);
+  --secondary: oklch(0.955 0.004 250);
+  --secondary-foreground: oklch(0.3 0.02 270);
+  --muted: oklch(0.96 0.004 248);
+  --muted-foreground: oklch(0.47 0.03 262);
+  --accent: oklch(0.94 0.02 250);
+  --accent-foreground: oklch(0.34 0.08 258);
+  --accent-2: oklch(0.62 0.13 210);
+  --accent-3: oklch(0.55 0.19 300);
+  --destructive: oklch(0.577 0.245 27.325);
+  --success: oklch(0.596 0.145 163.225);
+  --warning: oklch(0.681 0.162 75.834);
+  /* Deeper amber than the dark theme's gold: 0.83 would fail contrast on white, so the
+     console carries a different lightness per theme rather than reusing one token. */
+  --highlight: oklch(0.62 0.15 82);
+  --border: oklch(0.906 0 0);
+  --input: oklch(0.906 0 0);
+  --ring: oklch(0.45 0.17 260);
+  --sidebar: oklch(0.946 0 0);
+  --sidebar-foreground: oklch(0.22 0.015 285);
+  --sidebar-accent: oklch(0.91 0.018 250);
+  --sidebar-border: oklch(0.9 0 0);
 
-  /* The console's gradient ends at L=0.55. Here it stops at 0.62, because this page puts
-     *text* on the fill — Send, Approve, and every user bubble — and 0.55 leaves the
-     label at 3.93:1, under the 4.5 minimum. The console only ever uses the darker end
-     behind wordless surfaces (switches, progress bars), where nothing has to be read.
-     Same hue travel, so it still reads as the same gradient. */
-  --gradient-brand: linear-gradient(135deg, oklch(0.7 0.15 258), oklch(0.62 0.12 285));
-  /* Text on that fill. Taken from the console's --primary-foreground rather than white:
-     white measures 2.7:1 on the light end of this gradient, which is worse than the dark
-     ink on either end. Bright fill + dark ink is the console's own pairing. */
-  --on-brand: oklch(0.15 0.02 275);
-  --glow-brand: oklch(0.7 0.15 258);
-  --glow-accent: oklch(0.6 0.12 275);
-  --mesh-1: oklch(0.24 0.04 260);
-  --mesh-2: oklch(0.21 0.035 285);
-  --mesh-3: oklch(0.22 0.03 255);
+  --gradient-brand: linear-gradient(
+    135deg,
+    oklch(0.45 0.17 260),
+    oklch(0.5 0.15 245),
+    oklch(0.55 0.12 230)
+  );
+  /* Text on that fill. The light gradient is dark enough that white is the readable ink here —
+     the opposite of the dark theme, where the fill is bright and the ink must be dark. One
+     token for both, flipped per theme, so nothing downstream has to know which is in play. */
+  --on-brand: oklch(0.99 0.006 250);
+  --glow-brand: oklch(0.45 0.17 260);
+  --glow-accent: oklch(0.55 0.13 245);
+  --mesh-1: oklch(0.95 0.02 255);
+  --mesh-2: oklch(0.96 0.015 245);
+  --mesh-3: oklch(0.965 0.015 250);
+
+  /* ── readable status text, per theme ──
+     Status colours are chosen to work as FILLS, and text needs a different treatment from a
+     swatch. On dark they were mixed toward white to lift them off the background; doing that on
+     light washes them out to near-invisible. So the adjustment is a token, mixed toward black
+     here and toward white in .dark, and the call sites just use it. */
+  --success-text: color-mix(in oklch, var(--success) 88%, black);
+  --destructive-text: color-mix(in oklch, var(--destructive) 88%, black);
+  --warning-text: color-mix(in oklch, var(--warning) 78%, black);
+  --highlight-text: color-mix(in oklch, var(--highlight) 90%, black);
+  --accent-2-text: color-mix(in oklch, var(--accent-2) 88%, black);
+
+  /* Elevation. A drop shadow that reads on a near-white surface is far softer than one on
+     near-black, so the alpha is a token rather than a literal at each call site. */
+  --shadow-color: oklch(0.45 0.03 265 / 18%);
+  --shadow-strong: oklch(0.45 0.03 265 / 26%);
+
+  /* The headline wordmark, as gradient text. Same cyan→blue→violet travel as dark, dropped in
+     lightness so it reads on a near-white page: measured 4.6-6.9:1 here, where the dark stops
+     gave 1.69-3.18:1. */
+  --gradient-wordmark: linear-gradient(
+    120deg,
+    oklch(0.55 0.13 208),
+    oklch(0.5 0.17 258),
+    oklch(0.48 0.19 300)
+  );
 
   --radius: 0.625rem;
   --radius-sm: calc(var(--radius) * 0.6);
@@ -63,6 +115,82 @@
      system stack — which still looks deliberate, so it is easy to miss. */
   --sans: 'Public Sans Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Tells the browser which built-in colours to use for form controls, scrollbars and the
+     like. Without it a light page keeps dark scrollbars, which is the giveaway that a theme
+     was applied only to our own elements. Overridden in .dark below. */
+  color-scheme: light;
+}
+
+/* ── dark: JarvisClaw deep purple-black + ice mist ──
+   Applied by a class on <html>, matching the console's ThemeProvider so the two behave the
+   same way. Only the tokens that actually differ are redeclared; radii and fonts are shared. */
+.dark {
+  --background: oklch(0.165 0.019 278);
+  --foreground: oklch(0.95 0.01 270);
+  --card: oklch(0.205 0.023 276);
+  --card-foreground: oklch(0.95 0.01 270);
+  --popover: oklch(0.205 0.023 276);
+  --popover-foreground: oklch(0.95 0.01 270);
+  --primary: oklch(0.68 0.17 256);
+  --primary-foreground: oklch(0.15 0.02 275);
+  --secondary: oklch(0.27 0.03 276);
+  --secondary-foreground: oklch(0.9 0.012 272);
+  --muted: oklch(0.25 0.027 274);
+  --muted-foreground: oklch(0.75 0.018 262);
+  --accent: oklch(0.31 0.05 268);
+  --accent-foreground: oklch(0.92 0.012 272);
+  --accent-2: oklch(0.8 0.13 208);
+  --accent-3: oklch(0.66 0.19 300);
+  --destructive: oklch(0.65 0.25 15);
+  --success: oklch(0.75 0.2 155);
+  --warning: oklch(0.85 0.18 85);
+  --highlight: oklch(0.83 0.16 88);
+  --border: oklch(0.35 0.025 285 / 45%);
+  --input: oklch(0.35 0.025 285 / 45%);
+  --ring: oklch(0.7 0.15 258);
+  --sidebar: oklch(0.16 0.02 293);
+  --sidebar-foreground: oklch(0.88 0.012 275);
+  --sidebar-accent: oklch(0.3 0.045 268);
+  --sidebar-border: oklch(0.35 0.025 285 / 40%);
+
+  /* The console's dark gradient ends at L=0.55. Here it stops at 0.62, because this page puts
+     TEXT on the fill — Send, Approve, every user bubble — and 0.55 leaves the label at 3.93:1,
+     under the 4.5 minimum. The console only uses the darker end behind wordless surfaces
+     (switches, progress bars) where nothing has to be read. Same hue travel, so it still reads
+     as the same gradient. */
+  --gradient-brand: linear-gradient(135deg, oklch(0.7 0.15 258), oklch(0.62 0.12 285));
+  /* Dark ink on a bright fill — the console's own --primary-foreground. White measures 2.7:1
+     on the light end of this gradient, worse than dark ink on either end. */
+  --on-brand: oklch(0.15 0.02 275);
+  --glow-brand: oklch(0.7 0.15 258);
+  --glow-accent: oklch(0.6 0.12 275);
+  --mesh-1: oklch(0.24 0.04 260);
+  --mesh-2: oklch(0.21 0.035 285);
+  --mesh-3: oklch(0.22 0.03 255);
+
+  /* Mixed toward WHITE here, the opposite of light: a saturated status colour sits too close to
+     a near-black background to read as text until it is lifted. */
+  --success-text: color-mix(in oklch, var(--success) 85%, white);
+  --destructive-text: color-mix(in oklch, var(--destructive) 85%, white);
+  --warning-text: color-mix(in oklch, var(--warning) 88%, white);
+  --highlight-text: color-mix(in oklch, var(--highlight) 88%, white);
+  --accent-2-text: color-mix(in oklch, var(--accent-2) 85%, white);
+
+  /* Near-black, and much heavier than light: on a dark surface a subtle shadow is invisible, so
+     depth has to come from a deep, wide one. */
+  --shadow-color: oklch(0 0 0 / 45%);
+  --shadow-strong: oklch(0 0 0 / 60%);
+
+  /* Bright stops, correct against near-black: 5.7-10.7:1 measured. */
+  --gradient-wordmark: linear-gradient(
+    120deg,
+    oklch(0.8 0.13 208),
+    oklch(0.7 0.15 258),
+    oklch(0.66 0.19 300)
+  );
+
+  color-scheme: dark;
 }
 
 * {
@@ -229,7 +357,7 @@ button:not(:disabled):active {
 }
 
 .tag-free {
-  color: color-mix(in oklch, var(--success) 82%, white);
+  color: var(--success-text);
   border-color: color-mix(in oklch, var(--success) 40%, var(--border));
   box-shadow: 0 0 12px -5px var(--success);
 }
@@ -254,6 +382,66 @@ button:not(:disabled):active {
   border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
   box-shadow: 0 0 12px -3px var(--glow-brand);
 }
+
+/* ---- theme toggle ---- */
+
+/* Square icon button, matching the console's own (h-9 w-9, rounded-lg, outline variant). */
+.theme-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  flex: none;
+  background: color-mix(in oklch, var(--card) 55%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.theme-toggle:hover {
+  color: var(--foreground);
+  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+}
+
+/* Both icons occupy the same cell and cross over by rotating and scaling — the console does the
+   same. Absolute positioning on both is what keeps the button from resizing mid-transition. */
+.theme-icon {
+  position: absolute;
+  transition:
+    transform 220ms ease,
+    opacity 220ms ease;
+}
+
+.theme-icon-sun {
+  transform: rotate(0deg) scale(1);
+  opacity: 1;
+}
+
+.theme-icon-moon {
+  transform: rotate(90deg) scale(0);
+  opacity: 0;
+}
+
+.dark .theme-icon-sun {
+  transform: rotate(-90deg) scale(0);
+  opacity: 0;
+}
+
+.dark .theme-icon-moon {
+  transform: rotate(0deg) scale(1);
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-icon {
+    transition: none;
+  }
+}
+
 /* ---- transcript ---- */
 
 .transcript {
@@ -279,7 +467,7 @@ button:not(:disabled):active {
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: color-mix(in oklch, var(--accent-2) 85%, white);
+  color: var(--accent-2-text);
   margin-bottom: 18px;
   padding: 4px 12px;
   border-radius: 999px;
@@ -297,11 +485,16 @@ button:not(:disabled):active {
 }
 
 /* Gradient text has to be reinforced by a plain colour: if the clip is unsupported the
-   text would otherwise render transparent, i.e. the headline disappears. */
+   text would otherwise render transparent, i.e. the headline disappears.
+
+   --gradient-wordmark is per-theme, and that is not decoration. The dark values (L .66-.8) were
+   picked against a near-black page and measure 5.7-10.7:1 there; on the light page the SAME
+   stops measure 1.69-3.18:1 — the largest text on the screen, effectively invisible. A probe
+   sweep caught it. So the light theme carries its own, darker stops with the same hue travel. */
 .empty h1 em {
   font-style: normal;
   color: var(--glow-brand);
-  background: linear-gradient(120deg, oklch(0.8 0.13 208), oklch(0.7 0.15 258), oklch(0.66 0.19 300));
+  background: var(--gradient-wordmark);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -382,7 +575,7 @@ button:not(:disabled):active {
   );
   border: 1px solid var(--border);
   border-bottom-left-radius: var(--radius-sm);
-  box-shadow: 0 1px 2px oklch(0 0 0 / 0.2);
+  box-shadow: 0 1px 2px var(--shadow-color);
 }
 
 .reasoning {
@@ -445,7 +638,7 @@ button:not(:disabled):active {
    the previous ◇/◆ pair differed only in fill, which is the least legible way to distinguish
    "still running" from "done". */
 .tool-row:not(.is-running) .tool-glyph {
-  color: color-mix(in oklch, var(--success) 85%, white);
+  color: var(--success-text);
 }
 
 /* A spinner reads as progress on its own; the opacity pulse below then reinforces it. */
@@ -499,12 +692,12 @@ button:not(:disabled):active {
 }
 
 .price-free {
-  color: color-mix(in oklch, var(--success) 85%, white);
+  color: var(--success-text);
   font-weight: 500;
 }
 
 .declined {
-  color: color-mix(in oklch, var(--destructive) 82%, white);
+  color: var(--destructive-text);
 }
 
 .answered-by {
@@ -525,7 +718,7 @@ button:not(:disabled):active {
 .error {
   align-self: flex-start;
   max-width: 78%;
-  color: color-mix(in oklch, var(--destructive) 85%, white);
+  color: var(--destructive-text);
   border: 1px solid color-mix(in oklch, var(--destructive) 35%, var(--border));
   background: color-mix(in oklch, var(--destructive) 12%, var(--card));
   border-radius: var(--radius-lg);
@@ -537,7 +730,7 @@ button:not(:disabled):active {
   align-self: flex-start;
   max-width: 78%;
   font-size: 13px;
-  color: color-mix(in oklch, var(--warning) 88%, white);
+  color: var(--warning-text);
   border: 1px solid color-mix(in oklch, var(--warning) 30%, var(--border));
   background: color-mix(in oklch, var(--warning) 10%, var(--card));
   border-radius: var(--radius-lg);
@@ -912,7 +1105,7 @@ button:not(:disabled):active {
 }
 
 .account-key-note.is-bad {
-  color: color-mix(in oklch, var(--highlight) 88%, white);
+  color: var(--highlight-text);
 }
 
 .account-active {
@@ -933,7 +1126,7 @@ button:not(:disabled):active {
   margin: 10px 0 0;
   font-size: 11.5px;
   line-height: 1.45;
-  color: color-mix(in oklch, var(--destructive) 80%, white);
+  color: var(--destructive-text);
 }
 
 /* ---- generation options ---- */
@@ -954,7 +1147,7 @@ button:not(:disabled):active {
   background: var(--popover);
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
-  box-shadow: 0 18px 40px -18px oklch(0 0 0 / 60%);
+  box-shadow: 0 18px 40px -18px var(--shadow-strong);
 }
 
 .genopts-row + .genopts-row {
@@ -1116,7 +1309,7 @@ button:not(:disabled):active {
 }
 
 .kv-left > span:last-child {
-  color: color-mix(in oklch, var(--success) 85%, white);
+  color: var(--success-text);
 }
 
 /* A budget bar makes "how much is left" readable at a glance, which four monospace
@@ -1213,7 +1406,7 @@ button:not(:disabled):active {
   padding: 24px;
   max-width: 440px;
   width: 100%;
-  box-shadow: 0 0 30px -8px var(--glow-brand), 0 24px 60px -20px oklch(0 0 0 / 0.6);
+  box-shadow: 0 0 30px -8px var(--glow-brand), 0 24px 60px -20px var(--shadow-strong);
 }
 
 .dialog h3 {
@@ -1440,7 +1633,7 @@ button:not(:disabled):active {
 }
 
 .rail-row-del:hover {
-  color: color-mix(in oklch, var(--destructive) 85%, white);
+  color: var(--destructive-text);
 }
 
 .rail-toggle {
@@ -1595,7 +1788,7 @@ button:not(:disabled):active {
 }
 
 .picker-free {
-  color: color-mix(in oklch, var(--success) 85%, white);
+  color: var(--success-text);
   font-size: 11px;
 }
 
@@ -1618,7 +1811,7 @@ button:not(:disabled):active {
   border: 1px solid color-mix(in oklch, var(--border) 60%, var(--glow-brand) 20%);
   background: color-mix(in oklch, var(--popover) 96%, transparent);
   backdrop-filter: blur(16px) saturate(1.2);
-  box-shadow: 0 0 30px -8px var(--glow-brand), 0 20px 50px -18px oklch(0 0 0 / 0.6);
+  box-shadow: 0 0 30px -8px var(--glow-brand), 0 20px 50px -18px var(--shadow-strong);
 }
 
 .picker-search {
@@ -1707,14 +1900,14 @@ button:not(:disabled):active {
 }
 
 .picker-row-price.is-free {
-  color: color-mix(in oklch, var(--success) 85%, white);
+  color: var(--success-text);
 }
 
 /* A model the catalogue advertises but the gateway cannot serve. Warning-coloured rather
    than error-coloured: nothing has failed yet, and the row is still selectable — the point
    is that it will not work, not that something broke. */
 .picker-row-price.is-broken {
-  color: color-mix(in oklch, var(--highlight) 88%, white);
+  color: var(--highlight-text);
 }
 
 .picker-empty {
@@ -1777,7 +1970,7 @@ button:not(:disabled):active {
 }
 
 .market-note-error {
-  color: color-mix(in oklch, var(--destructive) 85%, white);
+  color: var(--destructive-text);
 }
 
 .market-grid {
@@ -1820,7 +2013,7 @@ button:not(:disabled):active {
 .market-count {
   margin: 0;
   font-size: 12px;
-  color: color-mix(in oklch, var(--accent-2) 85%, white);
+  color: var(--accent-2-text);
   font-family: var(--mono);
 }
 
@@ -1890,7 +2083,7 @@ button:not(:disabled):active {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-size: 10.5px;
-  color: color-mix(in oklch, var(--accent-2) 85%, white);
+  color: var(--accent-2-text);
 }
 
 .media-img,
@@ -1915,7 +2108,7 @@ button:not(:disabled):active {
 .media-missing {
   margin: 0;
   font-size: 13px;
-  color: color-mix(in oklch, var(--warning) 88%, white);
+  color: var(--warning-text);
 }
 
 .media-raw {
@@ -1979,14 +2172,14 @@ button:not(:disabled):active {
 }
 
 .wallet-warn {
-  color: color-mix(in oklch, var(--warning) 88%, white);
+  color: var(--warning-text);
   font-size: 13px;
 }
 
 .wallet-error {
   margin: 10px 0 0;
   font-size: 12.5px;
-  color: color-mix(in oklch, var(--destructive) 85%, white);
+  color: var(--destructive-text);
 }
 
 /* The security claim, held apart from the rest so it is not read as marketing copy. */

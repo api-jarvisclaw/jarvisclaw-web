@@ -39,11 +39,13 @@ import {
   type Settings,
 } from './lib/settings'
 import { SpendTracker, TYPICAL_AGENT_STEPS } from './lib/spend'
+import { applyTheme, loadTheme, saveTheme, type Theme } from './lib/theme'
 import { ChatList } from './ui/ChatList'
 import { Composer } from './ui/Composer'
 import { ConsentDialog, type PendingSpend } from './ui/ConsentDialog'
 import { Gallery } from './ui/Gallery'
 import { Marketplace } from './ui/Marketplace'
+import { ThemeToggle } from './ui/ThemeToggle'
 import {
   isUserRejection,
   selectEvmRequirement,
@@ -105,6 +107,11 @@ export function App() {
   const [account, setAccount] = useState<Account | null>(null)
   const [apiKey, setApiKey] = useState<{ key: string; name: string } | null>(null)
 
+  // Light by default, matching the console's own DEFAULT_THEME. The class is applied to <html>
+  // in an effect below rather than here, because the initial paint is handled by an inline
+  // script in index.html — doing it only in React would flash the wrong theme first.
+  const [theme, setTheme] = useState<Theme>(() => loadTheme())
+
   const history = useRef<ChatMessage[]>([])
   // Seeded from the stored settings, so a reload keeps the budget the user chose rather than
   // silently reverting to $1.00 mid-task.
@@ -127,6 +134,13 @@ export function App() {
   const anonymous = wallet === null && apiKey === null
 
   useEffect(() => () => abort.current?.abort(), [])
+
+  // Kept in sync with <html>. Both directions matter: applyTheme so a toggle takes effect, and
+  // saveTheme so it survives a reload — the console persists its own choice the same way.
+  useEffect(() => {
+    applyTheme(theme)
+    saveTheme(theme)
+  }, [theme])
 
   // Both of these change which models are reachable, so a candidate list learned under
   // the old settings no longer describes anything.
@@ -738,6 +752,7 @@ export function App() {
             {anonymous ? 'free · no sign-in' : 'signed in'}
           </span>
           <span className="spacer" />
+          <ThemeToggle theme={theme} onTheme={setTheme} />
           {busy && (
             <button className="ghost-btn" onClick={stop}>
               Stop

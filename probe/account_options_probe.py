@@ -304,8 +304,19 @@ async def main() -> int:
             if not href:
                 failures.append("the panel renders no sign-in link")
             else:
-                await signin_page.goto(href, wait_until="networkidle")
-                await signin_page.wait_for_timeout(2500)
+                # domcontentloaded, not networkidle: the console's sign-in page keeps a
+                # connection open (analytics/websocket), so networkidle never settles and the
+                # probe times out on a page that loaded perfectly well.
+                await signin_page.goto(href, wait_until="domcontentloaded", timeout=45_000)
+                # WAIT FOR THE ELEMENT, not for a duration. The console's sign-in form hydrates
+                # about 10s in on a cold load, so a fixed 3s wait reported 0 password fields on a
+                # page that renders one perfectly well — a probe bug that looks exactly like the
+                # dead link this check exists to catch. networkidle is no good either: the page
+                # holds a connection open, so it never settles.
+                try:
+                    await signin_page.wait_for_selector("input[type=password]", timeout=30_000)
+                except Exception:
+                    pass
                 text = await signin_page.inner_text("body")
                 pw = await signin_page.locator("input[type=password]").count()
                 notfound = "not found" in text[:200].lower()

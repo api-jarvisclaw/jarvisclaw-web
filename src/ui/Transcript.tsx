@@ -1,5 +1,5 @@
 import { CheckIcon, LoaderIcon } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { mediaMimeType } from '../lib/modality'
 
@@ -57,6 +57,14 @@ export type Turn =
       waitedMs?: number
       /** Set once waiting ended without media, distinguishing "gave up" from "never started". */
       timedOut?: boolean
+      /**
+       * Set when this wait was picked up again after a page load.
+       *
+       * Worth saying out loud rather than resuming silently: someone who reloaded during a long
+       * generation needs to know the job survived the reload. Without it the turn looks like it
+       * restarted from zero, which invites a second paid attempt at something already running.
+       */
+      resumed?: boolean
       /** A terminal upstream failure, with the provider's own wording. */
       failed?: { message: string; retryable: boolean }
     }
@@ -201,23 +209,7 @@ function MediaView({ turn }: { turn: Extract<Turn, { kind: 'media' }> }) {
             {turn.failed.retryable ? ' You can try again.' : null}
           </p>
         ) : src === undefined && turn.job ? (
-          // A wait, not a failure. Says which second it is on, because a video takes minutes
-          // and a bare spinner for that long reads as broken — the reload that follows is how
-          // a job id gets lost.
-          <p className="media-waiting">
-            <LoaderIcon className="tool-glyph is-spinning" size={13} aria-hidden="true" />
-            {turn.timedOut ? (
-              <span>
-                Still generating after {Math.round((turn.waitedMs ?? 0) / 1000)}s. It keeps
-                running on the server — check again in a minute.
-              </span>
-            ) : (
-              <span>
-                Generating{turn.waitedMs ? ` · ${Math.round(turn.waitedMs / 1000)}s` : null} · you
-                have already paid, so leaving this tab open is all that is needed.
-              </span>
-            )}
-          </p>
+          <WaitingView turn={turn} />
         ) : src === undefined ? (
           <p className="media-missing">
             The call completed but returned no media we could read.
@@ -243,6 +235,94 @@ function MediaView({ turn }: { turn: Extract<Turn, { kind: 'media' }> }) {
       </div>
     </div>
   )
+}
+
+/** Roughly how long each kind takes, so a wait can be shown against something. */
+const TYPICAL_WAIT_S: Record<'image' | 'video' | 'music' | 'speech', number> = {
+  video: 180,
+  music: 90,
+  image: 30,
+  speech: 10,
+}
+
+/**
+ * A generation in progress.
+ *
+ * Reported as "I ask for a video, then I wait a long time with no indication of anything".
+ * The previous version did show elapsed seconds — but only from `waitedMs`, which updates when
+ * a POLL RETURNS, i.e. every five seconds. Measured: the counter read 0s, 0s, 5s, 5s, 10s, 10s,
+ * 10s, 15s over eighteen seconds. A number that sits still for three checks is indistinguishable
+ * from a frozen page, which is precisely the impression to avoid.
+ *
+ * So the clock runs locally, once a second, and is anchored to a start time rather than
+ * accumulated — a browser throttles timers in a background tab, and a counter that ticks 60
+ * times per minute only while visible would under-report a wait someone left running.
+ *
+ * The progress bar is bounded by a TYPICAL duration, not a promise. It fills to 90% and stops:
+ * a bar that reaches the end and keeps sitting there says the thing is finished when it is not.
+ */
+function WaitingView({ turn }: { turn: Extract<Turn, { kind: 'media' }> }) {
+  // Anchored to mount rather than to the turn's own timestamp: this component appears when the
+  // wait starts, and after a resume the wait genuinely did restart from here.
+  const startedAt = useRef(Date.now() - (turn.waitedMs ?? 0))
+  const [elapsed, setElapsed] = useState(() => Date.now() - startedAt.current)
+
+  useEffect(() => {
+    const id = setInterval(() => setElapsed(Date.now() - startedAt.current), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  const seconds = Math.floor(elapsed / 1000)
+  const typical = TYPICAL_WAIT_S[turn.media]
+  const pct = Math.min(90, Math.round((seconds / typical) * 90))
+  const overdue = seconds > typical
+
+  return (
+    <div className="media-waiting-box">
+      <p className="media-waiting">
+        <LoaderIcon className="tool-glyph is-spinning" size={13} aria-hidden="true" />
+        <span>
+          {turn.resumed ? 'Still generating' : 'Generating'} · {formatWait(seconds)}
+          {/* Named while it is still normal, so a long wait is expected rather than alarming.
+              Past that point the claim is dropped instead of repeated — insisting on "about
+              3 min" at four minutes is worse than saying nothing. */}
+          {!overdue && <span className="media-waiting-eta"> · usually about {formatWait(typical)}</span>}
+        </span>
+      </p>
+
+      {/* Movement independent of the polls. Even at 90% it is still animating, which is the
+          part that says "working" rather than "stuck". */}
+      <div className="media-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+        <div className="media-progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+
+      <p className="media-waiting-note">
+        {turn.timedOut
+          ? // The client stopped asking; the job did not stop running. The gateway allows itself
+            // 900s upstream and stores the result either way, so the media is very likely coming.
+            'This is taking longer than usual. It keeps running on the server — reopen this chat in a minute and it will appear.'
+          : turn.resumed
+            ? 'Picked this back up after the page reloaded — the job kept running, and you were not charged again.'
+            : 'Already paid. You can keep chatting or close the tab; this carries on and will be here when you come back.'}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * `45s`, `2m 05s`, `3m` — seconds alone stop being readable somewhere around a minute.
+ *
+ * A whole number of minutes drops the seconds entirely. The estimate is 180s, and rendering that
+ * as "usually about 3m 00s" claims a precision nobody has: two padded zeros read as a measured
+ * figure rather than a rough one. Elapsed time keeps its seconds, because there the exact number
+ * is the information.
+ */
+export function formatWait(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  if (s === 0) return `${m}m`
+  return `${m}m ${String(s).padStart(2, '0')}s`
 }
 
 function StepView({ step }: { step: ToolStep }) {

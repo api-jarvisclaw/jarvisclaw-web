@@ -2161,6 +2161,32 @@ button:not(:disabled):active {
 
 /* A generation still running. Muted, not amber: a video legitimately takes minutes, and
    colouring a normal wait as a warning tells the user something is wrong when nothing is. */
+/* The "still generating" dot in the conversation list. Pulses rather than sitting still: a
+   static dot reads as a status badge, and this is meant to say "happening right now". */
+.rail-row-pending {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--primary);
+  flex: none;
+  animation: rail-pending-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes rail-pending-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-row-pending { animation: none; }
+}
+
+.media-waiting-box {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
 .media-waiting {
   display: flex;
   align-items: center;
@@ -2168,6 +2194,64 @@ button:not(:disabled):active {
   margin: 0;
   font-size: 13px;
   color: var(--muted-foreground);
+}
+
+/* The elapsed time is the part being read, so it gets the tabular figures — proportional
+   digits make a live counter jitter as the glyph widths change each second. */
+.media-waiting > span {
+  font-variant-numeric: tabular-nums;
+}
+
+.media-waiting-eta {
+  color: color-mix(in oklch, var(--muted-foreground) 75%, transparent);
+}
+
+.media-progress {
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--border) 70%, transparent);
+  overflow: hidden;
+}
+
+/* Two motions on purpose. The width tracks elapsed time against a typical duration, and the
+   shimmer runs regardless — so even parked at 90% the bar is visibly alive, which is the
+   difference between "still working" and "stuck". */
+.media-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--primary),
+    color-mix(in oklch, var(--primary) 55%, var(--accent-2)),
+    var(--primary)
+  );
+  background-size: 200% 100%;
+  animation: media-progress-shimmer 1.8s linear infinite;
+  transition: width 0.9s linear;
+}
+
+@keyframes media-progress-shimmer {
+  from {
+    background-position: 0% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* Respects a reduced-motion preference: the width still tracks progress, which is the
+   information — only the decorative shimmer stops. */
+@media (prefers-reduced-motion: reduce) {
+  .media-progress-fill {
+    animation: none;
+  }
+}
+
+.media-waiting-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: color-mix(in oklch, var(--muted-foreground) 82%, transparent);
 }
 
 .media-raw {

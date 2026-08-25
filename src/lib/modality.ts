@@ -139,9 +139,40 @@ export interface GenerationResult {
   url?: string
   /** base64 payload, for upstreams that inline the bytes instead. */
   b64?: string
-  /** Set when the response carried neither, so the UI can say so instead of showing nothing. */
+  /** Set when the call is queued and the media has to be collected later. */
+  job?: AsyncJob
+  /** Set when the response carried none of the above, so the UI can say so. */
   raw?: string
 }
+
+/**
+ * A queued generation. The POST is a receipt, not the media.
+ *
+ * This is what a video call actually returns, and not knowing that cost a user $0.83 for
+ * nothing:
+ *
+ *   POST /v1/videos/generations -> {"id":"…","status":"queued","poll_url":"/v1/videos/generations/…"}
+ *
+ * `extractMedia` found no url and no b64 in that, fell through to its raw branch, and the
+ * page said "the call completed but returned no media we could read". It had completed —
+ * the queueing had. The video itself was generated seconds later by the gateway's own
+ * background poller and stored under this id, where nothing ever went to look for it.
+ *
+ * So the receipt is now a first-class result rather than an unreadable one. Anything that
+ * charges money and answers asynchronously has to be modelled as asynchronous, because the
+ * alternative is a charge whose product exists and is unreachable.
+ */
+export interface AsyncJob {
+  id: string
+  /** Absolute URL to poll. Relative paths from the gateway are resolved on the way in. */
+  pollUrl: string
+}
+
+/** A poll's outcome. `pending` is not a failure — a video legitimately takes minutes. */
+export type PollState =
+  | { state: 'pending'; message?: string }
+  | { state: 'done'; media: GenerationResult }
+  | { state: 'failed'; message: string; retryable: boolean }
 
 /** Atomic USDC (6dp) -> dollars. */
 function atomicToUsd(amount: string): number {
@@ -344,6 +375,14 @@ export async function generate(
  * a silent blank is indistinguishable from a charge that produced nothing.
  */
 export function extractMedia(kind: GenerationKind, body: Record<string, unknown>): GenerationResult {
+  // A queued job is checked FIRST, and the order matters. A receipt carries an `id` and a
+  // `poll_url` and no media at all, so every media lookup below misses and the function
+  // used to end at its raw fallback — reporting an unreadable response for a call that had
+  // in fact succeeded in starting. Recognising the receipt is what turns a dead end into a
+  // wait.
+  const job = extractJob(body)
+  if (job) return { kind, job }
+
   const data = body.data
   if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object' && data[0] !== null) {
     const first = data[0] as Record<string, unknown>
@@ -376,6 +415,175 @@ export function extractMedia(kind: GenerationKind, body: Record<string, unknown>
     }
   }
   return { kind, raw: JSON.stringify(body).slice(0, 400) }
+}
+
+/**
+ * How long each kind is waited for before the UI stops asking.
+ *
+ * These bound the CLIENT's patience, not the job's. The gateway keeps polling upstream for
+ * its own 900s and stores the result either way, so giving up here loses nothing permanently
+ * — the media stays retrievable from the same id afterwards, which is why the UI keeps the
+ * job on screen with a Check-again button instead of discarding it.
+ *
+ * A deadline is mandatory rather than defensive: the status route answers "in_progress" for
+ * ids that do not exist, so "poll until it stops being pending" is a loop with no exit.
+ */
+export const POLL_DEADLINE_MS: Record<GenerationKind, number> = {
+  // Videos are the slow one and the reason this exists — the $0.83 clip that appeared to
+  // return nothing. Upstream takes minutes; the gateway allows itself 900s.
+  video: 300_000,
+  image: 120_000,
+  music: 300_000,
+  // Speech is synchronous today (bytes come back inline). Kept short so that if a channel
+  // ever queues it, the wait ends rather than hanging.
+  speech: 60_000,
+}
+
+/** Gap between polls. Matches the gateway's own 5s upstream cadence; the read is free. */
+export const POLL_INTERVAL_MS = 5_000
+
+/**
+ * Waits for a queued job, reporting progress, until it finishes or the deadline passes.
+ *
+ * `onTick` exists so the UI can show elapsed time rather than a spinner with no end in
+ * sight. Waiting minutes for a video is fine; waiting minutes with no indication that
+ * anything is happening is what makes a user reload the page and lose the job id.
+ */
+export async function awaitJob(
+  kind: GenerationKind,
+  job: AsyncJob,
+  opts: RequestOptions & {
+    onTick?: (elapsedMs: number, message?: string) => void
+    deadlineMs?: number
+  } = {},
+): Promise<PollState> {
+  const deadline = opts.deadlineMs ?? POLL_DEADLINE_MS[kind]
+  const started = Date.now()
+  let last: PollState = { state: 'pending' }
+
+  for (;;) {
+    const elapsed = Date.now() - started
+    if (elapsed >= deadline) {
+      // Not reported as a failure: the job is very likely still running, and calling it
+      // failed would tell the user their money is gone when the media is probably minutes
+      // away. The UI keeps the id and offers to check again.
+      return {
+        state: 'pending',
+        message: last.state === 'pending' ? last.message : undefined,
+      }
+    }
+
+    last = await pollJob(kind, job, opts)
+    if (last.state !== 'pending') return last
+
+    opts.onTick?.(Date.now() - started, last.message)
+    await sleep(POLL_INTERVAL_MS, opts.signal)
+  }
+}
+
+/** A cancellable delay. Rejects on abort so a closed tab or a new prompt stops the loop. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new DOMException('aborted', 'AbortError'))
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    function onAbort() {
+      clearTimeout(timer)
+      reject(new DOMException('aborted', 'AbortError'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+/**
+ * Reads a queued-job receipt, or null when the body is not one.
+ *
+ * Deliberately strict about what counts as a receipt. A `status` of `completed` with a
+ * `poll_url` is a finished job that happens to name its own address, and treating that as
+ * pending would make the UI wait for something already in its hands. Equally, an `id` alone
+ * is not a receipt — every OpenAI-shaped response has one.
+ */
+export function extractJob(body: Record<string, unknown>): AsyncJob | null {
+  const id = typeof body.id === 'string' ? body.id : ''
+  const pollUrl = typeof body.poll_url === 'string' ? body.poll_url : ''
+  const status = typeof body.status === 'string' ? body.status : ''
+  if (id === '' || status === 'completed' || status === 'failed') return null
+
+  // A relative poll_url is resolved against the gateway, and the fallback is constructed
+  // from the id rather than abandoned: the gateway's own status routes are exactly
+  // /v1/{videos,images,audio}/generations/:id, so a receipt without a usable poll_url is
+  // still pollable. Losing the media because a field was missing is the failure this
+  // whole path exists to prevent.
+  if (pollUrl === '') return status === 'queued' || status === 'in_progress' ? { id, pollUrl: '' } : null
+  return { id, pollUrl }
+}
+
+/**
+ * The absolute URL to poll for a job of this kind.
+ *
+ * The id is percent-encoded because job ids are provider-prefixed and contain a colon
+ * (`minimax:music_ae260…`). Left raw, the colon makes the path ambiguous and the poll
+ * misses the route the gateway told us to use.
+ */
+export function pollUrlFor(kind: GenerationKind, job: AsyncJob, baseUrl = DEFAULT_BASE_URL): string {
+  if (job.pollUrl !== '') {
+    return job.pollUrl.startsWith('http') ? job.pollUrl : `${baseUrl}${job.pollUrl}`
+  }
+  const path = kind === 'image' ? '/v1/images/generations' : kind === 'video' ? '/v1/videos/generations' : '/v1/audio/generations'
+  return `${baseUrl}${path}/${encodeURIComponent(job.id)}`
+}
+
+/**
+ * Polls a queued job once.
+ *
+ * Polling is free and needs no credential — the gateway's status routes are deliberately
+ * unauthenticated (job ids are unguessable UUIDs) and priced at zero, because a poll that
+ * charged would bill the same generation twice. Measured: it once did, at $0.46 a read.
+ *
+ * MEASURED AND IMPORTANT — the gateway answers `200 {"status":"in_progress"}` for ANY id,
+ * including ids that never existed. I checked with a freshly minted random UUID and got a
+ * cheerful "Video is still generating". So a poll can never prove a job is real, and a
+ * client that waits for a terminal state will wait forever on a typo. That is precisely why
+ * the caller must impose its own deadline rather than trusting the stream of `pending`s.
+ */
+export async function pollJob(
+  kind: GenerationKind,
+  job: AsyncJob,
+  opts: RequestOptions = {},
+): Promise<PollState> {
+  const url = pollUrlFor(kind, job, opts.baseUrl ?? DEFAULT_BASE_URL)
+  const res = await fetch(url, { method: 'GET', signal: opts.signal })
+  if (!res.ok) {
+    // A transport hiccup mid-generation is not a failed job, and calling it one would throw
+    // away a video that is still coming. Reported as pending so the caller's deadline — not
+    // one bad response — decides when to give up.
+    return { state: 'pending', message: `the gateway answered ${res.status} while checking` }
+  }
+
+  const body = (await res.json()) as Record<string, unknown>
+  const status = typeof body.status === 'string' ? body.status : ''
+
+  if (status === 'failed') {
+    // The gateway's failure envelope carries a human-readable `message` and a `retryable`
+    // flag, so the reason is passed through rather than replaced with a generic error. It
+    // also means "rejected by a content filter" reads differently from "provider timed out",
+    // which is the difference between rewriting a prompt and pressing the button again.
+    const message =
+      (typeof body.message === 'string' && body.message !== '' && body.message) ||
+      (typeof body.error === 'string' && body.error !== '' && body.error) ||
+      'the provider reported a failure'
+    return { state: 'failed', message, retryable: body.retryable !== false }
+  }
+
+  const media = extractMedia(kind, body)
+  if (media.url || media.b64) return { state: 'done', media }
+
+  return {
+    state: 'pending',
+    message: typeof body.message === 'string' ? body.message : undefined,
+  }
 }
 
 /**

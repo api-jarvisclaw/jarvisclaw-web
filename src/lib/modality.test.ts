@@ -1,14 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  awaitJob,
   challengeGeneration,
   DEFAULT_OPTIONS,
   GENERATION_CHOICES,
+  extractJob,
   extractMedia,
   generate,
   GENERATIONS,
   mediaMimeType,
   modeForModel,
+  POLL_DEADLINE_MS,
+  pollJob,
+  pollUrlFor,
   UNSERVABLE_VIRTUALS,
 } from './modality'
 
@@ -413,5 +418,181 @@ describe('extractMedia for speech', () => {
     const out = extractMedia('speech', { audio: '' })
     expect(out.b64).toBeUndefined()
     expect(out.raw).toBeDefined()
+  })
+})
+
+/**
+ * Asynchronous generation — the defect that charged $0.83 and showed nothing.
+ *
+ * A video POST returns a receipt, not a clip:
+ *   {"id":"…","status":"queued","poll_url":"/v1/videos/generations/…"}
+ * extractMedia found no url and no b64 there, fell through to its raw branch, and the page
+ * reported "the call completed but returned no media we could read". The generation itself
+ * succeeded seconds later — the gateway's background poller stored it under that id — and
+ * nothing ever went to collect it.
+ */
+describe('extractJob', () => {
+  it('recognises the queued receipt a video POST actually returns', () => {
+    const out = extractMedia('video', {
+      id: 'bytedance:video_ae260c45',
+      status: 'queued',
+      poll_url: '/v1/videos/generations/bytedance%3Avideo_ae260c45',
+    })
+    expect(out.job).toEqual({
+      id: 'bytedance:video_ae260c45',
+      pollUrl: '/v1/videos/generations/bytedance%3Avideo_ae260c45',
+    })
+    // The whole point: it is no longer an unreadable response.
+    expect(out.raw).toBeUndefined()
+  })
+
+  it('treats a completed job as media, not as something to wait for', () => {
+    // A finished job may still name its own poll_url. Waiting on that would stall a result
+    // already in hand.
+    const out = extractMedia('video', {
+      id: 'j1',
+      status: 'completed',
+      poll_url: '/v1/videos/generations/j1',
+      data: [{ url: 'https://cdn/v.mp4' }],
+    })
+    expect(out.job).toBeUndefined()
+    expect(out.url).toBe('https://cdn/v.mp4')
+  })
+
+  it('does not mistake an ordinary response for a receipt', () => {
+    // Every OpenAI-shaped body carries an id. Treating that as a job would make finished
+    // images wait forever.
+    expect(extractJob({ id: 'img-1', data: [{ url: 'https://cdn/a.png' }] })).toBeNull()
+  })
+
+  it('still polls a receipt whose poll_url is missing', () => {
+    // The gateway's status routes are /v1/{kind}/generations/:id, so the id alone is enough.
+    // Abandoning the media because one field was absent is the failure being fixed here.
+    const job = extractJob({ id: 'j2', status: 'in_progress' })
+    expect(job).toEqual({ id: 'j2', pollUrl: '' })
+    expect(pollUrlFor('video', job!, 'https://gw')).toBe('https://gw/v1/videos/generations/j2')
+  })
+})
+
+describe('pollUrlFor', () => {
+  it('percent-encodes a provider-prefixed id', () => {
+    // Job ids look like `minimax:music_ae26…`. A raw colon makes the path ambiguous and the
+    // poll misses the route the gateway named.
+    expect(pollUrlFor('music', { id: 'minimax:music_a1', pollUrl: '' }, 'https://gw')).toBe(
+      'https://gw/v1/audio/generations/minimax%3Amusic_a1',
+    )
+  })
+
+  it('resolves a relative poll_url against the gateway and leaves an absolute one alone', () => {
+    expect(pollUrlFor('video', { id: 'j', pollUrl: '/v1/videos/generations/j' }, 'https://gw')).toBe(
+      'https://gw/v1/videos/generations/j',
+    )
+    expect(pollUrlFor('video', { id: 'j', pollUrl: 'https://other/j' }, 'https://gw')).toBe(
+      'https://other/j',
+    )
+  })
+})
+
+describe('pollJob', () => {
+  it('reports the media once the job completes', async () => {
+    stubResponse(200, { id: 'j', status: 'completed', data: [{ url: 'https://cdn/v.mp4' }] })
+    const out = await pollJob('video', { id: 'j', pollUrl: '/p' })
+    expect(out).toEqual({ state: 'done', media: { kind: 'video', url: 'https://cdn/v.mp4' } })
+  })
+
+  it('polls without any credential, because the read is free', async () => {
+    // Measured: the gateway's status routes are unauthenticated and priced at zero. They were
+    // once priced at 0.001, which disabled the free-poll exemption and billed a poll as a
+    // whole new generation — $0.46 for a read. Sending no auth is also what lets this work
+    // for a wallet user whose payment header covered only the POST.
+    const spy = stubResponse(200, { id: 'j', status: 'in_progress' })
+    await pollJob('video', { id: 'j', pollUrl: '/p' })
+    const init = spy.mock.calls[0]?.[1]
+    expect(init?.method).toBe('GET')
+    expect(init?.headers).toBeUndefined()
+  })
+
+  it('passes the provider own failure wording through', async () => {
+    // "Rejected by a content filter" and "the provider timed out" call for different actions
+    // from the user, so replacing them with one generic error destroys the only useful part.
+    stubResponse(200, {
+      id: 'j',
+      status: 'failed',
+      error: 'sensitive information',
+      message: 'Your request was rejected by the content safety filter.',
+      retryable: false,
+    })
+    const out = await pollJob('video', { id: 'j', pollUrl: '/p' })
+    expect(out).toEqual({
+      state: 'failed',
+      message: 'Your request was rejected by the content safety filter.',
+      retryable: false,
+    })
+  })
+
+  it('treats a transport error as still-pending, not as a failed job', async () => {
+    // A 502 from a proxy mid-generation says nothing about the video. Calling it failed would
+    // discard a clip that is still coming, after the user has paid for it.
+    stubResponse(502, {})
+    const out = await pollJob('video', { id: 'j', pollUrl: '/p' })
+    expect(out.state).toBe('pending')
+  })
+
+  it('stays pending on the in-progress body the gateway really sends', async () => {
+    stubResponse(200, {
+      id: 'j',
+      status: 'in_progress',
+      message: 'Video is still generating. Please try again in a few seconds.',
+    })
+    const out = await pollJob('video', { id: 'j', pollUrl: '/p' })
+    expect(out).toEqual({
+      state: 'pending',
+      message: 'Video is still generating. Please try again in a few seconds.',
+    })
+  })
+})
+
+describe('awaitJob', () => {
+  it('gives up at the deadline instead of polling forever', async () => {
+    // MEASURED, and the reason a deadline is mandatory rather than defensive: the gateway
+    // answers 200 {"status":"in_progress"} for ANY id, including a random UUID that never
+    // existed. I checked. So "poll until it stops being pending" is a loop with no exit, and
+    // the only thing that can end it is the client's own clock.
+    stubResponse(200, { id: 'nope', status: 'in_progress' })
+    const out = await awaitJob('video', { id: 'nope', pollUrl: '/p' }, { deadlineMs: 0 })
+    expect(out.state).toBe('pending')
+  })
+
+  it('reports elapsed time while waiting, then returns the media', async () => {
+    let call = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        call += 1
+        return new Response(
+          JSON.stringify(
+            call < 2
+              ? { id: 'j', status: 'in_progress' }
+              : { id: 'j', status: 'completed', data: [{ url: 'https://cdn/v.mp4' }] },
+          ),
+          { status: 200 },
+        )
+      }),
+    )
+    const ticks: number[] = []
+    const out = await awaitJob(
+      'video',
+      { id: 'j', pollUrl: '/p' },
+      { onTick: (ms) => ticks.push(ms), deadlineMs: 60_000 },
+    )
+    expect(out.state).toBe('done')
+    expect(ticks.length).toBe(1)
+  }, 20_000)
+
+  it('allows a video far longer than an image', () => {
+    // Not a style choice: upstream video takes minutes and the gateway allows itself 900s.
+    // A shared timeout short enough for an image would abandon every video.
+    expect(POLL_DEADLINE_MS.video).toBeGreaterThan(POLL_DEADLINE_MS.image)
+    expect(POLL_DEADLINE_MS.video).toBeGreaterThanOrEqual(300_000)
   })
 })

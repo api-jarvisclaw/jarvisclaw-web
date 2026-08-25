@@ -165,6 +165,29 @@ describe('the ink on the gradient is flipped per theme', () => {
   })
 })
 
+describe.each(THEMES)('text on a filled button (%s)', (theme) => {
+  it('reads against the flat --primary fill', () => {
+    // This pair now carries every primary button AND the user's own chat bubble. They used to
+    // be filled with --gradient-brand and inked with --on-brand, which the tests above cover;
+    // moving them to a flat fill would have moved them OUT of every contrast check, so the
+    // pair that replaced it is measured here. A restraint pass that quietly drops a
+    // readability guarantee is not an improvement.
+    expect(
+      contrast(token('--primary-foreground', theme), token('--primary', theme)),
+    ).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('needs opposite ink per theme, like the gradient does', () => {
+    // Light's --primary is deep (L .5) and needs near-white ink; dark's is bright (L .68) and
+    // needs near-black. Asserting the swapped ink fails is what pins the flip, rather than
+    // letting one theme's value satisfy both.
+    const other: Theme = theme === 'light' ? 'dark' : 'light'
+    expect(
+      contrast(token('--primary-foreground', other), token('--primary', theme)),
+    ).toBeLessThan(4.5)
+  })
+})
+
 describe.each(THEMES)('body text (%s)', (theme) => {
   it('reads against the page background', () => {
     expect(

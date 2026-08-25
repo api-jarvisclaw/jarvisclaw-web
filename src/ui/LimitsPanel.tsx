@@ -1,3 +1,4 @@
+import { ChevronDownIcon, ChevronUpIcon } from 'lucide-react'
 import { useState } from 'react'
 
 import { LIMITS, type Settings } from '../lib/settings'
@@ -30,9 +31,11 @@ export function LimitsPanel({
         aria-expanded={open}
       >
         <h2>Limits</h2>
-        <span className="caret" aria-hidden="true">
-          {open ? '⌃' : '⌄'}
-        </span>
+        {open ? (
+          <ChevronUpIcon className="caret" size={14} aria-hidden="true" />
+        ) : (
+          <ChevronDownIcon className="caret" size={14} aria-hidden="true" />
+        )}
       </button>
 
       {open && (

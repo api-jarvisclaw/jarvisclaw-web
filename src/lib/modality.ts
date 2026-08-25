@@ -103,6 +103,36 @@ export const GENERATIONS: Record<GenerationKind, GenerationSpec> = {
   },
 }
 
+/**
+ * The choices the UI offers, per mode.
+ *
+ * Kept beside the DTO mapping above so a control cannot exist for a field the body never sends.
+ * Sizes and qualities are the OpenAI-compatible set the ImageRequest DTO accepts; voices are the
+ * OpenAI-compatible names, which is what the audio DTO's `voice` field expects.
+ */
+export const GENERATION_CHOICES = {
+  image: {
+    size: ['1024x1024', '1792x1024', '1024x1792'],
+    quality: ['standard', 'hd'],
+    n: [1, 2, 4],
+  },
+  video: {
+    duration: [5, 10],
+  },
+  speech: {
+    voice: ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'],
+    speed: [0.75, 1, 1.25, 1.5],
+  },
+} as const
+
+/** Defaults, chosen to match what the endpoints do when the field is omitted. */
+export const DEFAULT_OPTIONS: Record<GenerationKind, GenerationOptions> = {
+  image: { size: '1024x1024', quality: 'standard', n: 1 },
+  video: { duration: 5 },
+  music: {},
+  speech: { speed: 1 },
+}
+
 export interface GenerationResult {
   kind: GenerationKind
   /** Direct media URL when the upstream returns one. */
@@ -119,16 +149,74 @@ function atomicToUsd(amount: string): number {
   return Number.isFinite(n) ? n / 1_000_000 : NaN
 }
 
-function buildBody(kind: GenerationKind, prompt: string, model: string): Record<string, unknown> {
+/**
+ * Per-generation options the user can set.
+ *
+ * Every field here maps to a real field on the gateway's request DTO — `size`/`quality`/`n` on
+ * ImageRequest, `duration`/`width`/`height` on VideoRequest, `voice`/`speed` on the audio one.
+ * Nothing is invented for the UI's benefit: an option that the gateway drops is worse than no
+ * option, because the user believes they changed something.
+ *
+ * MEASURED, and it changes what can honestly be promised: the 402 quote does NOT move with any
+ * of these. Same price at 1024 and 1792, at standard and hd, at n=1 and n=2, and — surprisingly
+ * — at 5s and 10s of video. Speech is the one exception, and it is not an option at all: its
+ * price scales with the LENGTH OF THE TEXT ($0.002 for "hello", $0.0388 for ~700 characters).
+ * So the UI must not imply that picking a bigger size costs more, and must not imply speech is
+ * flat-rate.
+ */
+export interface GenerationOptions {
+  /** Image: `1024x1024`, `1792x1024`, … */
+  size?: string
+  /** Image: `standard` | `hd`. */
+  quality?: string
+  /** Image: how many to make. */
+  n?: number
+  /** Video: seconds. */
+  duration?: number
+  /** Speech: a named voice, when the upstream offers them. */
+  voice?: string
+  /** Speech: playback rate. */
+  speed?: number
+}
+
+function buildBody(
+  kind: GenerationKind,
+  prompt: string,
+  model: string,
+  options: GenerationOptions = {},
+): Record<string, unknown> {
   const spec = GENERATIONS[kind]
-  if (kind === 'video') {
-    // duration is not optional in the video DTO's semantics: the price depends on it, so
-    // omitting it would quote one thing and bill another.
-    return { model, prompt, duration: 5 }
-  }
   // Keyed off the spec rather than hardcoded, so adding an endpoint cannot silently reuse
   // the wrong field name. /v1/audio/speech reads `input` and 400s on `prompt`.
-  return { model, [spec.promptField]: prompt }
+  const body: Record<string, unknown> = { model, [spec.promptField]: prompt }
+
+  if (kind === 'image') {
+    if (options.size) body.size = options.size
+    if (options.quality) body.quality = options.quality
+    // Guarded, not passed through: n=0 would ask for nothing and still be charged, and a
+    // non-integer is rejected by the DTO's *uint.
+    if (Number.isInteger(options.n) && (options.n as number) > 0) body.n = options.n
+  }
+
+  if (kind === 'video') {
+    // Always sent. The price does not vary with it (measured), but the upstream still needs a
+    // duration, and omitting it leaves the length to whatever default the channel happens to
+    // have — which is not the 5 seconds the UI says.
+    body.duration = Number.isFinite(options.duration) && (options.duration as number) > 0
+      ? options.duration
+      : 5
+  }
+
+  if (kind === 'speech') {
+    if (options.voice) body.voice = options.voice
+    // Bounded to the range the OpenAI-compatible schema accepts. An out-of-range speed is a
+    // 400 on a call the user has already been quoted for.
+    if (Number.isFinite(options.speed) && (options.speed as number) >= 0.25 && (options.speed as number) <= 4) {
+      body.speed = options.speed
+    }
+  }
+
+  return body
 }
 
 /**
@@ -167,11 +255,14 @@ export function modeForModel(model: string, modality: string): GenerationKind | 
 export async function challengeGeneration(
   kind: GenerationKind,
   prompt: string,
-  opts: RequestOptions & { model?: string } = {},
+  opts: RequestOptions & { model?: string; options?: GenerationOptions } = {},
 ): Promise<{ challenge: Challenge; usd: number; url: string; body: Record<string, unknown> }> {
   const spec = GENERATIONS[kind]
   const url = `${opts.baseUrl ?? DEFAULT_BASE_URL}${spec.path}`
-  const body = buildBody(kind, prompt, opts.model ?? spec.defaultModel)
+  // The options are part of the QUOTED body, so the price returned is the price for exactly
+  // this request. Quoting a bare body and then sending a different one is how a signature ends
+  // up paying for something the gateway never priced.
+  const body = buildBody(kind, prompt, opts.model ?? spec.defaultModel, opts.options)
 
   const res = await fetch(url, {
     method: 'POST',
@@ -208,14 +299,20 @@ export async function challengeGeneration(
 export async function generate(
   kind: GenerationKind,
   prompt: string,
-  opts: RequestOptions & { cred: Credential; model?: string; url?: string; body?: Record<string, unknown> },
+  opts: RequestOptions & {
+    cred: Credential
+    model?: string
+    url?: string
+    body?: Record<string, unknown>
+    options?: GenerationOptions
+  },
 ): Promise<GenerationResult> {
   const spec = GENERATIONS[kind]
   // Re-uses the exact URL and body the challenge was issued for when given them. A payment
   // signed for one body and spent on another is a signature the facilitator may settle
   // while the gateway serves something else.
   const url = opts.url ?? `${opts.baseUrl ?? DEFAULT_BASE_URL}${spec.path}`
-  const body = opts.body ?? buildBody(kind, prompt, opts.model ?? spec.defaultModel)
+  const body = opts.body ?? buildBody(kind, prompt, opts.model ?? spec.defaultModel, opts.options)
 
   const res = await fetch(url, {
     method: 'POST',

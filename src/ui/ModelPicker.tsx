@@ -1,3 +1,4 @@
+import { ChevronDownIcon } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { displayPrice, type CatalogueModel, type Modality } from '../lib/catalogue'
@@ -79,9 +80,7 @@ export function ModelPicker({
       >
         <span className="picker-name">{selected}</span>
         {current?.free && <span className="picker-free">free</span>}
-        <span className="picker-caret" aria-hidden="true">
-          ⌄
-        </span>
+        <ChevronDownIcon className="picker-caret" size={13} aria-hidden="true" />
       </button>
 
       {open && (

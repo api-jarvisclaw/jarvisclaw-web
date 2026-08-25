@@ -1,6 +1,8 @@
+import type { Account } from '../lib/account'
 import type { Settings } from '../lib/settings'
 import type { SpendPolicy } from '../lib/spend'
 import type { WalletAccount } from '../lib/wallet'
+import { AccountPanel } from './AccountPanel'
 import { LimitsPanel } from './LimitsPanel'
 import { WalletPanel } from './WalletPanel'
 
@@ -8,10 +10,18 @@ export function Sidebar({
   wallet,
   spend,
   settings,
+  account,
+  keyName,
   onSettings,
+  onAccount,
+  onKey,
   onWallet,
 }: {
   wallet: WalletAccount | null
+  account: Account | null
+  keyName: string | null
+  onAccount: (a: Account | null) => void
+  onKey: (v: { key: string; name: string } | null) => void
   spend: {
     spentUsd: number
     remainingUsd: number
@@ -69,6 +79,11 @@ export function Sidebar({
           </div>
         </section>
       )}
+
+      {/* Account first, wallet second. Deliberate ordering: an existing customer's answer to
+          "how do I pay" is their account, and putting the wallet above it implies installing an
+          extension is the primary path. A key is also strictly simpler — no signatures at all. */}
+      <AccountPanel account={account} keyName={keyName} onAccount={onAccount} onKey={onKey} />
 
       <WalletPanel account={wallet} onAccount={onWallet} />
 

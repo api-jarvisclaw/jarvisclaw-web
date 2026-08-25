@@ -46,7 +46,7 @@ import { applyTheme, loadTheme, saveTheme, type Theme } from './lib/theme'
 import { ChatList } from './ui/ChatList'
 import { Composer } from './ui/Composer'
 import { ConsentDialog, type PendingSpend } from './ui/ConsentDialog'
-import { Gallery } from './ui/Gallery'
+import { Gallery, type GalleryTab } from './ui/Gallery'
 import { Marketplace } from './ui/Marketplace'
 import { ThemeToggle } from './ui/ThemeToggle'
 import {
@@ -107,6 +107,26 @@ export function App() {
   const [activeId, setActiveId] = useState<string | null>(() => loadConversations()[0]?.id ?? null)
   const [turnsRestored, setTurnsRestored] = useState(false)
   const [view, setView] = useState<'chat' | 'marketplace' | 'gallery'>('chat')
+  /**
+   * Which gallery tab is showing. Lifted here so it survives leaving the gallery and coming
+   * back — a tab that silently resets makes the other pane feel like it was not really there.
+   *
+   * Defaults to the showcase: an empty "your creations" is what every new visitor has, and
+   * landing on an empty page is what makes someone leave.
+   */
+  const [galleryTab, setGalleryTab] = useState<GalleryTab>('showcase')
+  /**
+   * Text pushed INTO the composer from elsewhere — currently a showcase prompt.
+   *
+   * A counter rides along with the text so that sending the same prompt twice still lands.
+   * Without it, setting the identical string is a no-op to React and the second attempt does
+   * nothing, which reads as a broken button.
+   */
+  const [draft, setDraftState] = useState<{ text: string; n: number } | null>(null)
+  const setDraft = useCallback(
+    (text: string) => setDraftState((d) => ({ text, n: (d?.n ?? 0) + 1 })),
+    [],
+  )
   const [gallery, setGallery] = useState<GalleryItem[]>(() => loadGallery())
   const [railOpen, setRailOpen] = useState(true)
 
@@ -971,6 +991,8 @@ export function App() {
         {view === 'gallery' ? (
           <Gallery
             items={gallery}
+            tab={galleryTab}
+            onTab={setGalleryTab}
             onRemove={(id) =>
               setGallery((g) => {
                 const next = removeFromGallery(g, id)
@@ -978,6 +1000,20 @@ export function App() {
                 return next
               })
             }
+            /**
+             * Loads a showcase prompt into the composer instead of running it.
+             *
+             * Deliberately NOT run-on-click. These prompts carry
+             * `{argument name="…" default="…"}` markers where their author expected an edit, and
+             * a one-click run would charge for a verbatim reproduction of someone else's example
+             * before the user had a chance to change the headline. So the prompt lands in the box,
+             * in the right mode, and the existing consent dialog still asks before any money moves.
+             */
+            onUsePrompt={(prompt, promptMode) => {
+              setView('chat')
+              setMode(promptMode)
+              setDraft(prompt)
+            }}
           />
         ) : view === 'marketplace' ? (
           <Marketplace
@@ -1004,6 +1040,7 @@ export function App() {
                 if (mode !== 'chat') setGenOptions((prev) => ({ ...prev, [mode]: o }))
               }}
               onSend={send}
+              draft={draft}
             />
           </>
         )}

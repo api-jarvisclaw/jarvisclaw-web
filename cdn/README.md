@@ -24,6 +24,7 @@ made it *look* unused, and both are benign:
 | `/media/<key>` | GET, HEAD | read-through cache. R2 miss fetches `blockrun.ai/api/<key>`, stores it, serves it |
 | `/gallery` | POST | copies one artifact into permanent storage. Body: `{"source": "https://…"}` |
 | `/gallery/<key>` | GET, HEAD | serves a stored artifact. No upstream fallback — we were the only copy |
+| `/showcase/<key>` | GET, HEAD | serves a curated prompt-gallery asset. Read-only, no write door at all |
 
 ## Why `/gallery` copies from a URL instead of accepting bytes
 
@@ -58,9 +59,21 @@ paid image gone with no explanation. It is also why the bucket read as empty.
 Replaced with a prefix-scoped rule:
 
 ```
-media-cache-1d    prefix media/    expire after 1 day     # cache, still disposable
-(none)            prefix gallery/  never expires          # paid artifacts, kept
+media-cache-1d    prefix media/     expire after 1 day    # cache, still disposable
+(none)            prefix gallery/   never expires         # paid artifacts, kept
+(none)            prefix showcase/  never expires         # curated examples, kept
 ```
+
+Verified live rather than assumed — `wrangler r2 bucket lifecycle list jarvisclaw-media` returns
+only `media-cache-1d` (prefix `media/`) plus R2's default multipart-abort rule. So **the 24-hour
+expiry applies to the cache alone**; nothing a user paid for and nothing in the prompt gallery is
+on a clock.
+
+There is a *separate* 24 hours worth knowing, because it is easy to confuse with this one: the
+gateway's own async job store keeps a generation's RESULT for 24h (`ColdTTL` in
+`relay/channel/blockrun/handler_video.go`). That is how long the gateway can still hand you a
+finished job you never collected — unrelated to how long the stored file survives, which is
+forever once `/gallery` has copied it.
 
 Applied with:
 
@@ -70,6 +83,23 @@ wrangler r2 bucket lifecycle remove jarvisclaw-media --name auto-cleanup
 ```
 
 **Do not re-add an all-prefixes expiry.** It would silently delete everything in every gallery.
+
+## The showcase prefix
+
+`showcase/` holds the 32 prompt-gallery assets, uploaded once by `upload-showcase.ps1`. They are
+copied to our own R2 rather than hotlinked for two independent reasons, both measured:
+
+- the app's CSP allows images from `self`, `data:` and `https:` — but a third-party host also
+  needs to permit hotlinking, and nothing guarantees franklin.run will keep those paths;
+- `POST /gallery` refuses the source outright: `403 {"error":"source host franklin.run is not
+  allowed"}`. That allowlist is doing its job; it is not a bug to route around.
+
+The upload script is PowerShell, not sh. Running the sh version through Git Bash on Windows
+resolves `wrangler` to the npm shim under a `/mnt/c` path whose bundled workerd binary does not
+exist for that platform, and it dies inside `generateBinPath` with a stack trace that names
+nothing relevant. The script also must NOT use `$ErrorActionPreference = 'Stop'`: wrangler writes
+a proxy warning to stderr on every call, Windows PowerShell wraps native stderr in ErrorRecords,
+and the first one aborts the loop after a single file.
 
 ## Deploy
 

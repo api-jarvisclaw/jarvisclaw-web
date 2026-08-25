@@ -8,3 +8,8 @@ probe/*.png
 # writes to without --remote. Machine-local scratch, not shared state.
 .wrangler/
 probe/*.json
+
+# The prompt-gallery media (7.9 MB of jpg/mp4). Deliberately NOT committed: R2 is where these
+# actually live and are served from, and a git object is permanent even after a delete. Refetch
+# with cdn/fetch-showcase.py if the upload ever has to be repeated.
+cdn/showcase/

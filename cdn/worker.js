@@ -128,7 +128,21 @@ export default {
 
     const isMedia = url.pathname.startsWith('/media/')
     const isGallery = url.pathname.startsWith('/gallery/')
-    if (!isMedia && !isGallery) {
+    /**
+     * `/showcase/…` — the curated prompt-gallery assets.
+     *
+     * A third prefix rather than reusing either of the others, because the three have different
+     * lifetimes and only the prefix distinguishes them to the lifecycle rules:
+     *
+     *   media/     expires after 1 day. It is a cache; anything lost is refetched.
+     *   gallery/   never expires. Media a user paid for.
+     *   showcase/  never expires. These examples, which must never render as broken thumbnails.
+     *
+     * Read-only, and deliberately with no write door of any kind: these are curated, uploaded by
+     * cdn/upload-showcase.sh, and there is no case where a browser should be able to add one.
+     */
+    const isShowcase = url.pathname.startsWith('/showcase/')
+    if (!isMedia && !isGallery && !isShowcase) {
       return new Response('Not Found', { status: 404, headers: CORS })
     }
     if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -150,10 +164,10 @@ export default {
         return new Response(request.method === 'HEAD' ? null : cached.body, { status: 200, headers })
       }
 
-      // A gallery object that is not in R2 is simply gone — there is no upstream to fall back
-      // to, because we were the only copy. Falling through to the origin fetch below would
-      // ask blockrun.ai for a key it never had and return a confusing 404 from there.
-      if (isGallery) {
+      // A gallery or showcase object that is not in R2 is simply gone — there is no upstream to
+      // fall back to, because we are the only copy. Falling through to the origin fetch below
+      // would ask blockrun.ai for a key it never had and return a confusing 404 from there.
+      if (isGallery || isShowcase) {
         return new Response('Not Found', { status: 404, headers: CORS })
       }
 

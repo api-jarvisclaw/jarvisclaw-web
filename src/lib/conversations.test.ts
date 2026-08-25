@@ -169,7 +169,7 @@ describe('search', () => {
   it('does not crash on turns without text', () => {
     const withMedia = [
       conv('m', 'a picture', 1, [
-        { kind: 'media', media: 'image', prompt: 'a red cube', model: 'x', spentUsd: 0.06 },
+        { kind: 'media', id: 'm1', media: 'image', prompt: 'a red cube', model: 'x', spentUsd: 0.06 },
       ]),
     ]
     expect(() => search(withMedia, 'cube')).not.toThrow()

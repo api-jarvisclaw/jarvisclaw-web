@@ -293,17 +293,30 @@ export function App() {
     [baseUrl, confirmSpend, settings.perSignatureUsd, wallet],
   )
 
-  /** Rewrites one media turn in place, by index. */
+  /**
+   * Rewrites one media turn in place, found by its own id.
+   *
+   * By id rather than by array index, and that is not tidiness. A minutes-long wait now runs
+   * detached, so by the time it lands the user may have sent more messages or opened another
+   * conversation. An index into a REPLACED array can still point at a media turn — one
+   * belonging to a different conversation — and the guard "is it a media turn" would happily
+   * pass. It would then write the video into that turn and persist the wrong conversation's
+   * transcript under this conversation's id, destroying both.
+   *
+   * An id cannot be mistaken for another turn. If it is not found, nothing happens, which is
+   * the correct outcome for a conversation the user has since deleted.
+   */
   const patchMediaTurn = useCallback(
-    (index: number, convId: string, patch: Partial<Extract<Turn, { kind: 'media' }>>) => {
+    (id: string, convId: string, patch: Partial<Extract<Turn, { kind: 'media' }>>) => {
+      // An empty id matches nothing. Conversations saved before turns carried ids reload with
+      // `id: undefined`, and a bare `turn.id === id` comparison would pair every one of them
+      // with the first patch that arrived — writing a new video into an old turn.
+      if (id === '') return
       setTurns((t) => {
-        const target = t[index]
-        // Guarded rather than assumed: a conversation switch between the poll starting and
-        // this landing would otherwise write a video's result into whatever turn now sits at
-        // that index. The wait outlives the render that began it.
-        if (!target || target.kind !== 'media') return t
+        const index = t.findIndex((turn) => turn.kind === 'media' && turn.id === id)
+        if (index === -1) return t
         const next = [...t]
-        next[index] = { ...target, ...patch }
+        next[index] = { ...(t[index] as Extract<Turn, { kind: 'media' }>), ...patch }
         persist(convId, next, history.current)
         return next
       })
@@ -320,7 +333,7 @@ export function App() {
    */
   const settleMedia = useCallback(
     async (
-      index: number,
+      turnId: string,
       kind: GenerationKind,
       media: GenerationResult,
       prompt: string,
@@ -352,7 +365,7 @@ export function App() {
         })
       }
 
-      patchMediaTurn(index, convId, {
+      patchMediaTurn(turnId, convId, {
         url: shownUrl,
         b64: media.b64,
         raw: media.raw,
@@ -373,7 +386,7 @@ export function App() {
    */
   const waitForJob = useCallback(
     async (
-      index: number,
+      turnId: string,
       kind: GenerationKind,
       job: AsyncJob,
       prompt: string,
@@ -381,26 +394,37 @@ export function App() {
       quoted: number,
       convId: string,
     ) => {
-      const outcome = await awaitJob(kind, job, {
-        baseUrl,
-        onTick: (elapsedMs) => patchMediaTurn(index, convId, { waitedMs: elapsedMs }),
-      })
-
-      if (outcome.state === 'done') {
-        await settleMedia(index, kind, outcome.media, prompt, usedModel, quoted, convId)
-        return
-      }
-      if (outcome.state === 'failed') {
-        patchMediaTurn(index, convId, {
-          failed: { message: outcome.message, retryable: outcome.retryable },
-          job: undefined,
+      // Wrapped because the caller no longer awaits this: an unhandled rejection here would
+      // leave the turn spinning forever with the reason only in the console. The turn has to
+      // reach a settled state whatever happens, because the user has already been charged.
+      try {
+        const outcome = await awaitJob(kind, job, {
+          baseUrl,
+          onTick: (elapsedMs) => patchMediaTurn(turnId, convId, { waitedMs: elapsedMs }),
         })
-        return
+
+        if (outcome.state === 'done') {
+          await settleMedia(turnId, kind, outcome.media, prompt, usedModel, quoted, convId)
+          return
+        }
+        if (outcome.state === 'failed') {
+          patchMediaTurn(turnId, convId, {
+            failed: { message: outcome.message, retryable: outcome.retryable },
+            job: undefined,
+          })
+          return
+        }
+        // Still pending at the deadline. The job is very likely still running — the gateway
+        // allows itself 900s upstream — so the turn keeps its id and says so, rather than
+        // claiming a failure that has not happened.
+        patchMediaTurn(turnId, convId, { timedOut: true })
+      } catch (err) {
+        // Reported as timed-out rather than failed: whatever broke here happened on OUR side of
+        // the wait, and says nothing about the job. It is still very likely to be running, and
+        // still retrievable from the same id.
+        patchMediaTurn(turnId, convId, { timedOut: true })
+        console.error('waiting for the generation failed', err)
       }
-      // Still pending at the deadline. The job is very likely still running — the gateway
-      // allows itself 900s upstream — so the turn keeps its id and says so, rather than
-      // claiming a failure that has not happened.
-      patchMediaTurn(index, convId, { timedOut: true })
     },
     [baseUrl, patchMediaTurn, settleMedia],
   )
@@ -517,33 +541,44 @@ export function App() {
         // A media turn is placed on screen immediately, even with nothing to show yet. A
         // queued video takes minutes, and the alternative is a page that looks idle while a
         // paid job runs — which is what makes someone reload and lose the job id.
-        const turnIndex = await new Promise<number>((resolve) => {
-          setTurns((t) => {
-            resolve(t.length)
-            const next: Turn[] = [
-              ...t,
-              {
-                kind: 'media',
-                media: kind,
-                prompt,
-                model: useModel,
-                spentUsd: quoted,
-                job: media.job,
-                raw: media.job ? undefined : media.raw,
-              },
-            ]
-            persist(convId, next, history.current)
-            return next
-          })
+        const turnId = newId()
+        setTurns((t) => {
+          const next: Turn[] = [
+            ...t,
+            {
+              kind: 'media',
+              id: turnId,
+              media: kind,
+              prompt,
+              model: useModel,
+              spentUsd: quoted,
+              job: media.job,
+              raw: media.job ? undefined : media.raw,
+            },
+          ]
+          persist(convId, next, history.current)
+          return next
         })
 
         // Synchronous result (images, speech): already in hand, nothing to wait for.
         if (!media.job) {
-          await settleMedia(turnIndex, kind, media, prompt, useModel, quoted, convId)
+          await settleMedia(turnId, kind, media, prompt, useModel, quoted, convId)
           return
         }
 
-        await waitForJob(turnIndex, kind, media.job, prompt, useModel, quoted, convId)
+        // NOT awaited, deliberately.
+        //
+        // Awaiting it held `busy` for the entire poll — up to 5 minutes for music and video —
+        // so the composer stayed disabled after a successful payment. Measured: send was still
+        // disabled 18 seconds in, on a wait that runs for 300. From the outside that is
+        // indistinguishable from a page that took the money and died, which is exactly how it
+        // was reported: "I paid and there's no reaction."
+        //
+        // The payment is what this call is busy with, and the payment is done. The wait updates
+        // its own turn by index as it goes, so letting it run detached costs nothing and gives
+        // the page back. A second generation started meanwhile appends its own turn and polls
+        // its own job.
+        void waitForJob(turnId, kind, media.job, prompt, useModel, quoted, convId)
       } catch (err) {
         setTurns((t) => [
           ...t,

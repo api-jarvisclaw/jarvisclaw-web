@@ -23,13 +23,16 @@ import {
 import { DEFAULT_BASE_URL, FREE_MODEL, type ChatMessage, type Credential } from './lib/gateway'
 import type { Account } from './lib/account'
 import {
+  awaitJob,
   challengeGeneration,
   DEFAULT_OPTIONS,
   GENERATIONS,
   generate,
   modeForModel,
+  type AsyncJob,
   type GenerationKind,
   type GenerationOptions as GenOptions,
+  type GenerationResult,
 } from './lib/modality'
 import { ModelRouter } from './lib/route'
 import {
@@ -290,6 +293,118 @@ export function App() {
     [baseUrl, confirmSpend, settings.perSignatureUsd, wallet],
   )
 
+  /** Rewrites one media turn in place, by index. */
+  const patchMediaTurn = useCallback(
+    (index: number, convId: string, patch: Partial<Extract<Turn, { kind: 'media' }>>) => {
+      setTurns((t) => {
+        const target = t[index]
+        // Guarded rather than assumed: a conversation switch between the poll starting and
+        // this landing would otherwise write a video's result into whatever turn now sits at
+        // that index. The wait outlives the render that began it.
+        if (!target || target.kind !== 'media') return t
+        const next = [...t]
+        next[index] = { ...target, ...patch }
+        persist(convId, next, history.current)
+        return next
+      })
+    },
+    [persist],
+  )
+
+  /**
+   * Archives finished media and puts it on screen.
+   *
+   * Shared by both paths — media that arrived inline and media that arrived after a wait —
+   * so a video does not miss the gallery just because it took the slow road. That was the
+   * original defect's second half: nothing downstream of the receipt ever ran.
+   */
+  const settleMedia = useCallback(
+    async (
+      index: number,
+      kind: GenerationKind,
+      media: GenerationResult,
+      prompt: string,
+      usedModel: string,
+      quoted: number,
+      convId: string,
+    ) => {
+      // Archived to R2 first, so the gallery holds a permanent URL rather than the upstream's
+      // temporary one — a $1.14 video whose link expires overnight is a receipt for nothing.
+      // Returns null on failure and the original URL is used: losing the archive must not
+      // lose the media the user just paid for.
+      const stored = media.url ? await archive(media.url) : null
+      const shownUrl = stored ?? media.url
+
+      if (shownUrl) {
+        const item: GalleryItem = {
+          id: newId(),
+          kind,
+          url: shownUrl,
+          prompt,
+          model: usedModel,
+          usd: quoted,
+          createdAt: Date.now(),
+        }
+        setGallery((g) => {
+          const next = addToGallery(g, item)
+          saveGallery(next)
+          return next
+        })
+      }
+
+      patchMediaTurn(index, convId, {
+        url: shownUrl,
+        b64: media.b64,
+        raw: media.raw,
+        job: undefined,
+        timedOut: false,
+      })
+    },
+    [patchMediaTurn],
+  )
+
+  /**
+   * Waits out a queued generation, keeping the turn updated as it goes.
+   *
+   * Runs after the charge has already happened, which sets the priority: every branch here
+   * must leave the user able to reach media they have paid for. So a client-side timeout
+   * keeps the job id on screen rather than clearing the turn, and an upstream failure is
+   * reported in the provider's own words instead of a generic error.
+   */
+  const waitForJob = useCallback(
+    async (
+      index: number,
+      kind: GenerationKind,
+      job: AsyncJob,
+      prompt: string,
+      usedModel: string,
+      quoted: number,
+      convId: string,
+    ) => {
+      const outcome = await awaitJob(kind, job, {
+        baseUrl,
+        onTick: (elapsedMs) => patchMediaTurn(index, convId, { waitedMs: elapsedMs }),
+      })
+
+      if (outcome.state === 'done') {
+        await settleMedia(index, kind, outcome.media, prompt, usedModel, quoted, convId)
+        return
+      }
+      if (outcome.state === 'failed') {
+        patchMediaTurn(index, convId, {
+          failed: { message: outcome.message, retryable: outcome.retryable },
+          job: undefined,
+        })
+        return
+      }
+      // Still pending at the deadline. The job is very likely still running — the gateway
+      // allows itself 900s upstream — so the turn keeps its id and says so, rather than
+      // claiming a failure that has not happened.
+      patchMediaTurn(index, convId, { timedOut: true })
+    },
+    [baseUrl, patchMediaTurn, settleMedia],
+  )
+
   /** Generation (image/video/music): quote, ask, then run. */
   const runGeneration = useCallback(
     async (kind: GenerationKind, prompt: string, convId: string) => {
@@ -399,47 +514,36 @@ export function App() {
         tracker.current.record(spec.label, quoted)
         setSpendVersion((v) => v + 1)
 
-        // Archived to R2 before rendering, so the gallery holds a permanent URL rather than the
-        // upstream's temporary one — a $1.14 video whose link expires overnight is a receipt for
-        // nothing. Returns null on failure, and the original URL is used instead: losing the
-        // archive must not lose the media the user just paid for.
-        const stored = media.url ? await archive(media.url) : null
-        const shownUrl = stored ?? media.url
-
-        if (shownUrl) {
-          const item: GalleryItem = {
-            id: newId(),
-            kind,
-            url: shownUrl,
-            prompt,
-            model: useModel,
-            usd: quoted,
-            createdAt: Date.now(),
-          }
-          setGallery((g) => {
-            const next = addToGallery(g, item)
-            saveGallery(next)
+        // A media turn is placed on screen immediately, even with nothing to show yet. A
+        // queued video takes minutes, and the alternative is a page that looks idle while a
+        // paid job runs — which is what makes someone reload and lose the job id.
+        const turnIndex = await new Promise<number>((resolve) => {
+          setTurns((t) => {
+            resolve(t.length)
+            const next: Turn[] = [
+              ...t,
+              {
+                kind: 'media',
+                media: kind,
+                prompt,
+                model: useModel,
+                spentUsd: quoted,
+                job: media.job,
+                raw: media.job ? undefined : media.raw,
+              },
+            ]
+            persist(convId, next, history.current)
             return next
           })
+        })
+
+        // Synchronous result (images, speech): already in hand, nothing to wait for.
+        if (!media.job) {
+          await settleMedia(turnIndex, kind, media, prompt, useModel, quoted, convId)
+          return
         }
 
-        setTurns((t) => {
-          const next: Turn[] = [
-            ...t,
-            {
-              kind: 'media',
-              media: kind,
-              url: shownUrl,
-              b64: media.b64,
-              raw: media.raw,
-              prompt,
-              model: useModel,
-              spentUsd: quoted,
-            },
-          ]
-          persist(convId, next, history.current)
-          return next
-        })
+        await waitForJob(turnIndex, kind, media.job, prompt, useModel, quoted, convId)
       } catch (err) {
         setTurns((t) => [
           ...t,
@@ -456,7 +560,9 @@ export function App() {
       model,
       models,
       persist,
+      settleMedia,
       settings.perSignatureUsd,
+      waitForJob,
       wallet,
     ],
   )

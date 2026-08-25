@@ -34,6 +34,22 @@ export type Turn =
       prompt: string
       model: string
       spentUsd: number
+      /**
+       * Set while the media is still being generated upstream.
+       *
+       * Video generation is asynchronous: the POST returns a receipt and the clip arrives
+       * minutes later. Without this the turn had nowhere to say "still coming", so a paid
+       * video rendered as "returned no media we could read" — a permanent-looking failure
+       * for a job that was working. The job id is kept because it stays valid afterwards:
+       * the media is retrievable long after this tab stopped waiting.
+       */
+      job?: { id: string; pollUrl: string }
+      /** Wall-clock spent waiting so far, so a long wait shows progress. */
+      waitedMs?: number
+      /** Set once waiting ended without media, distinguishing "gave up" from "never started". */
+      timedOut?: boolean
+      /** A terminal upstream failure, with the provider's own wording. */
+      failed?: { message: string; retryable: boolean }
     }
 
 /**
@@ -170,7 +186,30 @@ function MediaView({ turn }: { turn: Extract<Turn, { kind: 'media' }> }) {
           <span className="price">${turn.spentUsd.toFixed(6)}</span>
         </div>
 
-        {src === undefined ? (
+        {src === undefined && turn.failed ? (
+          <p className="media-missing">
+            {turn.failed.message}
+            {turn.failed.retryable ? ' You can try again.' : null}
+          </p>
+        ) : src === undefined && turn.job ? (
+          // A wait, not a failure. Says which second it is on, because a video takes minutes
+          // and a bare spinner for that long reads as broken — the reload that follows is how
+          // a job id gets lost.
+          <p className="media-waiting">
+            <LoaderIcon className="tool-glyph is-spinning" size={13} aria-hidden="true" />
+            {turn.timedOut ? (
+              <span>
+                Still generating after {Math.round((turn.waitedMs ?? 0) / 1000)}s. It keeps
+                running on the server — check again in a minute.
+              </span>
+            ) : (
+              <span>
+                Generating{turn.waitedMs ? ` · ${Math.round(turn.waitedMs / 1000)}s` : null} · you
+                have already paid, so leaving this tab open is all that is needed.
+              </span>
+            )}
+          </p>
+        ) : src === undefined ? (
           <p className="media-missing">
             The call completed but returned no media we could read.
             {turn.raw ? <code className="media-raw">{turn.raw}</code> : null}

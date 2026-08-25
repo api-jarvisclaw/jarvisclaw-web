@@ -272,9 +272,48 @@ describe('the origin guard', () => {
 describe('the links point at real pages', () => {
   it('sends people to the platform, not to a form on this page', () => {
     // Load-bearing, and the reason there is no password field in this app: a page that asks for
-    // platform credentials teaches users that any page may ask for them. Both URLs were checked
-    // to answer 200 on production.
-    expect(SIGN_IN_URL).toBe('https://api.jarvisclaw.ai/en/login')
-    expect(KEYS_URL).toBe('https://api.jarvisclaw.ai/en/keys')
+    // platform credentials teaches users that any page may ask for them.
+    expect(SIGN_IN_URL.startsWith('https://api.jarvisclaw.ai/')).toBe(true)
+    expect(KEYS_URL.startsWith('https://api.jarvisclaw.ai/')).toBe(true)
+  })
+
+  it('uses /en/sign-in, the route that exists', () => {
+    // I shipped /en/login and "verified" it by checking for a 200. That proves nothing about an
+    // SPA — the host serves index.html for every path, so a nonsense URL answers 200 too. In a
+    // browser, /en/login renders "Not Found", identical to /en/nonsense-xyz, while /en/sign-in
+    // renders a real form.
+    //
+    // Pinned as a substring rather than a full literal because the previous full-literal
+    // assertion was itself the wrong URL: it asserted exactly what the code said, so it could
+    // only ever confirm the typo. What matters is the path segment.
+    expect(SIGN_IN_URL).toContain('/en/sign-in')
+    expect(SIGN_IN_URL).not.toContain('/en/login')
+  })
+
+  it('carries the redirect the console itself uses', () => {
+    // Visiting /en/keys unauthenticated bounces to /en/sign-in?redirect=%2Fen%2Fkeys, so passing
+    // the same parameter lands the user on their keys instead of a dashboard to hunt through.
+    expect(SIGN_IN_URL).toContain('redirect=%2Fen%2Fkeys')
+  })
+
+  it('names no route this repo cannot verify exists', () => {
+    // The only durable check available offline: every path referenced here must correspond to a
+    // route file in the console. A status-code check cannot do this, and that gap is what let
+    // /en/login ship.
+    for (const url of [SIGN_IN_URL, KEYS_URL]) {
+      const path = new URL(url).pathname
+      expect(KNOWN_CONSOLE_ROUTES).toContain(path)
+    }
   })
 })
+
+/**
+ * Console routes confirmed to render real pages, both by file and in a browser.
+ *
+ *   src/routes/{-$lang}/(auth)/sign-in.tsx        -> /en/sign-in
+ *   src/routes/{-$lang}/_authenticated/keys/      -> /en/keys
+ *
+ * Anything not on this list has not been checked. Adding a path here without confirming the route
+ * exists reproduces exactly the bug this list exists to prevent.
+ */
+const KNOWN_CONSOLE_ROUTES = ['/en/sign-in', '/en/keys']

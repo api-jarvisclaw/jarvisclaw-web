@@ -266,7 +266,25 @@ export async function signOut(opts: { baseUrl?: string; userId: number } = { use
 }
 
 /** Where a visitor goes to sign in, or to make a key. Both are real pages on the platform. */
-export const SIGN_IN_URL = `${DEFAULT_BASE_URL}/en/login`
+/**
+ * The console's real auth and key pages.
+ *
+ * `/en/sign-in`, NOT `/en/login`. I shipped `/en/login` and "verified" it by checking that it
+ * answered 200 — which proves nothing about an SPA, because the static host serves index.html
+ * for every path. Checked properly in a browser:
+ *
+ *   /en/sign-in       -> renders a form (1 password input)
+ *   /en/login         -> renders "Not Found"
+ *   /en/nonsense-xyz  -> renders "Not Found"      <- indistinguishable from /en/login
+ *
+ * A status code cannot tell a real route from a client-side 404. The route files are the other
+ * source of truth: `src/routes/{-$lang}/(auth)/sign-in.tsx` exists and no login.tsx does.
+ *
+ * The redirect parameter is the console's own: visiting /en/keys unauthenticated bounces to
+ * `/en/sign-in?redirect=%2Fen%2Fkeys`, so passing it sends the user straight to their keys after
+ * signing in rather than dropping them on a dashboard to find them.
+ */
+export const SIGN_IN_URL = `${DEFAULT_BASE_URL}/en/sign-in?redirect=%2Fen%2Fkeys`
 export const KEYS_URL = `${DEFAULT_BASE_URL}/en/keys`
 
 /**

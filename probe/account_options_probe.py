@@ -283,6 +283,41 @@ async def main() -> int:
             if "Ada L" not in back:
                 failures.append("the re-check button did not pick the session back up")
 
+        # Signed out again first: the panel only renders the sign-in link in that state, so
+        # checking it while signed in would find nothing and report a link that is correctly
+        # absent. Sign out is the last thing step 8 does, so this reads the signed-out panel.
+        await page.click(".panel-btn-quiet:has-text('Sign out')")
+        await page.wait_for_timeout(600)
+
+        print("== 9. the sign-in link actually leads to a sign-in form ==")
+        # This exists because a dead link shipped. I hardcoded /en/login and "verified" it by
+        # checking for a 200 — worthless against an SPA, which serves index.html for every path,
+        # so a nonsense URL answers 200 too. The route is /en/sign-in; /en/login rendered
+        # "Not Found", indistinguishable from /en/nonsense-xyz.
+        #
+        # So the check is: follow the link the page actually renders, and require that what comes
+        # back is a real form rather than a client-side 404.
+        signin_page = await ctx.new_page()
+        try:
+            href = await page.get_attribute("a.panel-btn", "href")
+            print(f"   rendered href: {href}")
+            if not href:
+                failures.append("the panel renders no sign-in link")
+            else:
+                await signin_page.goto(href, wait_until="networkidle")
+                await signin_page.wait_for_timeout(2500)
+                text = await signin_page.inner_text("body")
+                pw = await signin_page.locator("input[type=password]").count()
+                notfound = "not found" in text[:200].lower()
+                print(f"   password inputs: {pw}   renders Not Found: {notfound}")
+                if pw == 0:
+                    failures.append(f"the sign-in link leads to a page with no password field: {href}")
+                if notfound:
+                    failures.append(f"the sign-in link leads to a client-side 404: {href}")
+        finally:
+            await signin_page.close()
+
+
         await browser.close()
 
     print()

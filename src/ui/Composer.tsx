@@ -9,7 +9,7 @@ import {
   type GenerationOptions as GenOptions,
 } from '../lib/modality'
 import { GenerationOptions } from './GenerationOptions'
-import { ModelPicker } from './ModelPicker'
+import { effectiveModel, ModelPicker } from './ModelPicker'
 
 /**
  * Mode icons, from lucide-react — the same library the main site uses in 340 files.
@@ -66,10 +66,9 @@ export function Composer({
   const picked = models.find((m) => m.model === model)
   const routed = picked ? modeForModel(picked.model, picked.modality) : null
 
-  // In a generation mode, the picked model is only used if it can serve that mode; otherwise
-  // the mode's verified default wins. Shown rather than applied silently.
-  const effectiveModel =
-    mode !== 'chat' && routed !== mode ? GENERATIONS[mode].defaultModel : model
+  // Shared with the picker rather than recomputed here. Two copies of this rule is how the
+  // trigger came to show one model while the hint below it named another.
+  const effective = effectiveModel(models, model, mode)
 
   const submit = () => {
     if (busy || text.trim() === '') return
@@ -118,6 +117,7 @@ export function Composer({
             models={models}
             selected={model}
             loading={modelsLoading}
+            mode={mode}
             onSelect={onModel}
           />
 
@@ -164,10 +164,14 @@ export function Composer({
         {mode !== 'chat' ? (
           <>
             {`${GENERATIONS[mode].label} is paid per ${GENERATIONS[mode].unit} — one price, one signature. You'll see the exact amount before anything is spent.`}
-            {/* Named explicitly, because the mode's own default silently overrides the
-                picker when the picked model is a chat model. Leaving that implicit is how
-                someone concludes their choice was ignored. */}
-            <span className="hint-model"> Using {effectiveModel}.</span>
+            {/* Only when the default took over, and phrased as an offer rather than a notice.
+                The picker itself now shows the model that will run, so repeating the name
+                here unconditionally was the interface talking about its own state instead of
+                the user's next move — and when the two disagreed, this small print was the
+                only place the truth appeared. */}
+            {effective !== model && (
+              <span className="hint-model"> Picked {effective} for you — change it above.</span>
+            )}
           </>
         ) : routed !== null ? (
           // The picker offers image, video and audio models, and choosing one used to change

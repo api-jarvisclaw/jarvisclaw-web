@@ -27,6 +27,15 @@ export type Turn =
    */
   | {
       kind: 'media'
+      /**
+       * Stable identity for this turn.
+       *
+       * A generation's wait runs detached and can land minutes later, after more messages have
+       * been sent or another conversation opened. Locating the turn by array index would let a
+       * result be written into a different conversation's turn that happens to sit at the same
+       * position — so the turn carries its own id and the update finds it by that.
+       */
+      id: string
       media: 'image' | 'video' | 'music' | 'speech'
       url?: string
       b64?: string

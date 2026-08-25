@@ -8,6 +8,18 @@
       name="description"
       content="A browser agent with its own wallet. 4000+ APIs and 80+ models, paid per call over x402."
     />
+    <!--
+      Sets the theme class BEFORE first paint.
+
+      Doing this only in React would render one frame with the default theme and then swap —
+      the flash of the wrong colours that gives away a bolted-on theme. It has to be a blocking
+      inline script in <head>, which is why it duplicates a few lines of lib/theme.ts rather
+      than importing them: the module graph has not loaded yet at this point.
+
+      It is `src` in dev and inlined by the build, so it is covered by `script-src 'self'` and
+      needs no CSP exemption.
+    -->
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

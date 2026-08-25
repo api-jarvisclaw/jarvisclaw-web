@@ -19,11 +19,60 @@ import { describe, expect, it } from 'vitest'
 
 const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
 
-function token(name: string): string {
-  // Last definition wins, matching the cascade for repeated custom properties.
-  const matches = [...css.matchAll(new RegExp(`${name}:\\s*([^;]+);`, 'g'))]
-  if (matches.length === 0) throw new Error(`token ${name} not found in styles.css`)
-  return matches[matches.length - 1][1].trim()
+/**
+ * Isolates one theme's declarations.
+ *
+ * There are now two palettes — `:root` for light and `.dark` for dark — and this was the trap.
+ * The original reader took the LAST definition of a token, which is correct for a single-theme
+ * file and silently wrong for two: every check would have measured the dark values only, and the
+ * light theme (the DEFAULT, which is what most visitors see) would have gone untested while the
+ * suite stayed green.
+ */
+function themeBlock(theme: 'light' | 'dark'): string {
+  const selector = theme === 'light' ? ':root' : '\\.dark'
+  const matches = [...css.matchAll(new RegExp(`${selector}\\s*\\{([\\s\\S]*?)\\n\\}`, 'g'))]
+  if (matches.length === 0) throw new Error(`no ${theme} block found in styles.css`)
+  // Concatenated because a theme may be declared across more than one block.
+  return matches.map((m) => m[1]).join('\n')
+}
+
+function token(name: string, theme: 'light' | 'dark' = 'dark'): string {
+  const block = themeBlock(theme)
+  const matches = [...block.matchAll(new RegExp(`${name}:\\s*([^;]+);`, 'g'))]
+  if (matches.length === 0) {
+    // Falling back to the light block is correct rather than lenient: .dark only redeclares what
+    // differs, so a token it omits is genuinely inherited from :root.
+    if (theme === 'dark') return token(name, 'light')
+    throw new Error(`token ${name} not found in the ${theme} block of styles.css`)
+  }
+  // Resolved here rather than at each call site, so a token expressed as a mix is measurable
+  // exactly like a literal one. Returns the value unchanged when it is not a mix.
+  return resolveMix(matches[matches.length - 1][1].trim(), theme)
+}
+
+/**
+ * Resolves a `color-mix(in oklch, var(--x) N%, white|black)` into a plain oklch colour.
+ *
+ * Needed because the per-theme status-text tokens are expressed as mixes, and those are exactly
+ * the values that have to be measured — the raw status colours are chosen to work as fills, not
+ * as text. Interpolating in Oklab is what the browser does for `in oklch`, so mixing lightness
+ * and chroma linearly toward L=1 (white) or L=0 (black) matches it closely enough for a
+ * threshold check; the numbers below were cross-checked against the browser's own rendering via
+ * probe/theme_compare.py.
+ */
+function resolveMix(value: string, theme: 'light' | 'dark'): string {
+  const m = value.match(/color-mix\(in oklch,\s*var\((--[\w-]+)\)\s*([\d.]+)%,\s*(white|black)\)/i)
+  if (!m) return value
+  const base = oklchParts(token(m[1], theme))
+  const weight = Number(m[2]) / 100
+  const towardL = m[3].toLowerCase() === 'white' ? 1 : 0
+  return `oklch(${base.L * weight + towardL * (1 - weight)} ${base.C * weight} ${base.H})`
+}
+
+function oklchParts(css: string): { L: number; C: number; H: number } {
+  const nums = css.match(/oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)/i)
+  if (!nums) throw new Error(`not an oklch colour: ${css}`)
+  return { L: Number(nums[1]), C: Number(nums[2]), H: Number(nums[3]) }
 }
 
 /** oklch(L C H) -> sRGB 0..255, via Oklab and linear sRGB. */
@@ -72,48 +121,85 @@ function contrast(fg: string, bg: string): number {
 }
 
 /** Both stops of --gradient-brand. Text has to survive the worse one. */
-function gradientStops(): string[] {
-  const stops = [...token('--gradient-brand').matchAll(/oklch\([^)]*\)/g)].map((m) => m[0])
+function gradientStops(theme: Theme): string[] {
+  const stops = [...token('--gradient-brand', theme).matchAll(/oklch\([^)]*\)/g)].map((m) => m[0])
   expect(stops.length).toBeGreaterThanOrEqual(2)
   return stops
 }
 
-describe('text on the brand gradient', () => {
+type Theme = 'light' | 'dark'
+
+/**
+ * Every check runs against BOTH themes.
+ *
+ * Not thoroughness for its own sake — the light theme is the DEFAULT and was added last, so it is
+ * the one with no history of being looked at. A suite that only measured dark would have been
+ * green while the palette most visitors see went unchecked.
+ */
+const THEMES: Theme[] = ['light', 'dark']
+
+describe.each(THEMES)('text on the brand gradient (%s)', (theme) => {
   it('is readable against every stop, not just the flattering one', () => {
     // The bug this pins: a gradient's light end and dark end give very different ratios,
     // and checking the darker one alone passes a label nobody can read at the other.
-    const fg = token('--on-brand')
-    for (const stop of gradientStops()) {
+    const fg = token('--on-brand', theme)
+    for (const stop of gradientStops(theme)) {
       expect(contrast(fg, stop)).toBeGreaterThanOrEqual(4.5)
     }
   })
+})
 
-  it('would reject white, which is what shipped and failed', () => {
-    // Guards the fix rather than the symptom: white looks like the obvious choice on a
-    // saturated fill, so the next person to reach for it should see this fail. Asserting
-    // that at least one stop refuses white is the real claim — the gradient's light end
-    // is exactly where white gives out.
-    const worst = Math.min(...gradientStops().map((s) => contrast('oklch(1 0 0)', s)))
-    expect(worst).toBeLessThan(4.5)
+describe('the ink on the gradient is flipped per theme', () => {
+  it('uses dark ink on dark’s bright fill and light ink on light’s deep fill', () => {
+    // The two themes need OPPOSITE ink, and picking one for both is the mistake this catches.
+    // Dark's gradient is bright (L .62-.7) so it needs dark ink; light's is deep (L .45-.55) so
+    // it needs near-white. Asserting the wrong ink FAILS on each is what pins the flip.
+    const darkInkOnLightFill = Math.min(
+      ...gradientStops('light').map((s) => contrast(token('--on-brand', 'dark'), s)),
+    )
+    const lightInkOnDarkFill = Math.min(
+      ...gradientStops('dark').map((s) => contrast(token('--on-brand', 'light'), s)),
+    )
+    expect(darkInkOnLightFill).toBeLessThan(4.5)
+    expect(lightInkOnDarkFill).toBeLessThan(4.5)
   })
 })
 
-describe('body text', () => {
+describe.each(THEMES)('body text (%s)', (theme) => {
   it('reads against the page background', () => {
-    expect(contrast(token('--foreground'), token('--background'))).toBeGreaterThanOrEqual(4.5)
+    expect(
+      contrast(token('--foreground', theme), token('--background', theme)),
+    ).toBeGreaterThanOrEqual(4.5)
   })
 
   it('keeps muted text above the minimum too', () => {
-    // Muted is the token most likely to be nudged darker "to calm it down", and it carries
-    // real content here: the hero paragraph, the sidebar labels, the spend hints.
+    // Muted is the token most likely to be nudged "to calm it down", and it carries real
+    // content here: the hero paragraph, the sidebar labels, the spend hints.
     expect(
-      contrast(token('--muted-foreground'), token('--background')),
+      contrast(token('--muted-foreground', theme), token('--background', theme)),
     ).toBeGreaterThanOrEqual(4.5)
   })
 
   it('keeps the money colours legible on the card surface', () => {
-    // A charge and a refusal are the two lines a user must never misread.
-    expect(contrast(token('--highlight'), token('--card'))).toBeGreaterThanOrEqual(4.5)
-    expect(contrast(token('--success'), token('--card'))).toBeGreaterThanOrEqual(4.5)
+    // A charge and a refusal are the two lines a user must never misread. These use the
+    // per-theme *-text tokens rather than the raw fill colours, because a status colour picked
+    // to work as a swatch is not the same one that reads as text.
+    expect(
+      contrast(token('--highlight-text', theme), token('--card', theme)),
+    ).toBeGreaterThanOrEqual(4.5)
+    expect(
+      contrast(token('--success-text', theme), token('--card', theme)),
+    ).toBeGreaterThanOrEqual(4.5)
+    expect(
+      contrast(token('--destructive-text', theme), token('--card', theme)),
+    ).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('keeps sidebar text legible on the sidebar surface', () => {
+    // The sidebar has its own background token, so a palette that works on --background can
+    // still fail here — and the wallet address and balance live in it.
+    expect(
+      contrast(token('--sidebar-foreground', theme), token('--sidebar', theme)),
+    ).toBeGreaterThanOrEqual(4.5)
   })
 })

@@ -144,6 +144,12 @@ async def main() -> int:
             "err_network_changed",
             "err_connection_reset",
             "cloudflareinsights",
+            # A 401 from the session check is the CORRECT response for a visitor who is not
+            # signed in, and the browser logs every non-2xx as a console error regardless. It is
+            # only reachable at all because the gateway now returns CORS headers on it
+            # (api-server#530); before that fix it appeared as a CORS failure instead, which was
+            # a real defect. Filtered as expected rather than treated as one.
+            "status of 401",
         )
         real = [e for e in console_errors if not any(i in e.lower() for i in ignorable)]
         for e in real[:5]:

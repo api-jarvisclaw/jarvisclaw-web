@@ -26,7 +26,18 @@ URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:4188"
 
 # Cloudflare injects an analytics beacon that our own CSP refuses. That refusal is the
 # policy working; counting it would fail every run against production.
-IGNORABLE = ("favicon", "err_quic", "err_network_changed", "err_connection_reset", "cloudflareinsights")
+# "status of 401" is the session check answering for a visitor who is not signed in — the
+# correct response, which the browser still logs as an error. It only surfaces as a plain 401
+# because the gateway now sends CORS headers on it (api-server#530); before that it appeared as
+# a CORS failure, which WAS a defect.
+IGNORABLE = (
+    "favicon",
+    "err_quic",
+    "err_network_changed",
+    "err_connection_reset",
+    "cloudflareinsights",
+    "status of 401",
+)
 
 
 async def main() -> int:

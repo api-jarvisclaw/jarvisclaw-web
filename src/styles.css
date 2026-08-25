@@ -277,40 +277,67 @@ button:not(:disabled):active {
   z-index: 1;
   display: grid;
   grid-template-columns: 260px 1fr 320px;
+  /* Caps the row to the viewport, which is what pins the composer.
+   *
+   * `height: 100%` on its own was never enough. The row track was implicit, and an implicit
+   * row is `auto` — it sizes to its tallest item and overflows the height declared right
+   * below it. So a long transcript made the row 5358px tall inside a 780px window, the
+   * document scrolled, and the composer went with it, being the last child of .main.
+   *
+   * `minmax(0, 100%)` addresses both halves: `100%` caps the row, and the `0` floor is what
+   * allows the panes inside to be SHORTER than their content — the permission their own
+   * `overflow-y: auto` needs before it can do anything.
+   *
+   * MEASURED, and worth knowing before editing any of this: this rule, `overflow: hidden`
+   * below, `min-height: 0` on .main and `min-height: 0` on .transcript are REDUNDANT with one
+   * another. Removing all four fails 15 layout checks; restoring any single one passes all of
+   * them. So no one line here is "the fix", and a one-at-a-time sweep reports every one as
+   * unnecessary — which is the trap: I read such a sweep and concluded this line alone was
+   * responsible, having removed the others together and reintroduced only this one. They are
+   * kept together because each states the constraint at the level it belongs to, and because
+   * what they prevent is a chat app whose input sits four screens below the fold. */
+  grid-template-rows: minmax(0, 100%);
   height: 100%;
+  /* Clips rather than growing a document scrollbar, if a pane ever escapes the row. */
+  overflow: hidden;
 }
 
 .shell-rail-closed {
   grid-template-columns: 1fr 320px;
 }
 
-/* Two breakpoints, because the three panes stop fitting at different widths. The rail
-   goes first: on a tablet the transcript matters more than the chat list, and the rail is
-   reachable again through the toggle. */
-@media (max-width: 1200px) {
-  .shell,
-  .shell-rail-closed {
-    grid-template-columns: 1fr 300px;
-  }
-  .rail {
-    display: none;
-  }
-}
+/* The responsive rules for these panes live at the END of this file, not here.
+ *
+ * They used to sit at this point, and they did nothing. `.rail` is defined at line ~1500 and
+ * `.sidebar` at ~840 — both AFTER this block, both with the same specificity — so their own
+ * `display` won and the media query's `display: none` was simply overridden. Measured at
+ * 1180px: the rail was still `display: flex`, three children competed for two columns, and
+ * the third wrapped onto an implicit second row, which split the viewport in half and left
+ * `.main` 330px tall inside a 700px window.
+ *
+ * Nothing about the declarations was wrong, only where they were written. Keeping them next
+ * to the panes they hide is what makes them apply — and it means adding a pane cannot
+ * silently disable the breakpoint that hides it. */
 
-@media (max-width: 820px) {
-  .shell,
-  .shell-rail-closed {
-    grid-template-columns: 1fr;
-  }
-  .sidebar {
-    display: none;
-  }
-}
-
+/* The frame that keeps the composer on screen. The pin itself is .shell's row track above;
+ * what follows are the rules that keep this column honest inside it.
+ *
+ * The bug, measured at a 780px viewport with 40 turns: .main grew to 5381px and the composer
+ * sat at y=5218, four screens down. The tell was that .transcript.scrollHeight equalled its
+ * clientHeight — it has `overflow-y: auto` and always did, but an element allowed to grow
+ * forever never overflows, so its own scrollbar never appeared and the document's did instead.
+ *
+ * `min-height: 0` here and on .transcript is one of four interchangeable ways to express the
+ * same cap — see the measured note on .shell. Any one of them alone fixes the bug, so removing
+ * one and finding nothing broken proves nothing about whether it matters. Both are written
+ * because `min-height: auto` on grid and flex items is the default that caused this, and
+ * saying so at the element it applies to is how the next person avoids reintroducing it.
+ */
 .main {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
 /* ---- topbar ---- */
@@ -322,6 +349,9 @@ button:not(:disabled):active {
   padding: 14px 24px;
   border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, var(--glow-brand) 15%);
   background: var(--card);
+  /* Fixed, for the same reason as .composer: it is the other end of the pinned frame, and
+     flex would otherwise compress it to make room for a long transcript. */
+  flex: none;
 }
 
 .brand {
@@ -441,7 +471,14 @@ button:not(:disabled):active {
 
 .transcript {
   flex: 1;
+  /* Matching .main — see the measured note on .shell. `overflow-y: auto` was always here and
+     did nothing on its own: an element free to grow never overflows. What gives it something
+     to do is any one of the four caps, this one included. */
+  min-height: 0;
   overflow-y: auto;
+  /* Reserves the scrollbar's width at all times, so the first message does not shift the
+     column sideways the moment the transcript becomes scrollable. */
+  scrollbar-gutter: stable;
   padding: 28px 24px;
   display: flex;
   flex-direction: column;
@@ -734,6 +771,10 @@ button:not(:disabled):active {
   border-top: 1px solid color-mix(in oklch, var(--border) 70%, var(--glow-brand) 12%);
   padding: 16px 24px 20px;
   background: color-mix(in oklch, var(--card) 45%, var(--background));
+  /* Never give up height to the transcript. Once .main is capped to the viewport, flex
+     starts looking for something to shrink, and the composer is a candidate — it would be
+     squeezed thinner as the conversation grew, which is a subtler version of the same bug. */
+  flex: none;
 }
 
 .composer-row {
@@ -801,6 +842,10 @@ button:not(:disabled):active {
 .sidebar {
   border-left: 1px solid color-mix(in oklch, var(--sidebar-border) 60%, var(--glow-brand) 10%);
   padding: 20px;
+  /* Same pairing as .transcript: a grid item also defaults to min-height:auto, so this pane
+     would grow past the row and push the document taller. The wallet and spend panels are
+     long enough to do it. */
+  min-height: 0;
   overflow-y: auto;
   background: color-mix(in oklch, var(--sidebar) 82%, transparent);
   backdrop-filter: blur(12px);
@@ -2189,4 +2234,36 @@ button:not(:disabled):active {
   border-top: 1px solid color-mix(in oklch, var(--border) 40%, transparent);
   font-size: 12px;
   color: var(--muted-foreground);
+}
+
+/* ---- responsive panes ---- */
+
+/* Deliberately last in the file.
+ *
+ * These rules were originally written up beside `.shell`, before `.sidebar` and `.rail`
+ * existed. Same specificity, earlier position — so the panes' own `display` won and both
+ * breakpoints were dead. The layout looked responsive because the columns still changed;
+ * only the hiding failed, which is the half you cannot see in a stylesheet.
+ *
+ * Two breakpoints, because the three panes stop fitting at different widths. The rail goes
+ * first: on a tablet the transcript matters more than the chat list, and the rail is still
+ * reachable through the toggle. */
+@media (max-width: 1200px) {
+  .shell,
+  .shell-rail-closed {
+    grid-template-columns: 1fr 300px;
+  }
+  .rail {
+    display: none;
+  }
+}
+
+@media (max-width: 820px) {
+  .shell,
+  .shell-rail-closed {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    display: none;
+  }
 }

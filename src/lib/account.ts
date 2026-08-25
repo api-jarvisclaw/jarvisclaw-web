@@ -168,7 +168,29 @@ interface RawSelf {
 export async function whoami(opts: { baseUrl?: string; signal?: AbortSignal } = {}): Promise<Account | null> {
   if (!sessionCheckAllowed()) return null
   try {
-    const self = await platformCall<RawSelf>('/api/user/self', opts)
+    /**
+     * Two calls, and the first one is the fix for a real bug.
+     *
+     * `/api/user/self` sits behind UserAuth, which requires a `New-Api-User` header carrying the
+     * caller's own user id. Measured against production from this origin:
+     *
+     *   /api/user/self WITHOUT the header -> 401 "Unauthorized, New-Api-User header not provided"
+     *   /api/user/self WITH    the header -> 200
+     *
+     * So the very first call could never succeed: it is asking who the session belongs to, and it
+     * cannot send an id it does not have yet. A signed-in user pressed "I've signed in" and was
+     * told, permanently, that they were signed out. The console never hits this because its login
+     * response gives it the id and it keeps it in `localStorage` — which is per-origin, so nothing
+     * here can read it.
+     *
+     * `/api/user/session` (added in the gateway alongside this) answers with the id using nothing
+     * but the session cookie. Everything after that goes through the header-requiring routes as
+     * normal.
+     */
+    const ident = await platformCall<{ id?: number }>('/api/user/session', opts)
+    if (typeof ident.id !== 'number' || ident.id <= 0) return null
+
+    const self = await platformCall<RawSelf>('/api/user/self', { ...opts, userId: ident.id })
     if (typeof self.id !== 'number') return null
     return {
       id: self.id,
@@ -286,6 +308,23 @@ export async function signOut(opts: { baseUrl?: string; userId: number } = { use
  */
 export const SIGN_IN_URL = `${DEFAULT_BASE_URL}/en/sign-in?redirect=%2Fen%2Fkeys`
 export const KEYS_URL = `${DEFAULT_BASE_URL}/en/keys`
+
+/**
+ * The host the sign-in link actually opens, derived rather than written out.
+ *
+ * The button said "Sign in on jarvisclaw.ai" while linking to api.jarvisclaw.ai. Both serve the
+ * same SPA, but they are different hosts and the session cookie is set on the one the link opens
+ * — so the label was naming a host the flow does not use. Deriving it means the two cannot drift
+ * again when DEFAULT_BASE_URL changes.
+ */
+export const SIGN_IN_HOST = (() => {
+  try {
+    return new URL(DEFAULT_BASE_URL).host
+  } catch {
+    // A malformed base URL is not worth breaking the panel over; the link is still correct.
+    return 'jarvisclaw.ai'
+  }
+})()
 
 /**
  * Whether this origin can read a platform session at all.

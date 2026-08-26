@@ -1,5 +1,5 @@
 import { CheckIcon, LoaderIcon } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { getMediaUrl } from '../lib/blobstore'
 import { mediaMimeType } from '../lib/modality'
@@ -87,27 +87,21 @@ export type Turn =
       failed?: { message: string; retryable: boolean }
     }
 
-/**
- * Starters, each one something this gateway can actually do — the marketplace really does
- * carry search, on-chain and prediction-market services, and the catalogue really does
- * expose per-model pricing. A suggestion that fails on click is worse than none: it is the
- * first thing a new visitor tries.
- */
-const SUGGESTIONS = [
-  'What can you do, and what does it cost?',
-  'Find me an API for Ethereum gas prices.',
-  'Which models are free right now?',
-  'Search the marketplace for on-chain data services.',
-  'What would a 5-second video cost me?',
-  'Compare the cheapest and most capable chat models.',
-]
 
 export function Transcript({
   turns,
-  onSuggestion,
+  empty,
 }: {
   turns: Turn[]
-  onSuggestion: (text: string) => void
+  /**
+   * What to show when there are no turns yet.
+   *
+   * Passed in rather than built here. This used to be a hero and six starter buttons defined in
+   * this file, which was fine until the first screen needed to say what the product is — that
+   * content needs the live model and marketplace counts, and Transcript has no business fetching
+   * a catalogue. The slot keeps the scroll container here and the copy where its data is.
+   */
+  empty: ReactNode
 }) {
   const endRef = useRef<HTMLDivElement>(null)
 
@@ -118,27 +112,7 @@ export function Transcript({
   }, [turns])
 
   if (turns.length === 0) {
-    return (
-      <div className="transcript">
-        <div className="empty">
-          <span className="eyebrow">The agent with a wallet</span>
-          <h1>
-            What should <em>JarvisClaw</em> do?
-          </h1>
-          <p>
-            330+ models and thousands of callable APIs, paid per call. Start now — no account,
-            no key, no card. Anything paid shows its price and asks first.
-          </p>
-          <div className="suggestions">
-            {SUGGESTIONS.map((s) => (
-              <button key={s} className="suggestion" onClick={() => onSuggestion(s)}>
-                {s}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    )
+    return <div className="transcript">{empty}</div>
   }
 
   return (

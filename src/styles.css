@@ -2627,6 +2627,188 @@ button:not(:disabled):active {
   color: var(--muted-foreground);
 }
 
+/* ---- landing content on the first screen ---- */
+
+/* The wrapper, not a page. `.empty` inside it keeps `margin: auto` so the hero still centres in
+   the viewport when nothing has scrolled — the sections below simply extend past the fold, inside
+   the transcript's own scroll container. The composer is unaffected: measured at vh 900/720/620,
+   it stays pinned and the document never scrolls. */
+.landing {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 8px;
+}
+
+/* Centring only applies while the hero is alone on screen. With sections after it, `margin: auto`
+   on all sides would push the hero away from them. */
+.landing .empty {
+  margin: auto auto 0;
+  padding-top: 8vh;
+  padding-bottom: 40px;
+}
+
+.landing-band {
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 34px 20px 0;
+  border-top: 1px solid var(--border);
+}
+
+.landing-band:first-of-type {
+  border-top: none;
+}
+
+.landing-band h2 {
+  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+}
+
+.landing-lede {
+  margin: 0 0 16px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+}
+
+.landing-band > h2 + .landing-steps,
+.landing-band > h2 + .landing-cards,
+.landing-band > h2 + .landing-faq {
+  margin-top: 16px;
+}
+
+.landing-steps {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.landing-step-n {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent-2-text);
+}
+
+.landing-step h3 {
+  margin: 6px 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.landing-step p,
+.landing-card p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+}
+
+.landing-cards {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+
+/* Flat `--card`, no gradient. The gradient variants in this file mix a chromatic glow into a
+   neutral, which is what produced the pink tint; more importantly a first screen with five tinted
+   panels is the "too AI" look this console deliberately avoids. */
+.landing-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+  padding: 15px 16px;
+}
+
+.landing-card > svg {
+  color: var(--accent-2-text);
+  margin-bottom: 8px;
+}
+
+.landing-card h3 {
+  margin: 0 0 5px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.landing-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-2-text);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+}
+
+.landing-link:hover {
+  text-decoration: underline;
+}
+
+.landing-faq {
+  display: flex;
+  flex-direction: column;
+}
+
+.landing-faq details {
+  border-bottom: 1px solid var(--border);
+}
+
+.landing-faq details:last-child {
+  border-bottom: none;
+}
+
+/* `<details>` rather than a JS accordion: six answers of which someone reads one, and the browser
+   already does this correctly including keyboard and find-in-page. */
+.landing-faq summary {
+  cursor: pointer;
+  padding: 11px 0;
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--foreground);
+  list-style: none;
+}
+
+.landing-faq summary::-webkit-details-marker {
+  display: none;
+}
+
+.landing-faq summary::after {
+  content: '+';
+  float: right;
+  font-family: var(--mono);
+  color: var(--muted-foreground);
+}
+
+.landing-faq details[open] summary::after {
+  content: '2';
+}
+
+.landing-faq p {
+  margin: 0 0 13px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--muted-foreground);
+}
+
+.landing-foot {
+  max-width: 760px;
+  width: 100%;
+  margin: 30px auto 0;
+  padding: 0 20px;
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
 /* ---- showcase grid ---- */
 
 /* Denser than the paid gallery: these are 32 examples to browse, where that one is a handful of

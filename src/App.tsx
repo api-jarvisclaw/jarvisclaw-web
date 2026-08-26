@@ -2,7 +2,7 @@ import { PanelLeftIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { runAgent, type AgentEvent } from './lib/agent'
-import { listCatalogue, type CatalogueModel } from './lib/catalogue'
+import { listApis, listCatalogue, type CatalogueModel } from './lib/catalogue'
 import {
   deriveTitle,
   loadConversations,
@@ -49,6 +49,7 @@ import { ChatList } from './ui/ChatList'
 import { Composer } from './ui/Composer'
 import { ConsentDialog, type PendingSpend } from './ui/ConsentDialog'
 import { Gallery, type GalleryTab } from './ui/Gallery'
+import { Landing } from './ui/Landing'
 import { Marketplace } from './ui/Marketplace'
 import { ThemeToggle } from './ui/ThemeToggle'
 import {
@@ -134,6 +135,13 @@ export function App() {
 
   const [models, setModels] = useState<CatalogueModel[]>([])
   const [modelsLoading, setModelsLoading] = useState(true)
+  /**
+   * Marketplace size, for the landing copy. Null until loaded, NOT 0.
+   *
+   * The distinction is the whole point: "0 callable APIs" on a page still fetching reads as an
+   * empty product, on the one screen whose job is a first impression. Null renders as a dash.
+   */
+  const [marketSize, setMarketSize] = useState<{ total: number; categories: number } | null>(null)
   const [model, setModel] = useState<string>(FREE_MODEL)
   const [mode, setMode] = useState<GenerationKind | 'chat'>('chat')
   // Per-mode, so switching from Image to Video and back does not lose the size you chose. Not
@@ -199,6 +207,22 @@ export function App() {
       .finally(() => {
         if (!ac.signal.aborted) setModelsLoading(false)
       })
+
+    /**
+     * One page of one row, purely for the count.
+     *
+     * `page_size=1` because only `total` and the category facet are wanted — the facet comes back
+     * with every response regardless of page size, so this is the cheapest possible way to ask.
+     * Pulling a real page would download 24 endpoint descriptions to render one number.
+     *
+     * Read live rather than hardcoded because these numbers MOVE: the facet reported 26 categories
+     * one afternoon and 18 the next. A number typed into the source is a number that will be wrong
+     * on the first screen.
+     */
+    listApis({ baseUrl, signal: ac.signal, pageSize: 1 })
+      .then((page) => setMarketSize({ total: page.total, categories: page.categories.length }))
+      .catch(() => undefined)
+
     return () => ac.abort()
   }, [baseUrl])
 
@@ -1068,7 +1092,19 @@ export function App() {
           />
         ) : (
           <>
-            <Transcript turns={turns} onSuggestion={send} />
+            <Transcript
+              turns={turns}
+              empty={
+                <Landing
+                  models={models}
+                  marketplaceTotal={marketSize?.total ?? null}
+                  marketplaceCategories={marketSize?.categories ?? null}
+                  onSuggestion={send}
+                  onOpenMarketplace={() => setView('marketplace')}
+                  onOpenGallery={() => setView('gallery')}
+                />
+              }
+            />
             <Composer
               busy={busy}
               anonymous={anonymous}

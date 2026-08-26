@@ -1,25 +1,49 @@
 import { CheckIcon, CopyIcon, ExternalLinkIcon, SparklesIcon } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 
 import { galleryTotalUsd, type GalleryItem } from '../lib/gallery'
+import { SEEDANCE_COUNT } from '../lib/seedance-count'
 import { SHOWCASE, showcaseMode, showcaseUrl, type ShowcaseItem } from '../lib/showcase'
 
-export type GalleryTab = 'showcase' | 'mine'
+/**
+ * The Seedance pane is lazy, and it is the only lazy thing in this app.
+ *
+ * Its data is 286 KB of prompt text — several of those prompts run past ten thousand words of
+ * shot-by-shot direction, which is the point of having them. Statically imported it lands in the
+ * main bundle, so every visitor downloads a video-prompt library before the chat box appears,
+ * including the majority who never open the gallery at all.
+ *
+ * The count is imported separately from a tiny module so the tab can show it without pulling the
+ * payload. Reading `SEEDANCE.length` here would defeat the whole split — the import would be
+ * static again and the chunk would be merged back in, silently, with the code still looking
+ * lazy.
+ */
+const SeedancePane = lazy(() =>
+  import('./SeedancePane').then((m) => ({ default: m.SeedancePane })),
+)
+
+export type GalleryTab = 'showcase' | 'seedance' | 'mine'
 
 /**
- * Two galleries behind two tabs, because they are two different things.
+ * Three galleries behind three tabs, because they are three different things.
  *
  *   Prompt gallery — 32 curated examples with the prompt that made each one, there to be read,
  *                    copied and re-run. Nobody paid for these here.
+ *   Video prompts  — 105 published Seedance 2.0 prompts with their result frames. Reference
+ *                    material for the hardest thing to write in this product.
  *   Your creations — media this user generated and was charged for.
  *
  * Merging them was the tempting shortcut and would have been wrong: someone else's example
  * sitting next to your own $0.40 video, with nothing saying which is which, makes the one number
  * that matters — what you have spent — unreadable.
  *
+ * Seedance is its own tab rather than more rows in the prompt gallery for a concrete reason:
+ * 100 of its 105 entries have a still and no servable clip, so the pane renders them differently.
+ * Mixing them in would mean either threading that distinction through the showcase type or
+ * putting a play button over a frame that cannot move.
+ *
  * The prompt gallery is first because of who is looking. An empty "your creations" tab is the
  * default state of every new visitor, and landing on an empty page is what makes someone leave.
- * Thirty-two working prompts is the answer to "what can this thing actually do".
  */
 export function Gallery({
   items,
@@ -49,6 +73,15 @@ export function Gallery({
         </button>
         <button
           role="tab"
+          aria-selected={tab === 'seedance'}
+          className={tab === 'seedance' ? 'gallery-tab gallery-tab-active' : 'gallery-tab'}
+          onClick={() => onTab('seedance')}
+        >
+          Video prompts
+          <span className="gallery-tab-count">{SEEDANCE_COUNT}</span>
+        </button>
+        <button
+          role="tab"
           aria-selected={tab === 'mine'}
           className={tab === 'mine' ? 'gallery-tab gallery-tab-active' : 'gallery-tab'}
           onClick={() => onTab('mine')}
@@ -62,6 +95,13 @@ export function Gallery({
 
       {tab === 'showcase' ? (
         <ShowcasePane onUsePrompt={onUsePrompt} />
+      ) : tab === 'seedance' ? (
+        // The fallback is a real sentence rather than a spinner: this chunk is ~90 KB gzipped and
+        // on a slow connection the wait is long enough that an unlabelled spinner reads as a
+        // hang. Saying what is loading is the difference between waiting and giving up.
+        <Suspense fallback={<p className="gallery-sub">Loading {SEEDANCE_COUNT} video prompts…</p>}>
+          <SeedancePane onUsePrompt={onUsePrompt} />
+        </Suspense>
       ) : (
         <MinePane items={items} onRemove={onRemove} />
       )}

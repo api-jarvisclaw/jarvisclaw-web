@@ -1,0 +1,136 @@
+import { readFileSync, readdirSync } from 'node:fs'
+
+import { describe, expect, it } from 'vitest'
+
+import { SEEDANCE, SEEDANCE_COLLECTION_URL, SEEDANCE_PLAYABLE, seedanceUrl } from './seedance'
+import { SEEDANCE_COUNT } from './seedance-count'
+
+/**
+ * The Seedance prompt collection, and the two things about it that can go quietly wrong.
+ *
+ * These are generated data, so the usual "does the function work" tests are beside the point. What
+ * matters is that the data agrees with the assets on disk and with the CC BY 4.0 terms it arrived
+ * under — neither of which a build or a type check can see.
+ */
+
+const ASSET_DIR = new URL('../../cdn/showcase/', import.meta.url)
+const assets = new Set(readdirSync(ASSET_DIR))
+
+describe('the collection', () => {
+  it('holds every prompt that was published in the README', () => {
+    // 105, not the 6,156 in their statistics table — that counts their CMS, which is behind an API
+    // key. Pinned so a future regeneration that silently drops entries is visible.
+    expect(SEEDANCE).toHaveLength(105)
+  })
+
+  it('keeps the tab count in step with the data', () => {
+    // SEEDANCE_COUNT lives in its own module so the gallery tab can show a number without pulling
+    // 330 KB of prompt text into the main bundle. The cost of that split is exactly this: two
+    // places holding the same fact. This is the thing that stops them drifting.
+    expect(SEEDANCE_COUNT).toBe(SEEDANCE.length)
+  })
+
+  it('has no duplicate ids', () => {
+    // The id is the asset filename stem, so a duplicate means two entries pointing at one image
+    // and one of them showing the wrong frame for its prompt.
+    expect(new Set(SEEDANCE.map((p) => p.id)).size).toBe(SEEDANCE.length)
+  })
+
+  it('carries a real prompt in every entry', () => {
+    // An entry with no prompt is a picture. The collection exists to be read and copied, so an
+    // empty one is a broken row rather than a sparse one.
+    for (const p of SEEDANCE) {
+      expect(p.prompt.trim().length).toBeGreaterThan(100)
+    }
+  })
+})
+
+describe('attribution', () => {
+  /**
+   * CC BY 4.0 requires attribution, and it is the right thing regardless — a person wrote each of
+   * these. Asserted rather than trusted because attribution is the first thing a "tidy up the data"
+   * change drops: it is the field that does nothing visible when removed.
+   */
+  it('names an author for every prompt', () => {
+    const anonymous = SEEDANCE.filter((p) => !p.author)
+    expect(anonymous).toEqual([])
+  })
+
+  it('links the post every prompt was published in', () => {
+    const unsourced = SEEDANCE.filter((p) => !p.source)
+    expect(unsourced).toEqual([])
+  })
+
+  it('credits the collection itself, separately from the prompt authors', () => {
+    // Two different contributions: the people who wrote the prompts, and the people who assembled
+    // them into a list. The licence asks for both.
+    expect(SEEDANCE_COLLECTION_URL).toContain('awesome-seedance-2-prompts')
+  })
+})
+
+describe('playability', () => {
+  /**
+   * The distinction this whole pane is built around. Only 5 of 105 have an MP4 we can serve; the
+   * rest publish Cloudflare Stream HLS only (measured: /downloads/default.mp4 -> 404).
+   *
+   * Getting this wrong renders a play control over a frame that cannot move — the same defect as
+   * the paid $0.83 video that showed a dead player, except by construction.
+   */
+  it('marks exactly the entries that have a clip', () => {
+    expect(SEEDANCE_PLAYABLE).toHaveLength(5)
+    for (const p of SEEDANCE) {
+      expect(p.playable).toBe(p.video !== null)
+    }
+  })
+
+  it('never claims playable with no video file', () => {
+    // The asymmetric half, and the dangerous one. `playable: true` with `video: null` is what puts
+    // a <video> element on screen with no source.
+    for (const p of SEEDANCE.filter((x) => x.playable)) {
+      expect(p.video).not.toBeNull()
+    }
+  })
+})
+
+describe('assets', () => {
+  it('points every entry at a poster that exists', () => {
+    // Checked against the directory on disk, not against a naming convention. A convention test
+    // passes when the generator is consistent and the download failed — which is precisely the
+    // case that renders a broken tile.
+    const missing = SEEDANCE.filter((p) => !assets.has(p.poster)).map((p) => p.poster)
+    expect(missing).toEqual([])
+  })
+
+  it('points every playable entry at a video that exists', () => {
+    const missing = SEEDANCE.filter((p) => p.video !== null && !assets.has(p.video)).map(
+      (p) => p.video,
+    )
+    expect(missing).toEqual([])
+  })
+
+  it('serves assets from the CDN under the non-expiring prefix', () => {
+    // `showcase/`, not `media/`. The media- prefix has a 1-day lifecycle rule (it is a cache), so
+    // shipping these under it would empty the gallery overnight — silently, and a day later.
+    const url = seedanceUrl('sd-1402-poster.jpg')
+    expect(url).toContain('/showcase/')
+    expect(url).not.toContain('/media/')
+  })
+})
+
+describe('the lazy chunk stays lazy', () => {
+  it('does not let the gallery import the payload directly', () => {
+    /**
+     * The failure this catches is silent and total: one static `import { SEEDANCE }` in Gallery.tsx
+     * merges 330 KB of prompt text back into the main bundle, while the `lazy()` call sits there
+     * still looking correct. Nothing breaks, no test fails, and every visitor downloads a
+     * video-prompt library to see a chat box.
+     *
+     * Read as source text because that is the only way to see it. A behavioural test cannot
+     * distinguish a split bundle from a merged one.
+     */
+    const gallery = readFileSync(new URL('../ui/Gallery.tsx', import.meta.url), 'utf8')
+    expect(gallery).not.toMatch(/^import\s.*from\s+['"]\.\.\/lib\/seedance['"]/m)
+    expect(gallery).toContain('seedance-count')
+    expect(gallery).toContain('lazy(')
+  })
+})

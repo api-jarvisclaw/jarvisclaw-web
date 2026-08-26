@@ -83,8 +83,14 @@ def main() -> int:
         print("== tabs ==")
         for t in tabs:
             print("   ", t.strip().replace("\n", " "))
-        if len(tabs) != 2:
-            fails.append(f"expected 2 tabs, found {len(tabs)}")
+        # Named, not counted. This asserted `len(tabs) == 2` and failed the moment a third
+        # collection was added — reporting a working gallery as broken, which is exactly how a
+        # probe trains you to ignore it. What this probe is about is that the showcase and the
+        # user's own creations are SEPARATE tabs; how many others exist is not its business.
+        joined = " ".join(tabs).lower()
+        for want in ("prompt gallery", "your creations"):
+            if want not in joined:
+                fails.append(f"no {want!r} tab: {tabs}")
 
         # ── the showcase grid ──
         page.wait_for_selector(".showcase-card", timeout=20000)

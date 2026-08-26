@@ -904,6 +904,23 @@ export function App({
               t.text += e.text ?? ''
             })
             break
+          /**
+           * A retry is starting over, so clear what the abandoned attempt streamed.
+           *
+           * Only reachable now that delivery is live. While events were buffered until the response
+           * finished, a failed attempt's buffer was simply dropped and the user never saw it. Now
+           * the words are on screen, and without this the retry's text appends to them — one turn
+           * that reads as a single answer and is really two halves of different ones.
+           *
+           * Reasoning is cleared too. It belongs to the attempt that was abandoned, and leaving it
+           * beside a fresh answer attributes one model's thinking to another's words.
+           */
+          case 'reset':
+            patchAgent((t) => {
+              t.text = ''
+              t.reasoning = ''
+            })
+            break
           case 'reasoning':
             patchAgent((t) => {
               t.reasoning += e.text ?? ''

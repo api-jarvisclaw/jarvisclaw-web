@@ -5,6 +5,7 @@
  * spending money the user has not approved and never running away with turns.
  */
 
+import { EventQueue } from './eventqueue'
 import {
   FREE_MODEL,
   isPaymentRequired,
@@ -44,7 +45,28 @@ export const SYSTEM_PROMPT = [
 ].join('\n')
 
 export interface AgentEvent {
-  type: 'text' | 'reasoning' | 'tool-start' | 'tool-end' | 'error' | 'done' | 'downgrade' | 'notice'
+  type:
+    | 'text'
+    | 'reasoning'
+    | 'tool-start'
+    | 'tool-end'
+    | 'error'
+    | 'done'
+    | 'downgrade'
+    | 'notice'
+    /**
+     * Discard whatever text this turn has streamed so far.
+     *
+     * Needed only because delivery is now live. While events were buffered until the response
+     * finished, an attempt that failed mid-stream could simply have its buffer dropped and the
+     * user never saw it. Now the words are already on screen, and a retry — a 402 answered with a
+     * payment, or a model retired mid-answer — starts the response over from the beginning.
+     *
+     * Without this the second attempt's text appends to the first's, producing a turn that reads
+     * as one answer and is actually two halves of different ones. Silently keeping the first
+     * attempt's fragment would be worse: it would look like the model wrote it.
+     */
+    | 'reset'
   /** For text/reasoning: the increment. For error: the message. */
   text?: string
   /** For tool-start/tool-end. */
@@ -130,16 +152,89 @@ export async function* runAgent(
       : undefined
 
   for (let turn = 0; turn < maxTurns; turn++) {
-    // Buffered rather than yielded from inside the callback: the stream callback is
-    // synchronous, and a generator cannot yield from it.
-    const pending: AgentEvent[] = []
+    /**
+     * How many times this turn has called the model.
+     *
+     * Only used to decide whether an attempt must clear the screen before its first delta. The
+     * first attempt has shown nothing yet; a retry — after a 402 paid for, or a model retired
+     * mid-answer — has, and its text would otherwise append to the abandoned attempt's.
+     */
+    let attempts = 0
     let result
 
     // Downgrade loop. A model that cannot serve the request is retired and the next
     // candidate tried, in place, so one unservable model costs a retry rather than the
     // whole message. Bounded by the candidate list, which is finite and shrinking.
+    /**
+     * Runs one attempt and forwards its deltas to the caller as they arrive.
+     *
+     * The generator cannot `yield` from inside `streamChat`'s callback, so the callback pushes into
+     * `stream` and this helper drains it — which is what makes the text appear while the request is
+     * still open rather than all at once when it closes.
+     *
+     * The request is NOT awaited before draining. Awaiting it first is the bug this replaces: it
+     * completes the whole response before a single token is forwarded. Instead the promise is
+     * started, its settlement closes the queue, and the drain finishes when the queue does.
+     *
+     * `attempt` counts from 1. Anything past the first has already put text on screen, so it emits
+     * a `reset` before its own first delta — see AgentEvent['reset'].
+     */
+    // The return type has no `| undefined`, and that is a guarantee this function must keep: every
+    // path either returns the request's value or throws. TypeScript would otherwise force the call
+    // sites to handle an absent result that cannot occur, and the natural way to silence that is a
+    // non-null assertion — which would then hide a real hole if a future edit added a bare `return`.
+    const attemptStream = async function* (
+      model: string,
+      cred: typeof opts.cred,
+      attempt: number,
+    ): AsyncGenerator<AgentEvent, Awaited<ReturnType<typeof streamChat>>> {
+      const q = new EventQueue<AgentEvent>()
+      let first = true
+      const request = streamChat(
+        { messages: history, model, tools: schemas },
+        (delta) => {
+          if (attempt > 1 && first && (delta.content || delta.reasoning)) {
+            // Emitted on the first real delta rather than before the request, so an attempt that
+            // fails before producing anything does not clear text the user is still reading.
+            q.push({ type: 'reset' })
+          }
+          if (delta.content || delta.reasoning) first = false
+          if (delta.content) q.push({ type: 'text', text: delta.content })
+          if (delta.reasoning) q.push({ type: 'reasoning', text: delta.reasoning })
+        },
+        { baseUrl: opts.baseUrl, cred, signal: opts.signal },
+      )
+
+      /**
+       * Settled into a tagged value rather than left to reject.
+       *
+       * An unhandled rejection here would fire before the drain below reaches it — the promise
+       * settles while the consumer is still yielding buffered text — and the browser reports it as
+       * an uncaught error even though the code does handle it a few lines later.
+       */
+      const settled = request.then(
+        (value) => ({ ok: true as const, value }),
+        (error: unknown) => ({ ok: false as const, error }),
+      )
+      // Closing the queue is what ends the drain. `void` because the drain is the thing being
+      // awaited; this only needs to run when the request finishes, whichever way it finishes.
+      void settled.then((outcome) => (outcome.ok ? q.close() : q.fail(outcome.error)))
+
+      // Errors surface from `settled`, not from here, so a failed stream still delivers the text it
+      // produced before dying. Dropping that would take words off the screen the user has read.
+      try {
+        yield* q.drain()
+      } catch {
+        // Swallowed deliberately: `q.fail` re-raises the request's own error, and it is handled by
+        // the caller through `settled` below with the full context of which attempt failed.
+      }
+
+      const outcome = await settled
+      if (!outcome.ok) throw outcome.error
+      return outcome.value
+    }
+
     for (;;) {
-      pending.length = 0
       const model = opts.model ?? (await router!.current())
       if (model === undefined) {
         // Reached when a previous message already exhausted the list, so no attempt is
@@ -148,15 +243,9 @@ export async function* runAgent(
         return
       }
 
+      attempts += 1
       try {
-        result = await streamChat(
-          { messages: history, model, tools: schemas },
-          (delta) => {
-            if (delta.content) pending.push({ type: 'text', text: delta.content })
-            if (delta.reasoning) pending.push({ type: 'reasoning', text: delta.reasoning })
-          },
-          { baseUrl: opts.baseUrl, cred: opts.cred, signal: opts.signal },
-        )
+        result = yield* attemptStream(model, opts.cred, attempts)
         break
       } catch (err) {
         // A 402 is a price, not a failure. Handled before the downgrade logic because a
@@ -184,14 +273,8 @@ export async function* runAgent(
           // means the payment was refused, and re-signing would ask the user to authorise
           // another transfer for a call that already failed to settle.
           try {
-            result = await streamChat(
-              { messages: history, model, tools: schemas },
-              (delta) => {
-                if (delta.content) pending.push({ type: 'text', text: delta.content })
-                if (delta.reasoning) pending.push({ type: 'reasoning', text: delta.reasoning })
-              },
-              { baseUrl: opts.baseUrl, cred: { ...opts.cred, payment: paid }, signal: opts.signal },
-            )
+            attempts += 1
+            result = yield* attemptStream(model, { ...opts.cred, payment: paid }, attempts)
             break
           } catch (payErr) {
             yield {
@@ -227,7 +310,8 @@ export async function* runAgent(
         }
       }
     }
-    yield* pending
+    // No `yield* pending` here any more. The text was forwarded by `attemptStream` while the
+    // request was open, which is the whole point of this shape.
 
     history.push({
       role: 'assistant',

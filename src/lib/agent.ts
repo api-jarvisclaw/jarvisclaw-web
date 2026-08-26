@@ -288,15 +288,69 @@ const EXHAUSTED_MESSAGE =
  * the assistant's tool-call turns and their results. Dropping those would make the
  * model re-plan from scratch on the next message and re-run tools it already paid for.
  */
+/** Marks the injected notice, so repeated switches replace it instead of stacking. */
+const CAPABILITY_MARK = '[session capability change]'
+
+/**
+ * Tells the model, in the transcript, that what it said earlier about paying no longer holds.
+ *
+ * Exported for its test. A system-prompt swap is not enough on its own: the model's own earlier
+ * refusals stay in the context and it treats them as fact — measured with a real wallet connected
+ * and a paid model answering "当前会话没有连接钱包或 API 密钥" anyway.
+ *
+ * Written as a `system` turn positioned at the END of the history rather than as an `assistant`
+ * one. Putting words in the assistant's mouth would have it explain a change it never observed;
+ * a late system turn is an instruction that outranks the earlier text by position.
+ */
+export function notifyCapabilityChange(
+  history: ChatMessage[],
+  anonymous: boolean,
+  changed: boolean,
+): void {
+  /**
+   * Nothing to correct unless the capability actually changed. `changed` comes from the caller,
+   * which knows whether the prompt it just installed differs from the one that was there.
+   *
+   * Without it this fired on every message of an ordinary session, and `agent.test.ts` caught it:
+   * a two-message conversation that never connected anything ended up with a notice announcing a
+   * change that never happened. Telling a model its capabilities just changed when they did not is
+   * a lie in the context, and a cheap one to avoid.
+   */
+  if (!changed) return
+
+  // Only worth saying if there is prior conversation to contradict. On a fresh history the prompt
+  // is already correct and a notice would be noise the model tries to act on.
+  const hasPriorTurns = history.some((m) => m.role === 'assistant' || m.role === 'tool')
+  if (!hasPriorTurns) return
+
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].role === 'system' && String(history[i].content).startsWith(CAPABILITY_MARK)) {
+      history.splice(i, 1)
+    }
+  }
+
+  const text = anonymous
+    ? `${CAPABILITY_MARK} The wallet or API key has been disconnected. This session can no longer ` +
+      'complete a paid call. Anything earlier in this conversation about being able to pay is now ' +
+      'out of date.'
+    : `${CAPABILITY_MARK} A wallet or API key is NOW connected. This session CAN complete paid ` +
+      'calls. Anything earlier in this conversation that said there is no wallet or no API key, or ' +
+      'that a paid call could not be made, is OUT OF DATE — do not repeat it and do not treat it ' +
+      'as still true. If the user asks again for something that needs a paid API, call it.'
+
+  history.push({ role: 'system', content: text })
+}
+
 export async function* runAgent(
   history: ChatMessage[],
   userMessage: string,
   opts: AgentOptions,
 ): AsyncGenerator<AgentEvent> {
   const prompt = systemPrompt({ anonymous: opts.anonymous })
+  const promptChanged = history.length > 0 && history[0].content !== prompt
   if (history.length === 0 || history[0].role !== 'system') {
     history.unshift({ role: 'system', content: prompt })
-  } else if (history[0].content !== prompt) {
+  } else if (promptChanged) {
     /**
      * Replaced when the session's capabilities have changed.
      *
@@ -306,7 +360,42 @@ export async function* runAgent(
      * own instructions, which is the state models resolve by ignoring the tools.
      */
     history[0] = { role: 'system', content: prompt }
+    /**
+     * The prompt is not the only thing in the context claiming what this session can pay for.
+     *
+     * Reported with a screenshot: a wallet WAS connected, the model was the paid
+     * `deepseek/deepseek-chat`, and the answer still opened "抱歉，我必须**再次**如实说明"
+     * and said "当前会话没有连接钱包或 API 密钥". Nothing was stale about the prompt — the code
+     * above had already replaced it. What was stale was the TRANSCRIPT: the earlier anonymous
+     * turns were still there, and the model read its own previous refusal and stayed consistent
+     * with it. "再次" is the tell; it was agreeing with itself.
+     *
+     * A system prompt does not outrank the conversation for this. The model treats its own prior
+     * turns as established fact, so the correction has to be a turn too — placed after the stale
+     * refusals, which is where a contradiction gets resolved in favour of the newer statement.
+     */
   }
+  /**
+   * Called on EVERY message, not only when the prompt just changed — and that distinction was a
+   * bug I wrote and the test caught.
+   *
+   * Scoped to the prompt-changed branch, a session that connected and then disconnected kept the
+   * "NOW connected" notice: the second flip returns message[0] to a prompt it already held, so
+   * `promptChanged` is false and nothing refreshed. The notice then contradicted reality in the
+   * other direction, which is the same defect with the sign flipped.
+   *
+   * It takes `promptChanged` as an argument instead of sitting inside the branch above, so that the
+   * "did anything change" question is answered in one place and the notice logic is testable on its
+   * own. Both spellings behave identically — `promptChanged` is recomputed per call and is true on a
+   * flip in either direction — so this is a readability choice, not a fix; the bug I actually had
+   * was calling it with no `changed` argument at all, which announced a change on every message of
+   * an ordinary session.
+   *
+   * Idempotent: any previous notice is removed and at most one describing the CURRENT state is
+   * appended, so a session that connects, disconnects and reconnects carries one accurate line
+   * rather than three contradictory ones.
+   */
+  notifyCapabilityChange(history, opts.anonymous, promptChanged)
   history.push({ role: 'user', content: userMessage })
 
   const schemas = toolSchemas({ anonymous: opts.anonymous })

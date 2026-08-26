@@ -204,6 +204,124 @@ describe('the free session is told the price, not that the capability is missing
     }
   })
 
+  it('contradicts its own earlier refusals when a wallet arrives mid-conversation', async () => {
+    /**
+     * Reported with a screenshot, and the most user-visible bug of this batch: a wallet WAS
+     * connected, the paid `deepseek/deepseek-chat` was answering, and the reply still opened
+     * "抱歉，我必须再次如实说明" and claimed "当前会话没有连接钱包或 API 密钥".
+     *
+     * The prompt was NOT stale — `runAgent` already replaced it when `anonymous` flipped. The
+     * TRANSCRIPT was: the earlier anonymous refusals were still in the history, and the model
+     * read its own previous turn and stayed consistent with it. The "再次" is the tell — it was
+     * agreeing with itself, not with the prompt.
+     *
+     * So a swap of message[0] is not sufficient, and this asserts the correction reaches the
+     * place the stale claim lives.
+     */
+    stubTurns([[frame({ choices: [{ delta: { content: 'ok' } }] })]])
+    const history: ChatMessage[] = []
+    await collect(runAgent(history, '北京时间是几点', { ...anon, anonymous: true }))
+    // The refusal an anonymous turn produces, in the shape the screenshot showed.
+    history[history.length - 1] = {
+      role: 'assistant',
+      content: '我无法告诉你北京时间。当前会话没有连接钱包或 API 密钥，调用没有成功。',
+    }
+
+    stubTurns([[frame({ choices: [{ delta: { content: 'ok' } }] })]])
+    await collect(runAgent(history, '北京时间是几点', { ...anon, anonymous: false }))
+
+    // The stale refusal is still there on purpose — deleting a user-visible exchange would
+    // rewrite history the person can see on screen. It is overridden, not erased.
+    expect(history.some((m) => /没有连接钱包/.test(String(m.content)))).toBe(true)
+
+    const notice = history.filter(
+      (m) => m.role === 'system' && /capability change/.test(String(m.content)),
+    )
+    expect(notice).toHaveLength(1)
+    expect(String(notice[0].content)).toMatch(/NOW connected/)
+    expect(String(notice[0].content)).toMatch(/OUT OF DATE/)
+    // After the stale turn, which is what makes it win the contradiction.
+    expect(history.indexOf(notice[0])).toBeGreaterThan(
+      history.findIndex((m) => /没有连接钱包/.test(String(m.content))),
+    )
+  })
+
+  it('does not stack a notice on every message, or add one to a fresh conversation', async () => {
+    // Two failure modes of the naive version. A notice per message would grow the context by a
+    // paragraph each turn, and a notice on turn one would have the model announce a change to
+    // someone who just connected before saying anything.
+    stubTurns([[frame({ choices: [{ delta: { content: 'ok' } }] })]])
+    const fresh: ChatMessage[] = []
+    await collect(runAgent(fresh, 'hello', { ...anon, anonymous: false }))
+    expect(fresh.filter((m) => /capability change/.test(String(m.content)))).toHaveLength(0)
+
+    const history: ChatMessage[] = []
+    await collect(runAgent(history, 'one', { ...anon, anonymous: true }))
+    for (const flip of [false, true, false]) {
+      stubTurns([[frame({ choices: [{ delta: { content: 'ok' } }] })]])
+      await collect(runAgent(history, 'again', { ...anon, anonymous: flip }))
+    }
+    expect(history.filter((m) => /capability change/.test(String(m.content)))).toHaveLength(1)
+    /**
+     * The surviving notice describes the CURRENT state, and my first version of this assertion was
+     * simply wrong about what that state is.
+     *
+     * The loop's last value is `false` — `anonymous: false` means a wallet IS connected — and I
+     * asserted "no longer complete a paid call", the disconnected wording. The code was right and
+     * the test was inverted; `anonymous` reads like "is disconnected" and the loop ends on the
+     * connected case.
+     */
+    const last = history.filter((m) => /capability change/.test(String(m.content)))[0]
+    expect(String(last.content)).toMatch(/NOW connected/)
+  })
+
+  it('refreshes the notice when the wallet goes away again', async () => {
+    /**
+     * The second half of the same property, and it caught a real bug in my own code.
+     *
+     * I first called `notifyCapabilityChange` only inside the prompt-changed branch. Disconnecting
+     * after connecting returns message[0] to a prompt it already held, so nothing detected the
+     * second flip and the stale "NOW connected" notice survived — the same defect with the sign
+     * reversed, telling a session it can pay when it cannot. It is now called on every message and
+     * is idempotent.
+     */
+    const history: ChatMessage[] = []
+    /**
+     * Stubbed before EVERY turn, including the first, and leaving that out made this test pass for
+     * the wrong reason.
+     *
+     * Without a stub the first `runAgent` produces no assistant reply — the history went
+     * `user "one"`, `user "two"` with nothing between. `notifyCapabilityChange` requires a prior
+     * assistant or tool turn to have something to contradict, so the "NOW connected" notice was
+     * never written, and a mutation that made the notice write-once still passed: there was no
+     * stale notice to survive. Caught by mutating the code and dumping the history when the test
+     * refused to fail.
+     */
+    stubTurns([[frame({ choices: [{ delta: { content: 'ok' } }] })]])
+    await collect(runAgent(history, 'one', { ...anon, anonymous: true }))
+    stubTurns([[frame({ choices: [{ delta: { content: 'ok' } }] })]])
+    await collect(runAgent(history, 'two', { ...anon, anonymous: false }))
+    // The connected notice must exist before the flip back, or the next assertion proves nothing.
+    expect(history.some((m) => /NOW connected/.test(String(m.content)))).toBe(true)
+    stubTurns([[frame({ choices: [{ delta: { content: 'ok' } }] })]])
+    await collect(runAgent(history, 'three', { ...anon, anonymous: true }))
+
+    const notices = history.filter((m) => /capability change/.test(String(m.content)))
+    expect(notices).toHaveLength(1)
+    expect(String(notices[0].content)).toMatch(/no longer complete a paid call/)
+    /**
+     * Asserted across the WHOLE history, not just on `notices[0]`, and that distinction is the
+     * difference between this test working and not.
+     *
+     * My first version checked only the first notice. Mutation-verified: making the notice
+     * write-once (so a stale one survives) still PASSED, because the third turn appends a fresh
+     * notice after the stale one and `notices[0]` was the correct new one all along. The property
+     * that matters is that no message anywhere still claims the wallet is connected.
+     */
+    expect(history.some((m) => /NOW connected/.test(String(m.content)))).toBe(false)
+    expect(String(history[0].content)).toMatch(/cannot complete a paid call/)
+  })
+
   it('tells every session to answer directly when it already knows', async () => {
     // The counterweight that was missing. Checked for both session kinds because the overthinking is
     // not specific to the anonymous one — it was just worst there.
@@ -230,8 +348,19 @@ describe('the free session is told the price, not that the capability is missing
     stubTurns([[frame({ choices: [{ delta: { content: 'ok' } }] })]])
     await collect(runAgent(history, 'second', { ...anon, anonymous: false }))
     expect(String(history[0].content)).not.toMatch(/cannot complete a paid call/)
-    // Still exactly one system message — replaced, not prepended.
-    expect(history.filter((m) => m.role === 'system')).toHaveLength(1)
+    /**
+     * Widened from `toHaveLength(1)`, and the reason is recorded because loosening an assertion is
+     * how a real regression gets waved through.
+     *
+     * What this test was protecting is that the prompt is REPLACED rather than a second copy
+     * prepended — two competing prompts is the failure. That still holds: exactly one prompt, at
+     * index 0. There is now also a capability-change notice at the end, which is a different
+     * message serving a different purpose and is asserted on its own above.
+     */
+    const systems = history.filter((m) => m.role === 'system')
+    expect(systems.filter((m) => /You are JarvisClaw/.test(String(m.content)))).toHaveLength(1)
+    expect(history[0].role).toBe('system')
+    expect(systems).toHaveLength(2)
   })
 })
 

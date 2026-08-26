@@ -1,5 +1,5 @@
 {
-  // chat.jarvisclaw.ai is a Worker with a static-assets binding, NOT a Pages project.
+  // ducat.jarvisclaw.ai is a Worker with a static-assets binding, NOT a Pages project.
   //
   // Worth stating plainly, because DEPLOY.md described a Pages setup that was never
   // built: `wrangler pages project list` shows only jarvisclaw-docs, and the chat site
@@ -24,11 +24,20 @@
     "not_found_handling": "single-page-application"
   },
 
-  // The custom domain already exists on the zone; naming it here keeps the binding from
-  // silently reverting to a *.workers.dev URL on a later deploy.
+  // Naming the custom domain here keeps the binding from silently reverting to a
+  // *.workers.dev URL on a later deploy.
+  //
+  // ONE hostname. The site was on chat.jarvisclaw.ai and that name is deliberately
+  // detached rather than kept as a redirect — decided explicitly, on the grounds that
+  // it had not been distributed widely enough for the broken links to matter.
+  //
+  // The consequence, stated because someone will hit it: every chat.jarvisclaw.ai URL
+  // is now dead, and nothing in this repo rescues one. If that needs undoing, add the
+  // pattern back here and serve a 301 at the edge — a client-side redirect would only
+  // work for browsers with JavaScript.
   "routes": [
     {
-      "pattern": "chat.jarvisclaw.ai",
+      "pattern": "ducat.jarvisclaw.ai",
       "custom_domain": true
     }
   ],

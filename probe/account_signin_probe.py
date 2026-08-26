@@ -30,7 +30,7 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
-CHAT = os.environ.get("CHAT_URL", "https://chat.jarvisclaw.ai/")
+CHAT = os.environ.get("CHAT_URL", "https://ducat.jarvisclaw.ai/")
 API = os.environ.get("API_URL", "https://api.jarvisclaw.ai")
 
 

@@ -24,7 +24,7 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
-URL = os.environ.get("CHAT_URL", "https://chat.jarvisclaw.ai/")
+URL = os.environ.get("CHAT_URL", "https://ducat.jarvisclaw.ai/")
 
 # Two viewports and both rail states. The layout is a three-column grid that drops panes at
 # 1200px and 820px, so a fix that only holds at desktop width is not a fix — a phone is where

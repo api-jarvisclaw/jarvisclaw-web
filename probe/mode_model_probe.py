@@ -20,7 +20,7 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
-URL = os.environ.get("CHAT_URL", "https://chat.jarvisclaw.ai/")
+URL = os.environ.get("CHAT_URL", "https://ducat.jarvisclaw.ai/")
 
 # The mode, the model to pick first, and the default that must take over. Each default was
 # verified servable against the live gateway; see MODEL NOTES in src/lib/modality.ts.

@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  CATEGORY_LABELS,
+  categoryLabel,
   displayPrice,
   inferModality,
+  listApis,
   listCatalogue,
   listMarketplace,
   MODALITY_PATTERNS,
@@ -192,5 +195,135 @@ describe('listMarketplace', () => {
     })
     const services = await listMarketplace()
     expect(services[0].description).toBe('Fetch page contents')
+  })
+})
+
+describe('categoryLabel', () => {
+  it('names the categories a person would recognise', () => {
+    // The wire values are bare mechanism tokens. `blockchain` and `dns` are accurate about how the
+    // gateway groups things and useless as navigation for someone deciding where to look.
+    expect(categoryLabel('blockchain')).toBe('Crypto & Blockchain')
+    expect(categoryLabel('dns')).toBe('Domains & Web Intel')
+    expect(categoryLabel('utility')).toBe('Screenshots & Render')
+  })
+
+  it('shows an unknown category rather than hiding it', () => {
+    // Not hypothetical: the live facet went from 18 categories to 26 during this change. A lookup
+    // returning '' for a miss would have hidden six of them from the nav, leaving their endpoints
+    // reachable only by search. Falling through to a title-cased wire value is worse-looking and
+    // correct — and it is what let `ai tools` and `financial` appear the day they were added.
+    expect(categoryLabel('quantum_stuff')).toBe('Quantum Stuff')
+    expect(categoryLabel('ai tools')).toBe('Ai Tools')
+    expect(categoryLabel('newthing')).toBe('Newthing')
+  })
+
+  it('never maps two wire values to one label', () => {
+    // `crypto`/`blockchain` and `web scraping`/`web` are near-duplicate categories upstream, and
+    // merging their labels is the obvious tidy-up. It must not happen: `category=` takes ONE value
+    // (measured — a second is ignored, a comma-joined pair matches nothing), so a merged pill would
+    // sum both counts and filter by one, promising 37 endpoints and delivering 35.
+    //
+    // Checked as a property of the whole table rather than on the two known pairs, because the
+    // next overlapping pair will be added upstream without warning.
+    const labels = Object.values(CATEGORY_LABELS)
+    expect(new Set(labels).size).toBe(labels.length)
+  })
+})
+
+describe('listApis', () => {
+  /**
+   * Returns the requested URLs rather than the spy itself.
+   *
+   * `vi.fn(async () => …)` infers a zero-argument signature, so `mock.calls[0][0]` is a type error
+   * — and the tempting fix (casting the spy to `any`) would silently accept a call with no
+   * arguments at all, which is exactly what these tests exist to rule out.
+   */
+  function stubApiPage(body: unknown) {
+    const urls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        urls.push(String(url))
+        return new Response(JSON.stringify({ data: body }), { status: 200 })
+      }),
+    )
+    return urls
+  }
+
+  const ROW = {
+    resource_id: 3570,
+    name: 'Audio To Text',
+    description: 'Transcribes audio content into text format.',
+    category: 'audio',
+    display_price: 0.0115,
+    method: 'POST',
+  }
+
+  it('reads the paginated envelope, its total and its category facet', async () => {
+    stubApiPage({
+      items: [ROW],
+      total: 2720,
+      categories: [
+        { category: 'general', count: 1312 },
+        { category: 'video', count: 22 },
+      ],
+    })
+    const page = await listApis()
+    expect(page.items[0]).toEqual({
+      resourceId: 3570,
+      name: 'Audio To Text',
+      description: 'Transcribes audio content into text format.',
+      category: 'audio',
+      priceUsd: 0.0115,
+      method: 'POST',
+    })
+    // The total is for the WHOLE filtered catalogue, not the page. A category heading that showed
+    // the page length would claim 24 endpoints for a category holding 1,312.
+    expect(page.total).toBe(2720)
+    expect(page.categories.map((c) => c.label)).toEqual(['General', 'Video'])
+  })
+
+  it('filters server-side, which is the only way a count can be true', async () => {
+    const urls = stubApiPage({ items: [], total: 22, categories: [] })
+    await listApis({ category: 'video', query: 'text', page: 2, pageSize: 24 })
+    expect(urls).toHaveLength(1)
+    const url = urls[0]
+    expect(url).toContain('category=video')
+    expect(url).toContain('q=text')
+    expect(url).toContain('page=2')
+    expect(url).toContain('page_size=24')
+  })
+
+  it('omits an empty filter instead of sending it blank', async () => {
+    // `category=` with no value is not the same request as no `category` at all, and this code
+    // should not depend on the gateway treating them alike.
+    const urls = stubApiPage({ items: [], total: 0, categories: [] })
+    await listApis({ category: '', query: '' })
+    expect(urls).toHaveLength(1)
+    const url = urls[0]
+    expect(url).not.toContain('category=')
+    expect(url).not.toContain('q=')
+  })
+
+  it('survives a row missing everything but its id', async () => {
+    // Defensive because the alternative is a card reading "undefined — $NaN per call". The id is
+    // the one field without a sensible default: it is how the endpoint is addressed, so a row
+    // lacking it is dropped rather than rendered as unusable.
+    stubApiPage({ items: [{ resource_id: 9 }, { name: 'no id here' }], total: 2 })
+    const page = await listApis()
+    expect(page.items).toHaveLength(1)
+    expect(page.items[0]).toMatchObject({
+      resourceId: 9,
+      name: 'endpoint 9',
+      priceUsd: 0,
+      method: 'POST',
+    })
+  })
+
+  it('reads an absent facet as empty rather than throwing', async () => {
+    stubApiPage({ items: [ROW] })
+    const page = await listApis()
+    expect(page.categories).toEqual([])
+    expect(page.total).toBe(0)
   })
 })

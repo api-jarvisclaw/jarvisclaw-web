@@ -2017,6 +2017,129 @@ button:not(:disabled):active {
   font-size: 14px;
 }
 
+/* ---- category navigation ----
+   A wrapping row of pills rather than a sidebar: there are 18 of them, they are the first thing
+   a newcomer needs, and a sidebar would compete with the app's existing one. */
+.market-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  max-width: 900px;
+  margin: 0 auto 18px;
+}
+
+.market-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted-foreground);
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.market-cat:hover {
+  color: var(--foreground);
+  border-color: color-mix(in oklch, var(--glow-brand) 40%, var(--border));
+}
+
+/* The selected state carries a real background rather than only a border tint. With 18 pills on
+   three wrapped rows, a border-only difference is genuinely hard to find again after scrolling. */
+.market-cat.is-on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.market-cat-n {
+  font-family: var(--mono);
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.market-count-line {
+  max-width: 900px;
+  margin: 0 auto 12px;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  font-family: var(--mono);
+}
+
+.market-pager {
+  max-width: 900px;
+  margin: 18px auto 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.market-page-btn {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--foreground);
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.market-page-btn:disabled {
+  opacity: 0.4;
+}
+
+.market-page-btn:not(:disabled):hover {
+  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+}
+
+.market-page-at {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* ---- named services, demoted below the endpoint grid ---- */
+.market-services {
+  max-width: 900px;
+  margin: 36px auto 0;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+}
+
+.market-services h2 {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0 0 5px;
+}
+
+.market-services .market-note {
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+
+.market-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.market-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--foreground);
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-family: var(--mono);
+}
+
+.market-chip:hover {
+  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+}
+
 .market-note-error {
   color: var(--destructive-text);
 }
@@ -2071,19 +2194,9 @@ button:not(:disabled):active {
   color: var(--muted-foreground);
 }
 
-/* Long endpoint paths must scroll inside the card rather than widen the grid — a single
-   2700-endpoint service name would otherwise push the page into horizontal scroll. */
-.market-sample {
-  display: block;
-  font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--muted-foreground);
-  background: color-mix(in oklch, var(--muted) 40%, transparent);
-  border-radius: var(--radius-sm);
-  padding: 5px 8px;
-  overflow-x: auto;
-  white-space: nowrap;
-}
+/* `.market-sample` lived here and is gone with the endpoint path it styled. The cards now show a
+   price and a category instead of `/v1/marketplace/<path>`, because a path is not what someone
+   choosing between 2,720 endpoints needs to read. */
 
 .market-ask {
   align-self: flex-start;

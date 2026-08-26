@@ -104,6 +104,9 @@ export function isModelUnavailable(err: unknown): boolean {
 
 interface RawFreeModel {
   model?: string
+  /**
+   * Present on `cheap` rows, ABSENT on `free` rows. Not the free signal — see below.
+   */
   free?: boolean
 }
 
@@ -118,11 +121,23 @@ interface RawFreeModel {
  * `auto/free` and the other virtual names are dropped: they are priced at zero and so
  * appear in this list, but falling back from `auto/free` to `auto/free` retries the
  * failure that started it.
+ *
+ * Membership in the `free` array IS the free signal. This used to require `free === true`
+ * on each row, and the endpoint does not send that field on free rows — it sends
+ * `{model, pricing_type, note: "completely free"}`, while `free: false` appears on the
+ * SEPARATE `cheap` array. So the filter matched nothing and this function returned an empty
+ * list on every call, silently: the fallback chain had no models in it and a failed request
+ * had nothing to retry with. Verified live against `/api/discovery/free-models` — 10 rows in
+ * `free`, none carrying the field.
+ *
+ * A defensive `free !== false` is kept so a row the endpoint ever marks unfree is excluded
+ * even if it appears here, but absence is treated as free because that is what the payload
+ * means.
  */
 export async function listFreeModels(opts: RequestOptions = {}): Promise<string[]> {
   const data = await getJson<{ free?: RawFreeModel[] }>('/api/discovery/free-models', opts)
   return (data.free ?? [])
-    .filter((m) => m.free === true && typeof m.model === 'string' && m.model !== '')
+    .filter((m) => m.free !== false && typeof m.model === 'string' && m.model !== '')
     .map((m) => m.model as string)
     .filter((name) => !name.startsWith('auto'))
 }

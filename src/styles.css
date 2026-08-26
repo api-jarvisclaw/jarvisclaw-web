@@ -857,6 +857,37 @@ body.is-resizing * {
   color: var(--foreground);
 }
 
+/* The live tail of the reasoning stream, shown only while no answer text exists yet.
+   Measured: the first reasoning frame lands in 1.3-1.8s and the first content frame 23-91s
+   later, so this fills the gap the "Thinking" label used to sit through silently.
+
+   Single-line and clipped, deliberately: this must not push the composer around or grow the
+   scroll height while it updates several times a second. `direction: rtl` keeps the newest
+   end of the text visible when it overflows, with `text-align: left` restoring reading order
+   for the Latin and CJK inside it. */
+.reasoning-tail {
+  align-self: flex-start;
+  max-width: 78%;
+  margin-top: -2px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: color-mix(in oklch, var(--muted-foreground) 72%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Nothing animates here, but the tail is a moving element by nature. Kept visible because
+     it is information about progress, not decoration that can be dropped. */
+  .reasoning-tail {
+    opacity: 1;
+  }
+}
+
 /* ---- tool steps ---- */
 
 .tool-row {

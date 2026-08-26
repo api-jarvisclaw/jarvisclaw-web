@@ -60,6 +60,38 @@ describe('listFreeModels', () => {
     return expect(listFreeModels(OPTS)).resolves.toEqual(['nvidia/step-3.7-flash'])
   })
 
+  it('accepts the shape the endpoint actually sends, with no `free` field at all', async () => {
+    /**
+     * The case every test above invented its way around, and the reason this function returned
+     * an empty list in production for as long as it has existed.
+     *
+     * Each of those stubs writes `free: true`. The live endpoint does not send that field on a
+     * free row — it sends `{model, pricing_type, note: "completely free"}`, and `free: false`
+     * appears on the separate `cheap` array instead. Verified against
+     * `/api/discovery/free-models`: 10 rows under `free`, none carrying the field. So the old
+     * `free === true` filter matched nothing, `listFreeModels` returned `[]` on every call, and
+     * the fallback chain had no models to retry a failed request with — silently, because an
+     * empty list is a legitimate value.
+     *
+     * Membership in the array is the signal. This asserts the real payload.
+     */
+    stubFreeModels([
+      { model: 'nvidia/step-3.7-flash', pricing_type: 'per-token', note: 'completely free' },
+      { model: 'zai/glm-4-flash', pricing_type: 'per-token', note: 'completely free' },
+    ] as never)
+    expect(await listFreeModels(OPTS)).toEqual(['nvidia/step-3.7-flash', 'zai/glm-4-flash'])
+  })
+
+  it('still excludes a row the endpoint explicitly marks unfree', async () => {
+    // Absence means free; `false` is respected where it appears. Both halves asserted so the
+    // loosened filter cannot become "accept everything".
+    stubFreeModels([
+      { model: 'nvidia/step-3.7-flash' } as never,
+      { model: 'zai/glm-4-air', free: false },
+    ])
+    expect(await listFreeModels(OPTS)).toEqual(['nvidia/step-3.7-flash'])
+  })
+
   it('drops the virtual auto/* names', async () => {
     // auto/free is priced at zero and so appears in this list. Falling back from
     // auto/free to auto/free retries the exact failure that triggered the fallback.

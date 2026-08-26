@@ -60,6 +60,23 @@ function systemPrompt(opts: { anonymous: boolean }): string {
     '- Never call the same tool twice with near-identical arguments. If a search did not find it, ' +
       'a reworded search will not either — say what you found and what you could not.',
     /**
+     * The biggest single latency win available, and it is not about tool calls at all.
+     *
+     * Measured against the gateway on "解释一下 GIL": the model emits its first REASONING frame at
+     * 1.3-1.8s and its first CONTENT frame at 23-91s, because it writes 3,000-7,500 characters of
+     * deliberation first. The stream was never the problem — frames arrive the whole time — the
+     * user is waiting on the model to stop thinking.
+     *
+     * With this rule: reasoning drops to a median of 213 characters and first content to 12.7s,
+     * from 3,716 characters and 77s. Same model, same question, three runs each.
+     *
+     * `reasoning_effort: 'low'` was tried first and is weaker (572 chars / 35.9s) — it is also not
+     * honoured uniformly across the free pool, while a system rule reaches every model.
+     */
+    '- Think briefly. A short plan is enough; do not deliberate at length before answering. Long ' +
+      'deliberation is the single largest thing the user waits through, and on a question you can ' +
+      'answer directly it buys nothing.',
+    /**
      * The fabrication ban, and its position here is the correction of my own mistake.
      *
      * I first wrote this into `call_api`'s no-payment branch, which was the wrong place twice over.
@@ -118,12 +135,31 @@ function systemPrompt(opts: { anonymous: boolean }): string {
      * gets a 402 carrying the price, not a refusal — so the agent's job is to REPORT the price. That
      * is a useful answer; "I don't have access to a real-time clock API" is a false one.
      */
+    /**
+     * The round trip this used to cost, and why it was avoidable.
+     *
+     * The previous wording told the model to "call_api ... it will return the API name and its
+     * exact cost instead of calling". That works, and it is a whole extra turn to learn a price
+     * `search_apis` ALREADY returned on the row (`price=$0.001380/call`). Measured on the live
+     * console: the bitcoin question spent search_apis → call_api → answer, and the middle step
+     * retrieved nothing the model did not already have.
+     *
+     * A turn is not cheap here. Time-to-first-token on the free pool has a median around 2.5s and
+     * a tail past 30s (measured over the whole pool), so removing one round trip removes a whole
+     * draw from that distribution — which is the only lever available, since `auto/free` already
+     * routes to the fastest usable free model and pinning a specific one measured worse.
+     *
+     * So: report the price from the search row, and skip the call that cannot succeed. `call_api`
+     * still returns the price if the model calls it anyway — that path is the backstop, not the
+     * instruction.
+     */
     lines.push(
-      '- This session has no wallet and no API key, so it cannot complete a paid call. You can still ' +
-        'look an API up and price it: call_api will return the API name and its exact cost instead of ' +
-        'calling. When that happens, tell the user the API exists, what it costs, and that connecting ' +
-        'a wallet or signing in unlocks it — then answer whatever part of the question you can ' +
-        'yourself. Never tell the user a capability does not exist when it is in the catalogue.',
+      '- This session has no wallet and no API key, so it cannot complete a paid call. Do NOT call ' +
+        'call_api in this session: it cannot pay, and search_apis already gave you the price on each ' +
+        'row. Report that price straight from the search result — tell the user the API exists, what ' +
+        'it costs per call, and that connecting a wallet or signing in unlocks it — then answer ' +
+        'whatever part of the question you can yourself. Never tell the user a capability does not ' +
+        'exist when it is in the catalogue.',
     )
   }
 

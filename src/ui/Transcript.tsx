@@ -125,6 +125,24 @@ export function Transcript({
   )
 }
 
+/**
+ * The last line of a reasoning stream, for the one-line live tail.
+ *
+ * Exported for its test. Takes the tail rather than the head because the head stops changing
+ * immediately — a frozen first sentence is exactly the "nothing is happening" this exists to
+ * dispel — and collapses newlines so a multi-line thought cannot grow the layout mid-stream.
+ *
+ * `TAIL_CHARS` is a display cap, not a semantic one: this text is decoration, and the full
+ * reasoning stays available in the `<details>` above it.
+ */
+export const TAIL_CHARS = 140
+
+export function tailOf(reasoning: string): string {
+  const flat = reasoning.replace(/\s+/g, ' ').trim()
+  if (flat.length <= TAIL_CHARS) return flat
+  return `…${flat.slice(flat.length - TAIL_CHARS)}`
+}
+
 function TurnView({ turn }: { turn: Turn }) {
   if (turn.kind === 'user') {
     return (
@@ -153,12 +171,24 @@ function TurnView({ turn }: { turn: Turn }) {
       ))}
 
       {/* Collapsed by default: on several free models the reasoning is most of the
-          output, and showing it expanded reads as the answer. */}
+          output, and showing it expanded reads as the answer.
+
+          The live tail is what makes the wait legible. Measured against the gateway: the first
+          reasoning frame arrives in 1.3-1.8s while the first content frame can be 23-91s later, so
+          for most of the wait this component HAS data and was rendering a static word. The page
+          looked frozen while the stream was healthy — the complaint was "都要等待一段时间", and
+          the honest fix is partly to show that something is happening. Only while it is still the
+          last thing in the turn: once text arrives the tail would compete with the answer. */}
       {turn.reasoning.trim() !== '' && (
         <details className="reasoning">
           <summary>Thinking</summary>
           {turn.reasoning}
         </details>
+      )}
+      {turn.reasoning.trim() !== '' && turn.text.trim() === '' && (
+        <div className="reasoning-tail" aria-hidden="true">
+          {tailOf(turn.reasoning)}
+        </div>
       )}
 
       {turn.text.trim() !== '' && <div className="bubble">{turn.text}</div>}

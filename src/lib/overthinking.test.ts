@@ -187,6 +187,20 @@ describe('the free session is told the price, not that the capability is missing
        */
       expect(prompt).toMatch(/Do NOT convert a price into another currency/)
       expect(prompt).toMatch(/an exchange rate is live data you do not have/)
+
+      /**
+       * The brevity rule, which is the largest measured latency win and has nothing to do with
+       * tool calls.
+       *
+       * Measured against the gateway on "解释一下 GIL": first REASONING frame at 1.3-1.8s, first
+       * CONTENT frame at 23-91s, because the model writes 3,000-7,500 characters of deliberation
+       * first. With this rule: 213 characters and 12.7s. Three runs each, same model.
+       *
+       * In the prompt rather than as `reasoning_effort: 'low'` — that measured weaker (572 chars,
+       * 35.9s) and is not honoured uniformly across the free pool.
+       */
+      expect(prompt).toMatch(/Think briefly/)
+      expect(prompt).toMatch(/do not deliberate at length/)
     }
   })
 

@@ -14,44 +14,90 @@
   overflow-y: auto;
   background: var(--background);
   color: var(--foreground);
+
+  /* One measure and one gutter for the whole page.
+   *
+   * Declared here rather than repeated per section because the failure they prevent is exactly the one
+   * measured in this file: four different left edges (24 / 240 / 354 / 410) on one page, each from a
+   * rule that was locally reasonable. A shared variable makes "does this line up" a question with one
+   * answer instead of five. */
+  --page-measure: 1020px;
+  --page-gutter: 28px;
 }
 
+/* The bar's background and border span the window; its contents sit on the page measure, so the brand
+   lines up with the section headings underneath rather than hugging the window edge. */
 .page-nav {
   position: sticky;
   top: 0;
   z-index: 20;
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  padding: 14px 28px;
   border-bottom: 1px solid var(--border);
+  padding-inline: var(--page-gutter);
   /* The one blur on this page, and it is on an overlay — the console's own convention. A sticky
      bar over scrolling content is exactly the case backdrop-filter exists for. */
   background: color-mix(in oklab, var(--background) 82%, transparent);
   backdrop-filter: blur(10px);
 }
 
+.page-nav-inner {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  max-width: var(--page-measure);
+  margin-inline: auto;
+  padding-block: 13px;
+}
+
+/* The wordmark.
+ *
+ * It read "ducat" at 14.5px — two problems beyond the name itself. It was the same size as the nav
+ * links beside it, so nothing marked it as the brand rather than a seventh menu item; and it carried
+ * no optical letter-spacing, so it read as default text rather than set type.
+ *
+ * The name is now the product's, matching the console's bar, the tab icon and the main site. */
 .page-brand {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-size: 14.5px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  /* An anchor now, so it needs the link defaults undone. It points at `/` from `/` — which is what a
-     logo does everywhere, and it means someone who scrolled to the FAQ has the ordinary way back to
-     the top rather than having to hunt for it. */
+  gap: 9px;
+  /* An anchor, so the link defaults need undoing. It points at `/` from `/` — which is what a logo does
+     everywhere, and it gives someone who scrolled to the FAQ the ordinary way back to the top. */
   color: inherit;
   text-decoration: none;
   flex: none;
 }
 
-/* The real logo, the same file the console's rail and the tab icon use. It was a solid `--primary`
+.page-brand-name {
+  font-size: 17px;
+  font-weight: 700;
+  /* Tight enough to read as a set wordmark rather than a run of body text, and not so tight that the
+     letters touch at this size. */
+  letter-spacing: -0.021em;
+  white-space: nowrap;
+}
+
+/* The real logo, the same file the console's bar and the tab icon use. It was a solid `--primary`
    square, which made this the third different mark for one product. */
 .page-mark {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  object-fit: contain;
+  flex: none;
+}
+
+/* ---- footer brand ---- */
+
+.page-foot-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 650;
+  color: var(--foreground);
+  letter-spacing: -0.015em;
+}
+
+.page-foot-brand img {
+  border-radius: 5px;
   object-fit: contain;
 }
 
@@ -123,10 +169,20 @@
 
 /* ---- hero ---- */
 
+/* The hero shares the page measure and the page gutter, so its outer edge matches every band below it.
+   The narrower measures inside it — the lede at 62ch, the input at 620px — are deliberate and stay:
+   a 1020px line of body text is unreadable, and a full-width single-line input looks like a search
+   engine. Those are centred WITHIN this box, which is why they read as intentional rather than ragged. */
+/* The gutter is added TO the measure here, not taken out of it.
+ *
+ * Measured otherwise: the hero's own children landed at 238 while every band's landed at 210, because
+ * capping the box at 1020 and then padding it 28px leaves 964px of content — the gutter counted twice.
+ * The bands do not have this problem because their padding is on the full-width section and the measure
+ * is on the children inside it. Two correct-looking rules producing a 28px step down the page. */
 .page-hero {
-  max-width: 780px;
+  max-width: calc(var(--page-measure) + var(--page-gutter) * 2);
   margin: 0 auto;
-  padding: 72px 24px 64px;
+  padding: clamp(56px, 7vw, 88px) var(--page-gutter) clamp(48px, 6vw, 72px);
   text-align: center;
 }
 
@@ -216,8 +272,11 @@
 
 /* ---- bands ---- */
 
+/* Vertical rhythm from one pair of numbers, not a different padding per section. `clamp` scales the
+   space with the viewport so a phone does not get desktop-sized gaps between sections it has to
+   scroll past. */
 .page-band {
-  padding: 56px 24px;
+  padding: clamp(48px, 6vw, 76px) var(--page-gutter);
   border-top: 1px solid var(--border);
 }
 
@@ -226,21 +285,41 @@
   background: color-mix(in oklab, var(--muted) 45%, var(--background));
 }
 
+/* One measure for the whole page, so every section shares a left edge.
+ *
+ * MEASURED before this: the page had four of them. Section headings sat at left=24 while their own
+ * card grids sat at left=240 — a 216px mismatch on every band — and the hero was centred on a third
+ * edge with its input on a fourth.
+ *
+ * The cause was shorthand order, not a missing rule. `.page-band > *` set `margin-left/right: auto`,
+ * and `.page-band h2` — written AFTER it, same specificity — reset `margin: 0 0 6px`. The shorthand
+ * writes all four sides, so it silently replaced the auto centring with 0. Every heading on the page
+ * was flush against the section padding while its body was centred in 960px.
+ *
+ * Fixed by giving the band an inner measure of its own rather than centring each child, which removes
+ * the chance for any one child's margin shorthand to opt out. */
 .page-band > * {
-  max-width: 960px;
+  max-width: var(--page-measure);
   margin-left: auto;
   margin-right: auto;
 }
 
 .page-band h2 {
-  margin: 0 0 6px;
+  /* margin-bottom only. A `margin` shorthand here would rewrite the `auto` sides above and put this
+     heading back at the section's padding edge, 216px left of its own content — which is exactly the
+     bug this file used to have. */
+  margin-block: 0 6px;
   font-size: clamp(20px, 2.6vw, 27px);
   font-weight: 700;
   letter-spacing: -0.02em;
 }
 
 .page-band-lede {
-  margin: 0 0 26px;
+  /* margin-block, for the same reason as the h2 above: this is a direct child of .page-band, so a
+     `margin` shorthand would overwrite the auto sides and strand it at the padding edge. Two
+     elements had this bug; it is a property of the shorthand, not of one rule. */
+  margin-block: 0 26px;
+  max-width: 68ch;
   font-size: 14.5px;
   line-height: 1.6;
   color: var(--muted-foreground);
@@ -483,33 +562,53 @@
 
 /* ---- close + footer ---- */
 
+/* Measured at 1392px wide before this — the widest thing on the page, because it had padding but no
+   measure at all. A closing line stretched across the full window after six sections at 1020px reads
+   as a different page. */
 .page-close {
-  padding: 68px 24px;
+  padding: clamp(56px, 7vw, 84px) var(--page-gutter);
   border-top: 1px solid var(--border);
   text-align: center;
 }
 
+.page-close > * {
+  max-width: var(--page-measure);
+  margin-inline: auto;
+}
+
+/* margin-block on both, for the third and fourth time in this file: a `margin` shorthand on a direct
+   child overwrites the `auto` sides from `.page-close > *` and strands the element at the padding edge.
+   Measured here as left=28 against every other section's 210. */
 .page-close h2 {
-  margin: 0 0 8px;
+  margin-block: 0 8px;
   font-size: clamp(22px, 3vw, 32px);
   font-weight: 700;
   letter-spacing: -0.025em;
 }
 
 .page-close p {
-  margin: 0 0 24px;
+  margin-block: 0 24px;
   color: var(--muted-foreground);
   font-size: 15px;
 }
 
+/* The footer's rule spans the window, its CONTENT sits on the page measure — so the line reads as the
+   bottom of the page while the text still lines up with the six sections above it. Padding alone
+   (which is what this had) leaves the content at the window edge on a wide monitor. */
 .page-foot {
+  border-top: 1px solid var(--border);
+  padding-inline: var(--page-gutter);
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+.page-foot-inner {
   display: flex;
   align-items: center;
   gap: 20px;
-  padding: 22px 28px 34px;
-  border-top: 1px solid var(--border);
-  font-size: 13px;
-  color: var(--muted-foreground);
+  max-width: var(--page-measure);
+  margin-inline: auto;
+  padding-block: 24px 36px;
 }
 
 .page-foot nav {
@@ -550,5 +649,53 @@
   .page-prompt button {
     justify-content: center;
     padding: 12px 20px;
+  }
+}
+
+/* Below this the bar holds a wordmark, five destinations and a CTA, and the three stop fitting.
+ *
+ * Measured at 390px: the wordmark grew from 68px to 118px when it became "JarvisClaw" at 17px, and the
+ * CTA was pushed to right=413 in a 390px window — off the screen, and it is the bar's only button.
+ *
+ * The wordmark keeps its size and the CTA keeps its label; the gutter tightens and the CTA loses padding
+ * it does not need on a phone. Shrinking the wordmark instead would undo the change that made it read as
+ * a brand, and truncating the CTA would leave the primary action unreadable. */
+@media (max-width: 560px) {
+  .page {
+    --page-gutter: 18px;
+  }
+
+  .page-nav-inner {
+    gap: 12px;
+  }
+
+  .page-cta-sm {
+    padding: 8px 12px;
+  }
+
+  /* The nav's own gap can go tighter too, since it scrolls: its items stay reachable either way, and the
+     space it gives up is what keeps the CTA on screen. */
+  .page-nav nav {
+    gap: 14px;
+  }
+}
+
+/* The smallest phones still in use — a 320px iPhone SE, a 360px Android.
+ *
+ * Measured after the tightening above: the CTA still ran to right=373 in a 360px window. Three items
+ * simply do not fit, so one has to give up something, and the CTA's LABEL is the right thing to shorten:
+ * "Open" beside an arrow, next to a wordmark, in the top-right corner is unambiguous, whereas dropping
+ * the button leaves the page with no call to action and dropping the nav leaves it with no navigation.
+ *
+ * Done in CSS rather than by branching the markup on a width, because a JS breakpoint would have to
+ * listen for resize and would flash the wrong label on first paint. */
+@media (max-width: 380px) {
+  .page-cta-label {
+    /* Only the words are hidden; the arrow and the button's own label for assistive tech both stay. */
+    display: none;
+  }
+
+  .page-cta-sm::before {
+    content: 'Open';
   }
 }

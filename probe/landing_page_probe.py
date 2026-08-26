@@ -101,6 +101,97 @@ def main() -> int:
         if not any("npm i -g jarvisclaw" in c for c in struct["commands"]):
             fails.append(f"no install command for the published package: {struct['commands']}")
 
+        # Every section shares one left edge.
+        #
+        # MEASURED before this was fixed: four of them on one page. Section headings sat at left=24 while
+        # their own card grids sat at 240 — a 216px mismatch on all six bands — the hero was centred on a
+        # third edge, and the closing section was the widest thing on the page at 1392px.
+        #
+        # The cause was `margin` shorthand order, four times over: `.page-band > *` set
+        # `margin-left/right: auto`, and rules written after it reset `margin: 0 0 6px`, which writes all
+        # four sides and silently discarded the centring. Nothing about that is visible in a stylesheet
+        # and no unit test can see it, which is why it is measured here.
+        for vw in (390, 768, 1280, 1440, 2560):
+            page.set_viewport_size({"width": vw, "height": 900})
+            page.wait_for_timeout(350)
+            edges = page.evaluate(
+                """() => {
+                    const seen = new Map()
+                    const add = (label, el) => {
+                      if (!el) return
+                      seen.set(label, Math.round(el.getBoundingClientRect().left))
+                    }
+                    add('brand', document.querySelector('.page-brand'))
+                    add('hero', document.querySelector('.page-hero h1'))
+                    document.querySelectorAll('.page-band').forEach((s, i) => {
+                      add(`band${i + 1} heading`, s.querySelector('h2'))
+                      add(`band${i + 1} body`,
+                          s.querySelector('.page-cards,.page-steps,.page-faq,.page-table-wrap'))
+                    })
+                    add('close', document.querySelector('.page-close h2'))
+                    add('footer', document.querySelector('.page-foot-inner'))
+                    return {
+                      byLabel: Object.fromEntries(seen),
+                      distinct: [...new Set(seen.values())].sort((a, b) => a - b),
+                      bodyScrollsX: document.documentElement.scrollWidth > window.innerWidth + 1,
+                    }
+                }"""
+            )
+            print(f"edges  vw={vw:5} distinct={edges['distinct']} bodyX={edges['bodyScrollsX']}")
+            if len(edges["distinct"]) != 1:
+                # Names the offenders, not just the count — "2 edges" sends you through the whole
+                # stylesheet, whereas "band3 heading at 28" is the rule to open.
+                #
+                # The majority edge is the reference, NOT the smallest one. Sorting and taking [0] listed
+                # the ten CONFORMING elements as off-measure when the six broken ones sat further left,
+                # which points at the wrong rules — the report has to identify the minority.
+                counts: dict[int, int] = {}
+                for v in edges["byLabel"].values():
+                    counts[v] = counts.get(v, 0) + 1
+                majority = max(counts, key=lambda k: counts[k])
+                odd = {k: v for k, v in edges["byLabel"].items() if v != majority}
+                fails.append(
+                    f"vw={vw}: {len(edges['distinct'])} different left edges;"
+                    f" most sit at {majority}, these do not: {odd}"
+                )
+            if edges["bodyScrollsX"]:
+                fails.append(f"vw={vw}: the page scrolls sideways")
+        page.set_viewport_size({"width": 1440, "height": 900})
+        page.wait_for_timeout(350)
+
+        # The wordmark says the product's name, not the subdomain.
+        #
+        # It said "ducat", which is the host this is served from. The console's own bar — one click away —
+        # says JarvisClaw, so a visitor reading both had to work out whether they were the same product.
+        brand = page.evaluate(
+            """() => {
+                const el = document.querySelector('.page-brand')
+                const name = document.querySelector('.page-brand-name')
+                const cs = name ? getComputedStyle(name) : null
+                return {
+                  text: el ? el.textContent.trim() : null,
+                  size: cs ? Math.round(parseFloat(cs.fontSize)) : 0,
+                  weight: cs ? cs.fontWeight : '',
+                  family: cs ? cs.fontFamily.split(',')[0].replace(/"/g, '') : '',
+                }
+            }"""
+        )
+        print(f"brand  {brand}")
+        if brand["text"] != "JarvisClaw":
+            fails.append(f"the wordmark reads {brand['text']!r}, not the product name")
+        # Bigger than the nav links beside it, or nothing marks it as the brand rather than a menu item.
+        nav_size = page.evaluate(
+            """() => {
+                const a = document.querySelector('.page-nav nav a')
+                return a ? Math.round(parseFloat(getComputedStyle(a).fontSize)) : 0
+            }"""
+        )
+        if brand["size"] <= nav_size:
+            fails.append(f"the wordmark is {brand['size']}px against {nav_size}px nav links — same weight visually")
+        # And it is not set in a monospace face, which is what made it read as terminal output.
+        if "mono" in brand["family"].lower():
+            fails.append(f"the wordmark is set in {brand['family']}")
+
         # The counts are the pitch, so they have to be real rather than a dash.
         #
         # Matched against the SLOTS, not the whole sentence. Searching the string for an em dash

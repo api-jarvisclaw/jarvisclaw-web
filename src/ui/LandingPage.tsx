@@ -82,51 +82,61 @@ export function LandingPage({
   return (
     <div className="page">
       <header className="page-nav">
-        <a className="page-brand" href={LANDING_PATH} aria-label="ducat home">
-          <img className="page-mark" src="/jc.png" alt="" width={22} height={22} />
-          ducat
-        </a>
+        <div className="page-nav-inner">
+          {/* The product is JarvisClaw. "ducat" was the wordmark here and it should not have been: it is
+              the subdomain this happens to be served from, and the console's own top bar — one click
+              away — says JarvisClaw. A visitor who reads one then the other has to work out whether
+              they are the same product, which is a question no landing page should raise about itself.
+              The mark and the name now match the bar, the tab icon and the main site. */}
+          <a className="page-brand" href={LANDING_PATH} aria-label="JarvisClaw home">
+            <img className="page-mark" src="/jc.png" alt="" width={26} height={26} />
+            <span className="page-brand-name">JarvisClaw</span>
+          </a>
 
-        {/* The same list the console's bar renders, from lib/nav.ts. Two hand-kept navs drift, and an
-            item present on one bar and missing from the other reads as a link that breaks on some
-            pages. */}
-        <nav aria-label="Sections">
-          {navFor('landing').map((item) =>
-            item.kind === 'anchor' ? (
-              // Classed so the narrow-screen rule can drop the anchors and keep the destinations. The
-              // breakpoint used to hide this whole nav, which was right when every item was an in-page
-              // jump — and became wrong the moment real links joined it, leaving a phone visitor no way
-              // to reach the marketplace or the docs at all.
-              <a key={item.label} className="page-nav-anchor" href={item.to}>
-                {item.label}
-              </a>
-            ) : item.kind === 'view' ? (
-              // A real href into the console pane, so it can be copied or middle-clicked; the click
-              // handler keeps an ordinary click client-side. Modified clicks are left alone —
-              // swallowing cmd-click would turn "open in a new tab" into an in-place navigation.
-              <a
-                key={item.label}
-                href={pathForView(item.view)}
-                onClick={(e) => {
-                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
-                  e.preventDefault()
-                  onEnter(undefined, pathForView(item.view))
-                }}
-              >
-                {item.label}
-              </a>
-            ) : (
-              <a key={item.label} href={item.href} target="_blank" rel="noopener noreferrer">
-                {item.label}
-              </a>
-            ),
-          )}
-        </nav>
+          {/* The same list the console's bar renders, from lib/nav.ts. Two hand-kept navs drift, and an
+              item present on one bar and missing from the other reads as a link that breaks on some
+              pages. */}
+          <nav aria-label="Sections">
+            {navFor('landing').map((item) =>
+              item.kind === 'anchor' ? (
+                // Classed so the narrow-screen rule can drop the anchors and keep the destinations. The
+                // breakpoint used to hide this whole nav, which was right when every item was an in-page
+                // jump — and became wrong the moment real links joined it, leaving a phone visitor no way
+                // to reach the marketplace or the docs at all.
+                <a key={item.label} className="page-nav-anchor" href={item.to}>
+                  {item.label}
+                </a>
+              ) : item.kind === 'view' ? (
+                // A real href into the console pane, so it can be copied or middle-clicked; the click
+                // handler keeps an ordinary click client-side. Modified clicks are left alone —
+                // swallowing cmd-click would turn "open in a new tab" into an in-place navigation.
+                <a
+                  key={item.label}
+                  href={pathForView(item.view)}
+                  onClick={(e) => {
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
+                    e.preventDefault()
+                    onEnter(undefined, pathForView(item.view))
+                  }}
+                >
+                  {item.label}
+                </a>
+              ) : (
+                <a key={item.label} href={item.href} target="_blank" rel="noopener noreferrer">
+                  {item.label}
+                </a>
+              ),
+            )}
+          </nav>
 
-        <button className="page-cta-sm" onClick={() => onEnter()}>
-          Open the console
-          <ArrowRightIcon size={13} aria-hidden="true" />
-        </button>
+          {/* The label is wrapped so the narrowest phones can shorten it to "Open" in CSS. `aria-label`
+              carries the full wording either way, so what a screen reader announces does not change with
+              the viewport — the visual abbreviation is for space, not a different action. */}
+          <button className="page-cta-sm" onClick={() => onEnter()} aria-label="Open the console">
+            <span className="page-cta-label">Open the console</span>
+            <ArrowRightIcon size={13} aria-hidden="true" />
+          </button>
+        </div>
       </header>
 
       <section className="page-hero">
@@ -374,18 +384,27 @@ export function LandingPage({
       </section>
 
       <footer className="page-foot">
-        <span>JarvisClaw</span>
-        <nav>
-          <a href="https://docs.jarvisclaw.ai" target="_blank" rel="noopener noreferrer">
-            Docs
-          </a>
-          <a href={DEFAULT_BASE_URL} target="_blank" rel="noopener noreferrer">
-            Platform
-          </a>
-          <a href="https://blog.jarvisclaw.ai" target="_blank" rel="noopener noreferrer">
-            Blog
-          </a>
-        </nav>
+        {/* An inner wrapper, so the rule spans the window while the text lines up with the six sections
+            above it. Padding alone left this against the window edge on a wide monitor. */}
+        <div className="page-foot-inner">
+          <span className="page-foot-brand">
+            <img src="/jc.png" alt="" width={18} height={18} />
+            JarvisClaw
+          </span>
+          <nav>
+            <a href="https://docs.jarvisclaw.ai" target="_blank" rel="noopener noreferrer">
+              Docs
+            </a>
+            {/* jarvisclaw.ai, not the API host. DEFAULT_BASE_URL is api.jarvisclaw.ai — a gateway, not a
+                page — so "Platform" pointed a human at a machine endpoint. */}
+            <a href="https://jarvisclaw.ai" target="_blank" rel="noopener noreferrer">
+              Platform
+            </a>
+            <a href="https://blog.jarvisclaw.ai" target="_blank" rel="noopener noreferrer">
+              Blog
+            </a>
+          </nav>
+        </div>
       </footer>
     </div>
   )

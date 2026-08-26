@@ -116,12 +116,25 @@ def main() -> int:
             fails.append("the gateway does not have /api/user/session deployed yet")
 
         # ── the panel itself ──
+        #
+        # No assertion that the re-check button exists, and two wrong versions taught me why.
+        # First I looked for it AFTER clicking, where a successful sign-in has correctly removed
+        # it. Then I looked before clicking — and it was still absent, because by then the page
+        # had already found the session on its own mount and rendered the signed-in panel.
+        #
+        # Both were false failures on a run that had just proved the whole flow works. The button
+        # is a convenience for the case where sign-in finishes in another tab AFTER this page
+        # loaded; whether it is on screen depends on timing that is not the app's contract. What
+        # IS the contract is the panel naming the account, which is asserted below.
         btn = chat.get_by_role("button", name="I've signed in")
-        if not btn.count():
-            fails.append("no 'I've signed in' button in the panel")
-        else:
+        if btn.count():
             btn.first.click()
             chat.wait_for_timeout(5000)
+            print("   (pressed the re-check button)")
+        else:
+            # The session was already picked up on mount, which is the better outcome.
+            chat.wait_for_timeout(1500)
+            print("   (session recognised on load, no re-check needed)")
 
         sidebar = re.sub(r"\s+", " ", chat.inner_text(".sidebar")).strip()
         i = sidebar.find("ACCOUNT")

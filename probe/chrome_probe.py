@@ -124,12 +124,12 @@ def main() -> int:
         page.wait_for_selector(".shell", timeout=20000)
         page.wait_for_timeout(2000)
 
-        # The rail's mark must be an <img> that DECODED, not merely an element that exists. A wrong
+        # The bar's mark must be an <img> that DECODED, not merely an element that exists. A wrong
         # path leaves naturalWidth at 0 and renders nothing — indistinguishable from the chip it
         # replaced, and the reason this checks pixels rather than the attribute.
         mark = page.evaluate(
             """() => {
-                const el = document.querySelector('.rail-brand .brand-mark')
+                const el = document.querySelector('.topbar-brand .brand-mark')
                 if (!el) return null
                 return {
                     tag: el.tagName,
@@ -141,9 +141,83 @@ def main() -> int:
         )
         print(f"mark   {mark}")
         if not mark or mark["tag"] != "IMG":
-            fails.append("the rail brand mark is not an image")
+            fails.append("the top bar's brand mark is not an image")
         elif mark["natural"] == 0:
-            fails.append(f"the rail brand mark did not decode (src={mark['src']})")
+            fails.append(f"the top bar's brand mark did not decode (src={mark['src']})")
+
+        # --- 1b. the bar is GLOBAL: it spans the window and sits above every pane ---
+        #
+        # This is the whole complaint. Rendered inside `.main` the bar began after the rail's right
+        # border and stopped at the sidebar's left one — measured at 1600px as x=360..1280 of a 1600px
+        # window, cut into thirds by two vertical rules. Checked as geometry rather than as "the element
+        # exists", because the broken version had the element too.
+        span = page.evaluate(
+            """() => {
+                const bar = document.querySelector('.topbar').getBoundingClientRect()
+                const q = (s) => { const e = document.querySelector(s)
+                                   if (!e) return null
+                                   const r = e.getBoundingClientRect()
+                                   return { top: Math.round(r.top), left: Math.round(r.left) } }
+                return {
+                  left: Math.round(bar.left), right: Math.round(bar.right),
+                  bottom: Math.round(bar.bottom), vw: window.innerWidth,
+                  rail: q('.rail'), sidebar: q('.sidebar'), main: q('.main'),
+                }
+            }"""
+        )
+        print(
+            f"span   bar x={span['left']}..{span['right']} of {span['vw']}"
+            f"  bottom={span['bottom']}  rail.top={span['rail']['top']}"
+            f" sidebar.top={span['sidebar']['top']}"
+        )
+        if span["left"] != 0 or span["right"] != span["vw"]:
+            fails.append(
+                f"the bar spans {span['left']}..{span['right']} of a {span['vw']}px window, not edge to edge"
+            )
+        # Every pane must start BELOW it. A bar that overlaps a pane is floating over the layout rather
+        # than being part of it, and the pane's first row of content ends up underneath it.
+        for name in ("rail", "sidebar", "main"):
+            pane = span[name]
+            if pane and pane["top"] < span["bottom"]:
+                fails.append(f"the {name} starts at y={pane['top']}, above the bar's bottom edge")
+        # The brand is at the window's left edge, not indented to where the middle column used to start.
+        brand_left = page.evaluate(
+            "() => Math.round(document.querySelector('.topbar-brand').getBoundingClientRect().left)"
+        )
+        print(f"brand  left={brand_left}")
+        if brand_left > 40:
+            fails.append(f"the brand sits {brand_left}px in, so the bar is still indented")
+
+        # And it survives the rail being collapsed — the state in which the console previously had no
+        # navigation at all, because every destination lived in the pane that had just been hidden.
+        page.click(".rail-toggle")
+        page.wait_for_timeout(500)
+        closed = page.evaluate(
+            """() => {
+                const bar = document.querySelector('.topbar').getBoundingClientRect()
+                return { left: Math.round(bar.left), right: Math.round(bar.right),
+                         vw: window.innerWidth,
+                         navItems: document.querySelectorAll('.topnav .topnav-item').length,
+                         brand: !!document.querySelector('.topbar-brand'),
+                         railPresent: !!document.querySelector('.rail') }
+            }"""
+        )
+        print(
+            f"closed railPresent={closed['railPresent']} bar x={closed['left']}..{closed['right']}"
+            f" of {closed['vw']} nav={closed['navItems']} brand={closed['brand']}"
+        )
+        # The precondition for everything below it. The key was named `rail` and read "is it present",
+        # so `if closed['rail']` meant "fail when the rail IS gone" — the exact opposite, and it passed
+        # by reporting a working toggle as fine for the wrong reason. Without this check a toggle that
+        # silently stopped working would leave the three assertions below testing the open state.
+        if closed["railPresent"]:
+            fails.append("the rail toggle did not close the rail, so the collapsed state is untested")
+        if closed["navItems"] < 4 or not closed["brand"]:
+            fails.append("collapsing the rail took the navigation or the brand with it")
+        if closed["left"] != 0 or closed["right"] != closed["vw"]:
+            fails.append("the bar stopped spanning the window once the rail closed")
+        page.click(".rail-toggle")
+        page.wait_for_timeout(500)
 
         # --- 2. the top nav exists, and its items are real links ---
         items = page.evaluate(

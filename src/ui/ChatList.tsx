@@ -45,7 +45,6 @@ export function ChatList({
   onOpen,
   onDelete,
   onView,
-  onHome,
 }: {
   conversations: Conversation[]
   activeId: string | null
@@ -55,8 +54,8 @@ export function ChatList({
   onOpen: (id: string) => void
   onDelete: (id: string) => void
   onView: (v: RailView) => void
-  /** Back to the landing page. Omitted when there is nowhere to go back to. */
-  onHome?: () => void
+  // No onHome. The way back to the landing page is the brand in the global top bar, which is reachable
+  // whether or not this pane is open — the point of moving it there.
 }) {
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
@@ -68,22 +67,10 @@ export function ChatList({
       {/* The brand is the way back to the landing page, which is where a logo already leads on
           every other site — so this needs no extra nav item competing with "New chat". Rendered as
           a plain div when there is nowhere to go, rather than a button that does nothing. */}
-      {/* The mark is the real logo, not a gradient chip. It was a chip because a chip needs no asset,
-          and the cost of that was a brand nobody recognises: the same product's tab icon, main site
-          and console showed three different marks. `alt=""` because the name is right beside it —
-          a screen reader announcing "JarvisClaw JarvisClaw" is worse than silence. */}
-      {onHome ? (
-        <button className="rail-brand rail-brand-link" onClick={onHome} aria-label="Back to the home page">
-          <img className="brand-mark" src="/jc.png" alt="" width={24} height={24} />
-          <span className="rail-brand-name">JarvisClaw</span>
-        </button>
-      ) : (
-        <div className="rail-brand">
-          <img className="brand-mark" src="/jc.png" alt="" width={24} height={24} />
-          <span className="rail-brand-name">JarvisClaw</span>
-        </div>
-      )}
-
+      {/* No brand here.
+          It moved to the global top bar, which is where a logo belongs once there is one: the bar spans
+          the window, so the brand at its left edge reads as the site's, while a brand inside this pane
+          read as the pane's — and it disappeared entirely when the rail was collapsed. */}
       <button className="rail-item rail-item-strong" onClick={onNew}>
         <PlusIcon className="rail-glyph" size={16} aria-hidden="true" />
         New chat

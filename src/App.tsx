@@ -1105,148 +1105,167 @@ export function App({
   )
 
   return (
-    <div
-      ref={shell}
-      className={railOpen ? 'shell' : 'shell shell-rail-closed'}
-      /**
-       * The pane widths as custom properties, which is what lets a drag skip React entirely.
-       *
-       * The grid template reads them through `clamp()`, so the stylesheet still has the last word on
-       * a window too narrow to honour the stored number — and because that clamping happens in CSS,
-       * a temporarily-cramped viewport never overwrites the width the user chose.
-       */
-      style={
-        {
-          '--rail-w': `${panes.rail}px`,
-          '--sidebar-w': `${panes.sidebar}px`,
-        } as React.CSSProperties
-      }
-    >
-      {railOpen && (
-        <ChatList
-          onHome={onHome}
-          conversations={conversations}
-          activeId={activeId}
-          view={view}
-          galleryCount={gallery.length}
-          onNew={startNew}
-          onOpen={openConversation}
-          onDelete={deleteConversation}
-          onView={setView}
-        />
-      )}
-      {/* Between the panes it separates, in DOM order, so focus reaches it where it sits. Only when
-          the rail is open: a handle for a hidden pane would resize something invisible. */}
-      {railOpen && (
+    /**
+     * The window: one global bar, then the three panes beneath it.
+     *
+     * The bar used to be rendered inside `.main` — the grid's middle column — which made it a pane
+     * toolbar rather than a global bar: it started after the rail's right border and stopped at the
+     * sidebar's left one, with two vertical rules cutting the row into thirds and the brand stranded
+     * in the rail beside it.
+     *
+     * The rows are `auto` then `minmax(0, 1fr)`. The `0` floor is what still allows the panes to be
+     * shorter than their content, which is the permission their `overflow-y: auto` needs before it can
+     * do anything — the same constraint `.shell` states, moved up a level now that `.shell` is no
+     * longer the element capped to the viewport.
+     */
+    <div className="frame">
+      <TopNav
+        view={view}
+        anonymous={anonymous}
+        busy={busy}
+        theme={theme}
+        railOpen={railOpen}
+        hasTurns={turns.length > 0}
+        onView={setView}
+        onRail={() => setRailOpen((o) => !o)}
+        onTheme={setTheme}
+        onStop={stop}
+        onNew={startNew}
+        onHome={onHome}
+      />
+
+      <div
+        ref={shell}
+        className={railOpen ? 'shell' : 'shell shell-rail-closed'}
+        /**
+         * The pane widths as custom properties, which is what lets a drag skip React entirely.
+         *
+         * The grid template reads them through `clamp()`, so the stylesheet still has the last word on
+         * a window too narrow to honour the stored number — and because that clamping happens in CSS,
+         * a temporarily-cramped viewport never overwrites the width the user chose.
+         */
+        style={
+          {
+            '--rail-w': `${panes.rail}px`,
+            '--sidebar-w': `${panes.sidebar}px`,
+          } as React.CSSProperties
+        }
+      >
+        {railOpen && (
+          <ChatList
+            conversations={conversations}
+            activeId={activeId}
+            view={view}
+            galleryCount={gallery.length}
+            onNew={startNew}
+            onOpen={openConversation}
+            onDelete={deleteConversation}
+            onView={setView}
+          />
+        )}
+        {/* Between the panes it separates, in DOM order, so focus reaches it where it sits. Only when
+            the rail is open: a handle for a hidden pane would resize something invisible. */}
+        {railOpen && (
+          <PaneResizer
+            pane="rail"
+            width={panes.rail}
+            onWidth={(px) => setPaneWidth('rail', px)}
+            onCommit={commitPanes}
+          />
+        )}
+
+        <div className="main">
+          {view === 'gallery' ? (
+            <Gallery
+              items={gallery}
+              tab={galleryTab}
+              onTab={setGalleryTab}
+              onRemove={(id) =>
+                setGallery((g) => {
+                  const next = removeFromGallery(g, id)
+                  saveGallery(next)
+                  return next
+                })
+              }
+              /**
+               * Loads a showcase prompt into the composer instead of running it.
+               *
+               * Deliberately NOT run-on-click. These prompts carry
+               * `{argument name="…" default="…"}` markers where their author expected an edit, and
+               * a one-click run would charge for a verbatim reproduction of someone else's example
+               * before the user had a chance to change the headline. So the prompt lands in the box,
+               * in the right mode, and the existing consent dialog still asks before any money moves.
+               */
+              onUsePrompt={(prompt, promptMode) => {
+                setView('chat')
+                setMode(promptMode)
+                setDraft(prompt)
+              }}
+            />
+          ) : view === 'marketplace' ? (
+            <Marketplace
+              baseUrl={baseUrl}
+              onAsk={(prompt) => {
+                setView('chat')
+                void send(prompt)
+              }}
+            />
+          ) : (
+            <>
+              <Transcript
+                turns={turns}
+                empty={
+                  <Landing
+                    models={models}
+                    marketplaceTotal={marketSize?.total ?? null}
+                    onSuggestion={send}
+                  />
+                }
+              />
+              <Composer
+                busy={busy}
+                anonymous={anonymous}
+                models={models}
+                modelsLoading={modelsLoading}
+                model={model}
+                mode={mode}
+                options={mode === 'chat' ? {} : genOptions[mode]}
+                onModel={setModel}
+                onMode={setMode}
+                onOptions={(o) => {
+                  if (mode !== 'chat') setGenOptions((prev) => ({ ...prev, [mode]: o }))
+                }}
+                onSend={send}
+                draft={draft}
+              />
+            </>
+          )}
+        </div>
+
         <PaneResizer
-          pane="rail"
-          width={panes.rail}
-          onWidth={(px) => setPaneWidth('rail', px)}
+          pane="sidebar"
+          width={panes.sidebar}
+          onWidth={(px) => setPaneWidth('sidebar', px)}
           onCommit={commitPanes}
         />
-      )}
 
-      <div className="main">
-        <TopNav
-          view={view}
-          anonymous={anonymous}
-          busy={busy}
-          theme={theme}
-          railOpen={railOpen}
-          hasTurns={turns.length > 0}
-          onView={setView}
-          onRail={() => setRailOpen((o) => !o)}
-          onTheme={setTheme}
-          onStop={stop}
-          onNew={startNew}
+        <Sidebar
+          wallet={wallet}
+          spend={spend}
+          settings={settings}
+          account={account}
+          keyName={apiKey?.name ?? null}
+          onSettings={applySettings}
+          onAccount={setAccount}
+          onKey={setApiKey}
+          onWallet={setWallet}
         />
-
-        {view === 'gallery' ? (
-          <Gallery
-            items={gallery}
-            tab={galleryTab}
-            onTab={setGalleryTab}
-            onRemove={(id) =>
-              setGallery((g) => {
-                const next = removeFromGallery(g, id)
-                saveGallery(next)
-                return next
-              })
-            }
-            /**
-             * Loads a showcase prompt into the composer instead of running it.
-             *
-             * Deliberately NOT run-on-click. These prompts carry
-             * `{argument name="…" default="…"}` markers where their author expected an edit, and
-             * a one-click run would charge for a verbatim reproduction of someone else's example
-             * before the user had a chance to change the headline. So the prompt lands in the box,
-             * in the right mode, and the existing consent dialog still asks before any money moves.
-             */
-            onUsePrompt={(prompt, promptMode) => {
-              setView('chat')
-              setMode(promptMode)
-              setDraft(prompt)
-            }}
-          />
-        ) : view === 'marketplace' ? (
-          <Marketplace
-            baseUrl={baseUrl}
-            onAsk={(prompt) => {
-              setView('chat')
-              void send(prompt)
-            }}
-          />
-        ) : (
-          <>
-            <Transcript
-              turns={turns}
-              empty={
-                <Landing
-                  models={models}
-                  marketplaceTotal={marketSize?.total ?? null}
-                  onSuggestion={send}
-                />
-              }
-            />
-            <Composer
-              busy={busy}
-              anonymous={anonymous}
-              models={models}
-              modelsLoading={modelsLoading}
-              model={model}
-              mode={mode}
-              options={mode === 'chat' ? {} : genOptions[mode]}
-              onModel={setModel}
-              onMode={setMode}
-              onOptions={(o) => {
-                if (mode !== 'chat') setGenOptions((prev) => ({ ...prev, [mode]: o }))
-              }}
-              onSend={send}
-              draft={draft}
-            />
-          </>
-        )}
       </div>
 
-      <PaneResizer
-        pane="sidebar"
-        width={panes.sidebar}
-        onWidth={(px) => setPaneWidth('sidebar', px)}
-        onCommit={commitPanes}
-      />
-
-      <Sidebar
-        wallet={wallet}
-        spend={spend}
-        settings={settings}
-        account={account}
-        keyName={apiKey?.name ?? null}
-        onSettings={applySettings}
-        onAccount={setAccount}
-        onKey={setApiKey}
-        onWallet={setWallet}
-      />
-
+      {/* Outside the shell, deliberately. The shell sets `overflow: hidden` to stop a pane growing a
+          document scrollbar, and a clipping ancestor clips a fixed descendant too — so a dialog left
+          in there could be cut off by the very rule that keeps the composer pinned. This one asks the
+          user to approve a charge, which makes "partly off screen" the worst possible outcome. */}
       {pending && (
         <ConsentDialog
           pending={pending}

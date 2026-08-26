@@ -55,6 +55,14 @@ STATE = """() => {
     composerFullyVisible: r.top >= 0 && r.bottom <= innerHeight + 1,
     mainH: Math.round(m.getBoundingClientRect().height),
     mainTop: Math.round(m.getBoundingClientRect().top),
+    // The frame is what must fill the window now. `.main` no longer can: the global top bar is a
+    // row above it, so `.main` legitimately starts one bar-height down and is that much shorter.
+    // Two assertions here used to read `.main` as the full-height column — true when the bar was
+    // rendered inside it — and they failed on a layout whose composer was still pinned to the pixel.
+    // The invariant they were reaching for is this one.
+    frameTop: Math.round(document.querySelector('.frame').getBoundingClientRect().top),
+    frameH: Math.round(document.querySelector('.frame').getBoundingClientRect().height),
+    barBottom: Math.round(document.querySelector('.topbar').getBoundingClientRect().bottom),
     docScrolls: doc.scrollHeight > doc.clientHeight + 1,
     transcriptScrolls: t.scrollHeight > t.clientHeight + 1,
     // The grid's own row track. A SECOND row means a pane wrapped instead of hiding, which
@@ -90,6 +98,7 @@ def check(page, label: str) -> list[str]:
     print(f"   transcript scrolls  {full['transcriptScrolls']}")
     print(f"   grid rows           {full['gridRows']}")
     print(f"   rail hidden         {full['railHidden']}")
+    print(f"   frame / bar / main  {full['frameH']}px / ends {full['barBottom']} / {full['mainH']}px from {full['mainTop']}")
 
     fails = []
     if full["docScrolls"]:
@@ -119,10 +128,25 @@ def check(page, label: str) -> list[str]:
     # internally consistent. The frame has to fill the window too.
     if len(full["gridRows"].split()) > 1:
         fails.append(f"the shell grid grew a second row ({full['gridRows']}) — a pane wrapped instead of hiding")
-    if full["mainTop"] != 0:
-        fails.append(f"main starts at y={full['mainTop']}, not at the top of the window")
-    if full["mainH"] < empty["viewportH"] - 1:
-        fails.append(f"main is only {full['mainH']}px of a {empty['viewportH']}px window")
+    # The frame fills the window, and `.main` fills what the bar leaves. Stated as two claims that
+    # cannot both hold if the bar's height is ever double-counted — which is the specific way this
+    # breaks: `height: 100vh` on the shell would size it to the whole window while it starts 65px
+    # down, putting the composer exactly one bar-height below the fold.
+    if full["frameTop"] != 0:
+        fails.append(f"the frame starts at y={full['frameTop']}, not at the top of the window")
+    if full["frameH"] < empty["viewportH"] - 1:
+        fails.append(f"the frame is only {full['frameH']}px of a {empty['viewportH']}px window")
+    if full["mainTop"] != full["barBottom"]:
+        fails.append(
+            f"main starts at y={full['mainTop']} but the bar ends at {full['barBottom']}"
+            " — they overlap or there is a gap between them"
+        )
+    expected_main = empty["viewportH"] - full["barBottom"]
+    if abs(full["mainH"] - expected_main) > 1:
+        fails.append(
+            f"main is {full['mainH']}px where the bar leaves {expected_main}px"
+            " — the bar's height is being counted twice"
+        )
 
     for f in fails:
         print(f"   FAIL: {f}")

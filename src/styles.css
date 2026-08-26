@@ -274,6 +274,26 @@ button:not(:disabled):active {
 
 /* ---- shell ---- */
 
+/* ---- frame ---- */
+
+/* The window: the global bar, then the three panes.
+ *
+ * This element now holds the constraint `.shell` used to. The bar was previously rendered inside the
+ * middle column, which made it a pane toolbar — it began after the rail's border and stopped at the
+ * sidebar's, cut into thirds by two vertical rules, with the brand stranded in the rail beside it.
+ *
+ * `auto` then `minmax(0, 1fr)`: the bar takes the height it needs and the panes take the rest. The `0`
+ * floor is the load-bearing half — a grid item defaults to `min-height: auto`, meaning it refuses to
+ * be shorter than its content, so without it a long transcript makes this row taller than the window
+ * and the document scrolls, taking the composer with it. That was the original pinning bug, and moving
+ * the cap up a level is where it has to be restated. */
+.frame {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
+
 .shell {
   position: relative;
   z-index: 1;
@@ -296,16 +316,17 @@ button:not(:disabled):active {
     clamp(200px, var(--rail-w, 260px), 28vw) 6px
     minmax(0, 1fr)
     6px clamp(260px, var(--sidebar-w, 320px), 28vw);
-  /* Caps the row to the viewport, which is what pins the composer.
+  /* Caps the row, which is what pins the composer.
    *
-   * `height: 100%` on its own was never enough. The row track was implicit, and an implicit
-   * row is `auto` — it sizes to its tallest item and overflows the height declared right
-   * below it. So a long transcript made the row 5358px tall inside a 780px window, the
-   * document scrolled, and the composer went with it, being the last child of .main.
+   * `100%` here is now `100%` of the frame's second row rather than of the window — the global bar took
+   * the first. Getting that wrong is a specific bug: `height: 100vh` would size this to the whole
+   * window while it starts 65px down, so the composer would sit exactly one bar-height below the fold.
    *
-   * `minmax(0, 100%)` addresses both halves: `100%` caps the row, and the `0` floor is what
-   * allows the panes inside to be SHORTER than their content — the permission their own
-   * `overflow-y: auto` needs before it can do anything.
+   * `minmax(0, 100%)` addresses both halves: `100%` caps the row, and the `0` floor is what allows the
+   * panes inside to be SHORTER than their content — the permission their own `overflow-y: auto` needs
+   * before it can do anything. A grid item defaults to `min-height: auto`, which is a refusal to be
+   * shorter than its content; a long transcript made this row 5358px tall inside a 780px window, the
+   * document scrolled, and the composer went with it as the last child of .main.
    *
    * MEASURED, and worth knowing before editing any of this: this rule, `overflow: hidden`
    * below, `min-height: 0` on .main and `min-height: 0` on .transcript are REDUNDANT with one
@@ -317,6 +338,7 @@ button:not(:disabled):active {
    * what they prevent is a chat app whose input sits four screens below the fold. */
   grid-template-rows: minmax(0, 100%);
   height: 100%;
+  min-height: 0;
   /* Clips rather than growing a document scrollbar, if a pane ever escapes the row. */
   overflow: hidden;
 }
@@ -408,6 +430,15 @@ body.is-resizing * {
 
 /* ---- topbar ---- */
 
+/* The global bar: full window width, above all three panes.
+ *
+ * It used to live inside `.main` and so spanned only the middle column — starting after the rail's
+ * right border and stopping at the sidebar's left one, with two vertical rules cutting the row into
+ * thirds. That is a pane toolbar, not a global bar. It is now the frame's first row.
+ *
+ * The `flex: none` it carried is gone with the flex parent; the `auto` row track it sits in already
+ * means "the height you need", and `.frame`'s `minmax(0, 1fr)` second row is what stops the panes
+ * pushing it off. */
 .topbar {
   display: flex;
   align-items: center;
@@ -415,9 +446,28 @@ body.is-resizing * {
   padding: 14px 24px;
   border-bottom: 1px solid color-mix(in oklab, var(--border) 70%, var(--glow-brand) 15%);
   background: var(--card);
-  /* Fixed, for the same reason as .composer: it is the other end of the pinned frame, and
-     flex would otherwise compress it to make room for a long transcript. */
+  /* Above the panes' own backdrop-filter. A blurred pane creates a containing block, and without a
+     stacking order the rail's blur can paint over the bar's bottom border. */
+  position: relative;
+  z-index: 2;
+}
+
+/* The brand, at the window's left edge. Sized to line up with the rail's items beneath it: the mark's
+   left edge and the rail glyphs' should share a column, or the bar reads as a separate site. */
+.topbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   flex: none;
+  color: inherit;
+  text-decoration: none;
+}
+
+.topbar-brand-name {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
 }
 
 .brand {
@@ -1686,18 +1736,7 @@ body.is-resizing * {
   backdrop-filter: blur(12px);
 }
 
-.rail-brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 4px 8px 14px;
-}
-
-.rail-brand-name {
-  font-weight: 700;
-  font-size: 15px;
-  letter-spacing: -0.015em;
-}
+/* No .rail-brand rules. The brand lives in the global top bar now — see .topbar-brand. */
 
 .rail-item {
   display: flex;

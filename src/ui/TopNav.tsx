@@ -1,17 +1,32 @@
 import { PanelLeftIcon } from 'lucide-react'
 
 import { navFor } from '../lib/nav'
-import { pathForView } from '../lib/route-path'
+import { LANDING_PATH, pathForView } from '../lib/route-path'
 import type { RailView } from './ChatList'
 import { ThemeToggle } from './ThemeToggle'
 import type { Theme } from '../lib/theme'
 
 /**
- * The console's top bar.
+ * The console's top bar, spanning the whole window.
  *
  * It used to hold a rail toggle, a status tag and two buttons — everything a session needs and
  * nothing that says where else there is to go. Every destination lived in the left rail, so with the
  * rail collapsed (or on a tablet, where it is hidden entirely) the console had no navigation at all.
+ *
+ * ## Above the panes, not between them
+ *
+ * The first version of this bar was rendered inside `.main`, the grid's middle column. That made it
+ * a *pane* bar: it began after the rail's right border and stopped at the sidebar's left one, with
+ * the brand stranded in the rail beside it and two vertical rules cutting the row into thirds. A
+ * global bar that stops two-thirds of the way across is not global — it just looks like the chat
+ * pane has a toolbar.
+ *
+ * So the shell is now a row of two: this bar, then the three panes beneath it. Which is also why the
+ * brand moved here out of the rail — the left edge of a global bar is where a logo belongs, and it is
+ * what the landing page's own bar already does. The rail toggle sits beside it, next to the pane it
+ * controls.
+ *
+ * ## Shared destinations
  *
  * The nav items come from `lib/nav.ts`, shared with the landing page's bar. Two hand-kept lists
  * drift, and the drift is invisible: an item added to one bar and forgotten on the other looks like
@@ -34,6 +49,7 @@ export function TopNav({
   onTheme,
   onStop,
   onNew,
+  onHome,
 }: {
   view: RailView
   anonymous: boolean
@@ -47,9 +63,35 @@ export function TopNav({
   onTheme: (t: Theme) => void
   onStop: () => void
   onNew: () => void
+  /** Back to the landing page. Absent when this console was not rendered by the router. */
+  onHome?: () => void
 }) {
   return (
     <header className="topbar">
+      {/* The brand, at the window's left edge rather than inside the rail.
+          A real anchor when there is a landing page to reach: a logo is a link to home on every site
+          that has one, and rendering it as a button would drop copy-link and open-in-new-tab from the
+          one element every visitor already knows how to use. */}
+      {onHome ? (
+        <a
+          className="topbar-brand"
+          href={LANDING_PATH}
+          onClick={(e) => {
+            if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
+            e.preventDefault()
+            onHome()
+          }}
+        >
+          <img className="brand-mark" src="/jc.png" alt="" width={24} height={24} />
+          <span className="topbar-brand-name">JarvisClaw</span>
+        </a>
+      ) : (
+        <span className="topbar-brand">
+          <img className="brand-mark" src="/jc.png" alt="" width={24} height={24} />
+          <span className="topbar-brand-name">JarvisClaw</span>
+        </span>
+      )}
+
       <button
         className="rail-toggle"
         onClick={onRail}

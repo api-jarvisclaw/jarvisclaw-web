@@ -29,20 +29,84 @@ import { MODALITY_HINT, tools, toolSchemas, type ToolContext } from './tools'
  *   - It must say to search before concluding an API does not exist. Without that the
  *     model answers from memory about a catalogue it has never seen.
  */
-export const SYSTEM_PROMPT = [
-  'You are JarvisClaw, an agent with access to 4000+ callable APIs and 80+ language models.',
-  '',
-  'How to work:',
-  '- Use search_apis before saying an API does not exist. The catalogue is large and you have not memorised it.',
-  '- Prefer the cheapest API that answers the question.',
-  '- Call the tools directly. Do not describe what you are about to do instead of doing it.',
-  '- When a tool returns data, answer the question with it. Do not dump raw JSON at the user.',
-  '- If a tool result says the user declined a charge, respect it and do not retry that call.',
-  // Third bullet-worthy rule, and the one that came from a measured cost: without it, "turn
-  // this into speech" burned four paid steps hunting the catalogue and ended in a suggestion
-  // to use the browser's own speech API. The page has a Speech button that does it for $0.002.
-  `- ${MODALITY_HINT}`,
-].join('\n')
+/**
+ * The instruction the model runs under.
+ *
+ * `anonymous` changes it materially rather than cosmetically, and that is the point: an anonymous
+ * session is not offered `call_api` at all (see tools.toolSchemas), so it can search the catalogue
+ * and never invoke anything in it. Telling such a session to "search before saying an API does not
+ * exist" sends it hunting for a capability it has no way to use.
+ *
+ * Measured, on "北京时间是几点？然后用英文怎么说？": five `search_apis` calls, one `list_models`,
+ * a long reasoning block, and then a wrong answer — "I don't have access to a real-time clock API".
+ * The catalogue has one (id 447, $0.006, current local time by city name). It could not have called
+ * it either way, so the honest answer was available at step zero and the search was pure cost.
+ */
+function systemPrompt(opts: { anonymous: boolean }): string {
+  const lines = [
+    'You are JarvisClaw, an agent with access to 4000+ callable APIs and 80+ language models.',
+    '',
+    'How to work:',
+    /**
+     * First, and deliberately ahead of the search rule.
+     *
+     * Nothing here used to counterweight "always search". The catalogue rule was the first thing the
+     * model read, so a question it could answer from its own knowledge in one sentence became six
+     * tool calls — each one a round trip the user waits through.
+     */
+    '- Answer directly when you already know the answer. Most questions about language, definitions, ' +
+      'explanations, code or general knowledge need no tool at all. Reach for a tool only when the ' +
+      'question needs live data, a specific catalogue entry, or a file produced.',
+    '- Never call the same tool twice with near-identical arguments. If a search did not find it, ' +
+      'a reworded search will not either — say what you found and what you could not.',
+  ]
+
+  lines.push(
+    '- Use search_apis before saying an API does not exist. The catalogue is large and you have not memorised it.',
+    '- Prefer the cheapest API that answers the question.',
+  )
+
+  if (opts.anonymous) {
+    /**
+     * What this session can and cannot pay for — framed as a price, not as a missing capability.
+     *
+     * An earlier version of this said "you CANNOT call any external API", and that was the wrong
+     * lesson drawn from the right measurement. Hiding the capability made the model tell the user
+     * the product could not do things it can do.
+     *
+     * Franklin's framing, verified against its live gateway: a walletless request to a paid endpoint
+     * gets a 402 carrying the price, not a refusal — so the agent's job is to REPORT the price. That
+     * is a useful answer; "I don't have access to a real-time clock API" is a false one.
+     */
+    lines.push(
+      '- This session has no wallet and no API key, so it cannot complete a paid call. You can still ' +
+        'look an API up and price it: call_api will return the API name and its exact cost instead of ' +
+        'calling. When that happens, tell the user the API exists, what it costs, and that connecting ' +
+        'a wallet or signing in unlocks it — then answer whatever part of the question you can ' +
+        'yourself. Never tell the user a capability does not exist when it is in the catalogue.',
+    )
+  }
+
+  lines.push(
+    '- Call the tools directly. Do not describe what you are about to do instead of doing it.',
+    '- When a tool returns data, answer the question with it. Do not dump raw JSON at the user.',
+    '- If a tool result says the user declined a charge, respect it and do not retry that call.',
+    // The rule that came from a measured cost: without it, "turn this into speech" burned four paid
+    // steps hunting the catalogue and ended in a suggestion to use the browser's own speech API. The
+    // page has a Speech button that does it for $0.002.
+    `- ${MODALITY_HINT}`,
+  )
+
+  return lines.join('\n')
+}
+
+/**
+ * The non-anonymous prompt, exported for tests and for callers that predate the split.
+ *
+ * Kept as a constant because it is referenced by name in the test suite; the loop itself uses
+ * `systemPrompt(opts)` so the anonymous variant is actually reachable.
+ */
+export const SYSTEM_PROMPT = systemPrompt({ anonymous: false })
 
 export interface AgentEvent {
   type:
@@ -80,7 +144,13 @@ export interface AgentEvent {
 }
 
 export interface AgentOptions extends ToolContext {
-  /** Absent credential means the anonymous free tier — see gateway.authHeaders. */
+  /**
+   * Absent credential means the anonymous free tier — see gateway.authHeaders.
+   *
+   * Reaches the tools too, because `AgentOptions extends ToolContext` and `opts` is passed straight
+   * to `tool.run`. That is what lets `call_api` price an API and report the cost rather than being
+   * hidden from the session — see the note on tools.toolSchemas.
+   */
   anonymous: boolean
   /**
    * Pin one model. Omit to let the router choose and downgrade.
@@ -139,12 +209,44 @@ export async function* runAgent(
   userMessage: string,
   opts: AgentOptions,
 ): AsyncGenerator<AgentEvent> {
+  const prompt = systemPrompt({ anonymous: opts.anonymous })
   if (history.length === 0 || history[0].role !== 'system') {
-    history.unshift({ role: 'system', content: SYSTEM_PROMPT })
+    history.unshift({ role: 'system', content: prompt })
+  } else if (history[0].content !== prompt) {
+    /**
+     * Replaced when the session's capabilities have changed.
+     *
+     * Connecting a wallet mid-conversation flips `anonymous`, which changes both the advertised tools
+     * and what the prompt says the model may do. Leaving the original in place would tell a
+     * now-payment-capable session it cannot call anything — and the tool list would disagree with its
+     * own instructions, which is the state models resolve by ignoring the tools.
+     */
+    history[0] = { role: 'system', content: prompt }
   }
   history.push({ role: 'user', content: userMessage })
 
   const schemas = toolSchemas({ anonymous: opts.anonymous })
+  /**
+   * Tool calls already made this message, so a repeat can be answered rather than run.
+   *
+   * A prompt rule is not enough on its own — measured: five `search_apis` calls for one question,
+   * with the instruction to search sitting at the top of the prompt. The model rewords a failed
+   * search and tries again, which is reasonable behaviour and produces the same empty result at the
+   * cost of another round trip the user waits through.
+   *
+   * Keyed on the tool plus its normalised arguments, so "current time" and "Current  Time" count as
+   * one. Scoped to a single user message: the same search in a later message is a fresh question and
+   * the catalogue may genuinely have changed.
+   */
+  const seen = new Map<string, string>()
+  /**
+   * Tools this session has proven it cannot pay for.
+   *
+   * Separate from `seen`, which keys on the arguments: an unpayable tool is unpayable for EVERY set
+   * of arguments, so pricing a second API would otherwise be another round trip to the same answer.
+   * One priced refusal is informative; five is the behaviour this whole change is fixing.
+   */
+  const blocked = new Set<string>()
   const maxTurns = opts.maxTurns ?? DEFAULT_MAX_TURNS
   const router =
     opts.model === undefined
@@ -325,7 +427,7 @@ export async function* runAgent(
     }
 
     for (const call of result.toolCalls) {
-      yield* runOneTool(call, history, opts)
+      yield* runOneTool(call, history, opts, seen, blocked)
     }
   }
 
@@ -337,10 +439,38 @@ export async function* runAgent(
   }
 }
 
+/**
+ * A stable key for "this tool, called with these arguments".
+ *
+ * Arguments arrive as a JSON string assembled from stream fragments, so the same call can differ in
+ * key order and whitespace between attempts. Parsing and re-serialising with sorted keys makes those
+ * identical; unparseable JSON falls back to the trimmed, lowercased string, which is still a better
+ * key than nothing.
+ */
+function callKey(name: string, rawArgs: string): string {
+  try {
+    const parsed = JSON.parse(rawArgs || '{}') as Record<string, unknown>
+    const norm = Object.keys(parsed)
+      .sort()
+      .map((k) => {
+        const v = parsed[k]
+        // Values lowercased and space-collapsed too: a reworded search differs from its predecessor
+        // by capitalisation as often as by content, and re-running it returns the same rows.
+        return `${k}=${typeof v === 'string' ? v.trim().toLowerCase().replace(/\s+/g, ' ') : JSON.stringify(v)}`
+      })
+      .join('&')
+    return `${name}(${norm})`
+  } catch {
+    return `${name}(${rawArgs.trim().toLowerCase()})`
+  }
+}
+
 async function* runOneTool(
   call: ToolCall,
   history: ChatMessage[],
   opts: AgentOptions,
+  seen: Map<string, string>,
+  blocked: Set<string>,
 ): AsyncGenerator<AgentEvent> {
   const name = call.function.name
   const tool = tools[name]
@@ -353,6 +483,43 @@ async function* runOneTool(
   // that step.
   const answer = (output: string) => {
     history.push({ role: 'tool', tool_call_id: call.id, name, content: output })
+  }
+
+  /**
+   * A repeat is answered from the first result instead of run again.
+   *
+   * Returning the cached output rather than an error, and that distinction matters: an error invites
+   * the model to try a third wording, while the same result plus an explicit note is the information
+   * it needs to stop. Measured before this: five searches for one question.
+   *
+   * The tool-end event reports zero spend because nothing was spent — a paid tool called twice with
+   * the same arguments now costs once, which is a correctness property and not only a speed one.
+   */
+  /**
+   * Already established as unpayable this message, whatever the arguments.
+   *
+   * Answered without a network round trip: the session has no wallet and no key, which is not a fact
+   * about the API being asked for, so pricing a second one reaches the same conclusion more slowly.
+   */
+  if (blocked.has(name)) {
+    answer(
+      `${name} still cannot be paid for — this session has no wallet and no API key, and that has ` +
+        `not changed. Do not call it again. Tell the user what it would cost and that connecting a ` +
+        `wallet or signing in unlocks it.`,
+    )
+    yield { type: 'tool-end', tool: name, spentUsd: 0 }
+    return
+  }
+
+  const key = callKey(name, call.function.arguments)
+  const cached = seen.get(key)
+  if (cached !== undefined) {
+    answer(
+      `${cached}\n\n[This is the identical call you already made this turn — the result has not ` +
+        `changed. Do not call ${name} with these arguments again; answer the user with what you have.]`,
+    )
+    yield { type: 'tool-end', tool: name, spentUsd: 0 }
+    return
   }
 
   if (!tool) {
@@ -380,6 +547,18 @@ async function* runOneTool(
   try {
     const res = await tool.run(args, opts)
     answer(res.output)
+    /**
+     * Recorded so an identical repeat is served from here.
+     *
+     * A DECLINED call is deliberately not recorded. Declining is the user's decision about this
+     * moment, not a property of the call — they may approve the same thing a minute later, and
+     * caching the refusal would make that impossible without starting a new message.
+     */
+    if (!res.declined) seen.set(key, res.output)
+    // Unpayable is a property of the session, not of these arguments, so it blocks the tool outright
+    // rather than only this call. Recorded AFTER the result is answered, so the priced report — the
+    // useful part — still reaches the model once.
+    if (res.unpayable) blocked.add(name)
     yield {
       type: 'tool-end',
       tool: name,
@@ -391,6 +570,9 @@ async function* runOneTool(
     const message = err instanceof Error ? err.message : String(err)
     const output = `${name} failed: ${message}`
     answer(output)
+    // Failures are recorded too. A tool that just failed with these arguments will fail the same way
+    // on an immediate retry, and the retry costs the user another wait for the same message.
+    seen.set(key, output)
     yield { type: 'tool-end', tool: name, result: output, spentUsd: 0 }
   }
 }

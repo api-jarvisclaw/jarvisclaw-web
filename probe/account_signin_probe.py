@@ -62,7 +62,14 @@ def main() -> int:
         )
         print(f"== a real session ==\n   register {signup['register']}  login {signup['login']}  id {signup['id']}")
         if not signup["id"]:
-            print("   cannot create a test account; nothing below would mean anything")
+            # 429 is the registration route's CriticalRateLimit, not a product defect — running
+            # this probe a few times in a row trips it. Reported as SKIPPED rather than FAILED,
+            # because a probe that fails for its own reasons trains you to ignore it. Any other
+            # status is a genuine problem worth failing on.
+            if 429 in (signup["register"], signup["login"]):
+                print("   SKIPPED: registration is rate-limited (429). Wait a few minutes.")
+                return 0
+            print("   FAIL: cannot create a test account; nothing below would mean anything")
             return 1
 
         cookies = [(c["name"], c["domain"]) for c in ctx.cookies()]

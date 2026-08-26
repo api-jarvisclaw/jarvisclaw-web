@@ -275,6 +275,81 @@ describe('the free session is told the price, not that the capability is missing
     expect(String(last.content)).toMatch(/NOW connected/)
   })
 
+  it('corrects a RESTORED conversation, where nothing changed on this call', async () => {
+    /**
+     * The same bug reported a second time, after my first fix, and the screenshot is why it needed
+     * a second fix: `test in use for paid calls`, a wallet on Base, balance $8.09, the paid
+     * `deepseek/deepseek-chat` answering — and "当前会话没有连接钱包或 API 密钥。原因从未改变".
+     *
+     * My first fix keyed the correction on the PROMPT changing, which covers connecting a wallet
+     * mid-conversation. It does not cover a reload. Opening a saved conversation restores the
+     * transcript AND the prompt, so a conversation whose turns were written while anonymous comes
+     * back with the paid prompt already at index 0. Nothing changes on the next call, so nothing
+     * fired, and the stale refusal sat there uncontested while the model kept agreeing with it.
+     *
+     * So the trigger cannot be only "did the prompt just change". It also has to be "does the
+     * transcript contradict what this session can do".
+     */
+    const restored: ChatMessage[] = [
+      // Already the paying prompt — persisted after the wallet connected.
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: '北京时间是几点' },
+      { role: 'assistant', content: '当前会话没有连接钱包或 API 密钥，这个调用无法执行。' },
+    ]
+    stubTurns([[frame({ choices: [{ delta: { content: 'ok' } }] })]])
+    await collect(runAgent(restored, '北京时间', { ...anon, anonymous: false }))
+
+    const notices = restored.filter((m) => /capability change/.test(String(m.content)))
+    expect(notices).toHaveLength(1)
+    expect(String(notices[0].content)).toMatch(/NOW connected/)
+  })
+
+  it('recognises the refusal in either language the model answers in', async () => {
+    // The wordings actually observed, plus their English equivalents. A regex that only matched the
+    // one phrase from the screenshot would miss the next paraphrase, and the model rewords freely.
+    const refusals = [
+      '当前会话没有连接钱包或 API 密钥，这个调用无法执行。',
+      '这次会话没有连接钱包或 API 密钥，调用没有成功。',
+      'This session has no wallet and no API key, so the call cannot be made.',
+      'I cannot complete a paid call without a wallet.',
+    ]
+    for (const refusal of refusals) {
+      const h: ChatMessage[] = [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: 'q' },
+        { role: 'assistant', content: refusal },
+      ]
+      stubTurns([[frame({ choices: [{ delta: { content: 'ok' } }] })]])
+      await collect(runAgent(h, 'again', { ...anon, anonymous: false }))
+      expect(
+        h.filter((m) => /capability change/.test(String(m.content))),
+        `no notice for: ${refusal}`,
+      ).toHaveLength(1)
+    }
+  })
+
+  it('leaves an anonymous session alone when it correctly says it cannot pay', async () => {
+    /**
+     * The counterweight, and the reason the transcript check is scoped to paying sessions.
+     *
+     * "connect a wallet to unlock it" is the CORRECT answer for a session with no wallet. Firing a
+     * "capabilities changed" notice at it would tell the model it can now pay when it cannot —
+     * which is the reported bug with the sign reversed, and it would push the model straight back
+     * into inventing values it cannot retrieve.
+     */
+    const history: ChatMessage[] = []
+    stubTurns([[frame({ choices: [{ delta: { content: 'ok' } }] })]])
+    await collect(runAgent(history, 'one', anon))
+    history[history.length - 1] = {
+      role: 'assistant',
+      content: '当前会话没有连接钱包或 API 密钥，需要连接钱包才能调用。',
+    }
+    stubTurns([[frame({ choices: [{ delta: { content: 'ok' } }] })]])
+    await collect(runAgent(history, 'two', anon))
+
+    expect(history.filter((m) => /capability change/.test(String(m.content)))).toHaveLength(0)
+  })
+
   it('refreshes the notice when the wallet goes away again', async () => {
     /**
      * The second half of the same property, and it caught a real bug in my own code.

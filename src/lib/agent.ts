@@ -302,21 +302,49 @@ const CAPABILITY_MARK = '[session capability change]'
  * one. Putting words in the assistant's mouth would have it explain a change it never observed;
  * a late system turn is an instruction that outranks the earlier text by position.
  */
+/**
+ * Something already in the transcript claiming this session cannot pay.
+ *
+ * Matched on the assistant's own words, in both languages it answers in, because that is the only
+ * evidence available after a reload. Reported case: `test in use for paid calls`, a wallet on Base,
+ * balance $8.09, and the paid `deepseek/deepseek-chat` answering "当前会话没有连接钱包或 API 密钥"
+ * and "原因从未改变".
+ *
+ * Deliberately narrow. It must not match the model merely MENTIONING a wallet ("connect a wallet to
+ * unlock it" is correct copy for an anonymous session), so each alternative pairs a negation with
+ * the credential.
+ */
+const CANNOT_PAY_CLAIM =
+  /(没有|未|无)(连接)?(钱包|api\s*密钥|API 密钥)|(钱包|密钥).{0,8}(没有|未)连接|无法(完成|执行|发起).{0,12}(付费|调用)|(no|without)\s+(a\s+)?(wallet|api\s+key)|cannot\s+(pay|complete\s+a\s+paid)/i
+
+function claimsItCannotPay(history: ChatMessage[]): boolean {
+  return history.some((m) => m.role === 'assistant' && CANNOT_PAY_CLAIM.test(String(m.content)))
+}
+
 export function notifyCapabilityChange(
   history: ChatMessage[],
   anonymous: boolean,
   changed: boolean,
 ): void {
   /**
-   * Nothing to correct unless the capability actually changed. `changed` comes from the caller,
-   * which knows whether the prompt it just installed differs from the one that was there.
+   * Two ways the context can be wrong, and the first fix only handled one of them.
    *
-   * Without it this fired on every message of an ordinary session, and `agent.test.ts` caught it:
-   * a two-message conversation that never connected anything ended up with a notice announcing a
-   * change that never happened. Telling a model its capabilities just changed when they did not is
-   * a lie in the context, and a cheap one to avoid.
+   * `changed` is the live flip: the prompt this call installed differs from the one that was there,
+   * which is what happens when a wallet connects mid-conversation. Needed on its own because
+   * without it this fired on every message of an ordinary session — `agent.test.ts` caught that —
+   * and announcing a change that never happened is a lie in the context.
+   *
+   * `claimsItCannotPay` is the RELOAD, which is how the bug was reported the second time. Opening a
+   * saved conversation restores both the transcript AND the prompt, so a conversation that was
+   * anonymous when those turns were written comes back with the paid prompt already at index 0.
+   * Nothing changed on this call, `changed` is false, and the stale refusal sat there uncontested —
+   * so the model kept agreeing with itself ("原因从未改变") while the sidebar showed a funded key
+   * and a connected wallet.
+   *
+   * Only checked for a paying session: an anonymous one saying it cannot pay is correct.
    */
-  if (!changed) return
+  const contradictsTranscript = !anonymous && claimsItCannotPay(history)
+  if (!changed && !contradictsTranscript) return
 
   // Only worth saying if there is prior conversation to contradict. On a fresh history the prompt
   // is already correct and a notice would be noise the model tries to act on.

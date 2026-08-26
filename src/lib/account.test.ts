@@ -7,8 +7,10 @@ import {
   quotaToUsd,
   revealKey,
   SIGN_IN_URL,
+  SIGN_UP_URL,
   whoami,
 } from './account'
+import { CANONICAL_HOST } from './host'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -22,7 +24,7 @@ afterEach(() => {
  * can suppress. Without this stub the tests exercise that refusal instead of the code under
  * test, and `returns null when nobody is signed in` passes for entirely the wrong reason.
  */
-function stubOrigin(origin = 'https://chat.jarvisclaw.ai') {
+function stubOrigin(origin = `https://${CANONICAL_HOST}`) {
   vi.stubGlobal('window', { location: { origin } })
 }
 
@@ -319,9 +321,18 @@ describe('the origin guard', () => {
 
   it('does make the request from the deployed origin', async () => {
     const spy = stub(200, { success: true, data: { id: 1, username: 'a' } })
-    stubOrigin('https://chat.jarvisclaw.ai')
+    stubOrigin(`https://${CANONICAL_HOST}`)
     await expect(whoami()).resolves.not.toBeNull()
     expect(spy).toHaveBeenCalled()
+  })
+
+  it('does not allow the hostname the site moved off', () => {
+    // chat.jarvisclaw.ai is detached from the Worker, so nothing is served from it. Pinned not
+    // because the entry would be dangerous — it is our own zone, nobody else can claim that name
+    // — but because a list that gates credentials should be exactly the set of origins that
+    // exist. A stale entry is a standing suggestion that another host is supposed to work.
+    stubOrigin('https://chat.jarvisclaw.ai')
+    expect(canUseAccount()).toBe(false)
   })
 
   it('does NOT allow the localhost dev origins', () => {
@@ -343,10 +354,17 @@ describe('the origin guard', () => {
   })
 
   it('does not match an origin by prefix', () => {
-    // `https://chat.jarvisclaw.ai.evil.com` must not pass. A `startsWith` check would admit it,
-    // and this is a list that gates sending credentials.
-    stubOrigin('https://chat.jarvisclaw.ai.evil.com')
-    expect(canUseAccount()).toBe(false)
+    // `https://ducat.jarvisclaw.ai.evil.com` must not pass. A `startsWith` check would admit it,
+    // and this is a list that gates sending credentials. Both allowed hosts are checked: a
+    // lookalike of the SUPERSEDED name is just as dangerous as one of the canonical name, and it
+    // is the one more likely to be overlooked once attention moves on.
+    for (const origin of [
+      `https://${CANONICAL_HOST}.evil.com`,
+      'https://chat.jarvisclaw.ai.evil.com',
+    ]) {
+      stubOrigin(origin)
+      expect(canUseAccount()).toBe(false)
+    }
   })
 })
 
@@ -381,10 +399,29 @@ describe('the links point at real pages', () => {
     // The only durable check available offline: every path referenced here must correspond to a
     // route file in the console. A status-code check cannot do this, and that gap is what let
     // /en/login ship.
-    for (const url of [SIGN_IN_URL, KEYS_URL]) {
+    for (const url of [SIGN_IN_URL, SIGN_UP_URL, KEYS_URL]) {
       const path = new URL(url).pathname
       expect(KNOWN_CONSOLE_ROUTES).toContain(path)
     }
+  })
+
+  it('offers a way to create an account, not only to sign in', () => {
+    // The gap this closes: the panel showed a sign-in link and nothing else, so a visitor with no
+    // account had a form they could not fill and no next step. Sign-in is not a funnel on its own.
+    expect(SIGN_UP_URL).toContain('/en/sign-up')
+    // Pointed at the page, not at the redirect stub. `(auth)/register.tsx` exists and is a bare
+    // redirect() to sign-up, so /en/register works but costs an extra hop.
+    expect(SIGN_UP_URL).not.toContain('/en/register')
+    // A new account's whole reason for existing here is a key; landing on a dashboard means
+    // hunting for it.
+    expect(SIGN_UP_URL).toContain('redirect=%2Fen%2Fkeys')
+  })
+
+  it('keeps sign-in and sign-up distinct', () => {
+    // Both derive from the same base and the same redirect param, so a copy-paste slip would
+    // leave two buttons doing the same thing — and the one a new user needs would be the one
+    // missing, silently.
+    expect(SIGN_UP_URL).not.toBe(SIGN_IN_URL)
   })
 })
 
@@ -392,9 +429,20 @@ describe('the links point at real pages', () => {
  * Console routes confirmed to render real pages, both by file and in a browser.
  *
  *   src/routes/{-$lang}/(auth)/sign-in.tsx        -> /en/sign-in
+ *   src/routes/{-$lang}/(auth)/sign-up.tsx        -> /en/sign-up
  *   src/routes/{-$lang}/_authenticated/keys/      -> /en/keys
  *
  * Anything not on this list has not been checked. Adding a path here without confirming the route
  * exists reproduces exactly the bug this list exists to prevent.
+ *
+ * `/en/sign-up` was confirmed in a browser by `probe/signup_route_probe.py`, not by its route file
+ * alone — and the distinction is not pedantry: `(auth)/register.tsx` also exists in that tree and
+ * renders NOTHING, it is a bare `redirect()` to sign-up. A file is not a page. Measured:
+ *
+ *   /en/sign-up      -> 2 password inputs (password + confirm), no "Not Found"
+ *   /en/nonsense-xyz -> 0 password inputs, renders "Not Found"     <- the control
+ *
+ * The control is what makes the first line evidence. Without it, "sign-up rendered something" says
+ * nothing, because in an SPA every path renders something.
  */
-const KNOWN_CONSOLE_ROUTES = ['/en/sign-in', '/en/keys']
+const KNOWN_CONSOLE_ROUTES = ['/en/sign-in', '/en/sign-up', '/en/keys']

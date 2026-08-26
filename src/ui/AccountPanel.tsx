@@ -1,4 +1,4 @@
-import { ExternalLinkIcon, KeyIcon, RefreshCwIcon, UserIcon } from 'lucide-react'
+import { ExternalLinkIcon, KeyIcon, RefreshCwIcon, UserIcon, UserPlusIcon } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
 import {
@@ -7,12 +7,13 @@ import {
   listKeys,
   quotaToUsd,
   revealKey,
-  SIGN_IN_HOST,
   SIGN_IN_URL,
+  SIGN_UP_URL,
   whoami,
   type Account,
   type ApiKeyRef,
 } from '../lib/account'
+import { CANONICAL_HOST } from '../lib/host'
 
 /**
  * Sign in with a main-site account, and pick one of its API keys.
@@ -110,21 +111,41 @@ export function AccountPanel({
         <h2>Account</h2>
         <div className="panel">
           <p className="account-blurb">
-            Already have a JarvisClaw account? Sign in on the main site and use your existing API
-            key here — your quota works the same as it does on the platform.
+            Sign in to use quota you already have on JarvisClaw. Your key works here exactly as it
+            does on the platform.
           </p>
-          {/* Named for the host the link actually opens. It said "jarvisclaw.ai" while pointing at
-              api.jarvisclaw.ai — a different host, and the one the session cookie belongs to.
-              A label that disagrees with its own href is the sort of mismatch that makes someone
-              wonder whether they signed in to the right place. */}
+          {/* "Sign in to JarvisClaw", not "Sign in on api.jarvisclaw.ai".
+              The host used to be in the label because the button pointed at a DIFFERENT host than
+              it named, and deriving the name from the href was the fix for that. But the honest
+              reading of the original problem is that a hostname was never the useful thing to say:
+              nobody has an account "on api.jarvisclaw.ai", they have one on JarvisClaw. The href is
+              still derived from one constant, so the two cannot drift; the label now names the
+              product, and the destination is visible in the browser once the tab opens. */}
           <a className="panel-btn" href={SIGN_IN_URL} target="_blank" rel="noopener noreferrer">
             <UserIcon size={14} aria-hidden="true" />
-            Sign in on {SIGN_IN_HOST}
+            Sign in to JarvisClaw
+            <ExternalLinkIcon size={12} aria-hidden="true" />
+          </a>
+          {/* The missing half. Sign-in is useless to someone who has no account, and this panel
+              offered them nothing but a form they cannot fill — a dead end at exactly the moment a
+              new visitor is deciding whether this product is for them. The platform's own sign-in
+              page does carry a "Sign up" link, but it is below the form and reached only after the
+              user has already gone looking; naming the choice here means they never have to guess
+              which of the two they need. */}
+          <a
+            className="panel-btn panel-btn-quiet"
+            href={SIGN_UP_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <UserPlusIcon size={14} aria-hidden="true" />
+            New here? Create an account
             <ExternalLinkIcon size={12} aria-hidden="true" />
           </a>
           {available ? (
             // Needed because sign-in happens in another tab: nothing tells this page when it
-            // finished, and without a way to re-check the user would have to reload.
+            // finished, and without a way to re-check the user would have to reload. It covers
+            // registering too — a new account is signed in by the time the tab closes.
             <button className="panel-btn panel-btn-quiet" onClick={() => void check()}>
               <RefreshCwIcon size={14} aria-hidden="true" />
               I've signed in
@@ -134,7 +155,7 @@ export function AccountPanel({
             // a credentialed request, and the gateway only accepts those from whitelisted
             // origins — so on any other origin the check is not slow or flaky, it is impossible.
             <p className="panel-note">
-              Reading your session only works from chat.jarvisclaw.ai. On this origin, paste-free
+              Reading your session only works from {CANONICAL_HOST}. On this origin, paste-free
               sign-in is unavailable — use a wallet, or the free models.
             </p>
           )}

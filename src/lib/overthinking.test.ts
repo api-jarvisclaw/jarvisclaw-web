@@ -174,6 +174,19 @@ describe('the free session is told the price, not that the capability is missing
       // And the approximation loophole closed explicitly — this is the form the failure actually took.
       expect(prompt).toMatch(/Approximations are not exempt/)
       expect(prompt).toMatch(/roughly 5pm/)
+
+      /**
+       * The second loophole, and it needed its own sentence because the first rule did not
+       * cover it.
+       *
+       * Measured live: asked for the bitcoin price the model refused correctly, then priced the
+       * API at "约 0.14 元人民币". The catalogue is USD, so that took an exchange rate it never
+       * retrieved — and got it wrong, since $0.00115 is under one jiao. The rule above bans
+       * STATING a rate but says nothing about USING one, and a conversion feels like arithmetic
+       * rather than invention.
+       */
+      expect(prompt).toMatch(/Do NOT convert a price into another currency/)
+      expect(prompt).toMatch(/an exchange rate is live data you do not have/)
     }
   })
 

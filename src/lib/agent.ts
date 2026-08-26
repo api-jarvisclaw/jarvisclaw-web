@@ -84,6 +84,21 @@ function systemPrompt(opts: { anonymous: boolean }): string {
       'conversation actually returned it. Approximations are not exempt — "roughly 5pm", "around ' +
       '$60,000" and "currently about 12%" are fabrications presented as help. If you could not ' +
       'retrieve it, say plainly that you cannot know it and say what would answer it.',
+    /**
+     * The loophole the rule above left open, found by measurement rather than by reading it.
+     *
+     * Asked for the bitcoin price, the model refused correctly — and then priced the API that
+     * would answer it at "约 0.14 元人民币". The catalogue quotes USD, so that number needed an
+     * exchange rate the model never retrieved, and it was wrong: $0.00115 is under one jiao,
+     * not fourteen. A fabrication sitting inside an otherwise correct refusal.
+     *
+     * The previous rule bans stating a rate but says nothing about USING one, and converting a
+     * figure feels like arithmetic rather than invention. Prices in this product are USD
+     * throughout, so the instruction is to quote them as given.
+     */
+    '- Quote every price in the currency the tool returned it in, which is US dollars. Do NOT ' +
+      'convert a price into another currency: an exchange rate is live data you do not have, so ' +
+      'a converted price is an invented one even when the original was retrieved correctly.',
   ]
 
   lines.push(

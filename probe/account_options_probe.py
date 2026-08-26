@@ -74,7 +74,15 @@ async def main() -> int:
 
         async def platform(route):
             url = route.request.url
-            if "/api/user/self" in url:
+            # The identity bootstrap. `whoami` calls this FIRST to learn the user id, because
+            # /api/user/self sits behind UserAuth and 401s without a `New-Api-User` header the
+            # first call cannot know. Without this stub the id is never learned, whoami returns
+            # null, and every assertion below fails on an unstubbed response rather than on
+            # anything the app did — which is exactly how this probe broke when the bootstrap
+            # was added.
+            if "/api/user/session" in url:
+                body = {"success": True, "data": {"id": SELF["data"]["id"], "username": SELF["data"]["username"]}}
+            elif "/api/user/self" in url:
                 body = SELF
             elif "/api/token/" in url and url.rstrip("/").endswith("/key"):
                 body = KEY

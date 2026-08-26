@@ -21,7 +21,12 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
-URL = os.environ.get("CHAT_URL", "https://ducat.jarvisclaw.ai/")
+# Defaults to /chat, not /.
+#
+# `/` is the landing page now — a marketing page with no composer on it. This probe waits for the
+# composer, so with the old default it timed out after 30s and reported a broken console, which is
+# the most misleading way for a probe to fail.
+URL = os.environ.get("CHAT_URL", "https://ducat.jarvisclaw.ai/chat")
 
 
 def main() -> int:

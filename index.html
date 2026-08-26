@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>JarvisClaw — agent console</title>
+    <!--
+      The same mark as the main site and the left rail. It was a missing favicon, which browsers
+      answer with a letter tile — so the one place the brand is always visible showed a generic
+      square while the site had a logo all along.
+
+      Two sizes because they are used at very different scales: 128px is generous for a 16px tab
+      (retina asks for 32) and 512 is what iOS scales a home-screen icon from. Both are re-encoded
+      from the source, which is 868x978 and 741 KB — heavy enough that shipping it as a favicon would
+      cost more than the rest of the page.
+    -->
+    <link rel="icon" type="image/png" href="/jc.png" sizes="128x128" />
+    <link rel="apple-touch-icon" href="/jc-512.png" sizes="512x512" />
     <meta
       name="description"
       content="A browser agent with its own wallet. 4000+ APIs and 80+ models, paid per call over x402."

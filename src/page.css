@@ -39,25 +39,49 @@
   font-size: 14.5px;
   font-weight: 600;
   letter-spacing: -0.01em;
+  /* An anchor now, so it needs the link defaults undone. It points at `/` from `/` — which is what a
+     logo does everywhere, and it means someone who scrolled to the FAQ has the ordinary way back to
+     the top rather than having to hunt for it. */
+  color: inherit;
+  text-decoration: none;
+  flex: none;
 }
 
+/* The real logo, the same file the console's rail and the tab icon use. It was a solid `--primary`
+   square, which made this the third different mark for one product. */
 .page-mark {
-  width: 15px;
-  height: 15px;
-  border-radius: 5px;
-  background: var(--primary);
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  object-fit: contain;
 }
 
 .page-nav nav {
   display: flex;
-  gap: 20px;
+  gap: 18px;
   margin-right: auto;
+  /* Scrolls rather than wrapping. This bar is `position: sticky` with a border-bottom, so a second
+     row of items makes the whole bar taller and the border lands halfway down the hero — and it does
+     so only at the widths where the items happen not to fit, which is how it gets missed. */
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* `min-width: 0` alone was wrong here, and measurably so: at 390px flex crushed this to width 0 and
+     the eight items vanished entirely rather than scrolling — an overflow container with no width has
+     nothing to scroll. The basis is what gives it something to shrink FROM, and the floor is what stops
+     the shrinking at a width where two items are still legible. */
+  flex: 1 1 auto;
+  min-width: 4rem;
+}
+
+.page-nav nav::-webkit-scrollbar {
+  display: none;
 }
 
 .page-nav nav a {
   color: var(--muted-foreground);
   font-size: 13.5px;
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .page-nav nav a:hover {
@@ -80,6 +104,12 @@
 .page-cta-sm {
   padding: 8px 15px;
   font-size: 13px;
+  /* The one thing on this bar that must stay clickable at any width, so it neither shrinks nor wraps.
+     Measured at 768px: it wrapped to two lines and took the sticky bar from 65px to 85px, dropping the
+     border partway down the hero. The nav yields instead — it scrolls, so it can lose space without
+     losing anything. */
+  flex: none;
+  white-space: nowrap;
 }
 
 .page-cta {
@@ -366,9 +396,18 @@
 }
 
 @media (max-width: 720px) {
-  /* The in-page anchors go first: the brand and the CTA are what a narrow screen needs, and four
-     links wrapping onto a second row pushes the hero down for no benefit. */
-  .page-nav nav {
+  /* The in-page anchors go, and only they.
+   *
+   * This rule was `.page-nav nav { display: none }`, written when every item in here was an in-page
+   * jump — and correct then, because a jump is reachable by scrolling anyway. It became wrong the
+   * moment real destinations joined the list: at 390px it hid Marketplace, Gallery and Docs together
+   * with the anchors, so a phone visitor had no route to any of them. Measured as `navW=0`, which is
+   * also why the scroll fallback did nothing — an overflow container of zero width has nothing to
+   * scroll.
+   *
+   * The anchors are still the right thing to drop. They are the items whose function survives being
+   * removed. */
+  .page-nav-anchor {
     display: none;
   }
 

@@ -68,14 +68,18 @@ export function ChatList({
       {/* The brand is the way back to the landing page, which is where a logo already leads on
           every other site — so this needs no extra nav item competing with "New chat". Rendered as
           a plain div when there is nowhere to go, rather than a button that does nothing. */}
+      {/* The mark is the real logo, not a gradient chip. It was a chip because a chip needs no asset,
+          and the cost of that was a brand nobody recognises: the same product's tab icon, main site
+          and console showed three different marks. `alt=""` because the name is right beside it —
+          a screen reader announcing "JarvisClaw JarvisClaw" is worse than silence. */}
       {onHome ? (
         <button className="rail-brand rail-brand-link" onClick={onHome} aria-label="Back to the home page">
-          <span className="brand-mark" aria-hidden="true" />
+          <img className="brand-mark" src="/jc.png" alt="" width={24} height={24} />
           <span className="rail-brand-name">JarvisClaw</span>
         </button>
       ) : (
         <div className="rail-brand">
-          <span className="brand-mark" aria-hidden="true" />
+          <img className="brand-mark" src="/jc.png" alt="" width={24} height={24} />
           <span className="rail-brand-name">JarvisClaw</span>
         </div>
       )}

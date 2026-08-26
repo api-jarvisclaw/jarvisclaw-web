@@ -1,4 +1,3 @@
-import { PanelLeftIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { runAgent, type AgentEvent } from './lib/agent'
@@ -45,13 +44,16 @@ import {
 } from './lib/settings'
 import { SpendTracker, TYPICAL_AGENT_STEPS } from './lib/spend'
 import { applyTheme, loadTheme, saveTheme, type Theme } from './lib/theme'
-import { ChatList } from './ui/ChatList'
+import { ChatList, type RailView } from './ui/ChatList'
 import { Composer } from './ui/Composer'
 import { ConsentDialog, type PendingSpend } from './ui/ConsentDialog'
 import { Gallery, type GalleryTab } from './ui/Gallery'
 import { Landing } from './ui/Landing'
 import { Marketplace } from './ui/Marketplace'
-import { ThemeToggle } from './ui/ThemeToggle'
+import { PaneResizer } from './ui/PaneResizer'
+import { TopNav } from './ui/TopNav'
+import { clampPane, loadPanes, savePanes, type Pane, type PaneWidths } from './lib/panes'
+import { pathForView, replacePath } from './lib/route-path'
 import {
   isUserRejection,
   selectEvmRequirement,
@@ -77,10 +79,13 @@ import { Transcript, type Turn } from './ui/Transcript'
  */
 export function App({
   initialPrompt,
+  initialView,
   onHome,
 }: {
   /** A prompt typed into the landing page's hero, to run once on arrival. */
   initialPrompt?: string
+  /** Which pane the URL asked for — `/gallery` opens the gallery rather than the chat. */
+  initialView?: RailView
   /** Back to the landing page. */
   onHome?: () => void
 } = {}) {
@@ -117,7 +122,28 @@ export function App({
    */
   const [activeId, setActiveId] = useState<string | null>(() => loadConversations()[0]?.id ?? null)
   const [turnsRestored, setTurnsRestored] = useState(false)
-  const [view, setView] = useState<'chat' | 'marketplace' | 'gallery'>('chat')
+  /**
+   * Which pane is showing, seeded from the URL.
+   *
+   * `/gallery` has to arrive with the gallery open, not open the chat and then swap — that swap is
+   * visible, and it makes a shared link look like it went to the wrong place.
+   */
+  const [view, setView] = useState<RailView>(initialView ?? 'chat')
+
+  /**
+   * Keeps the address bar naming the pane on screen.
+   *
+   * `replaceState`, not push. Clicking Marketplace, then Gallery, then back to chat would otherwise
+   * bury the landing page three entries deep, so Back — which everywhere else leaves the section —
+   * would instead walk backwards through the panes one at a time.
+   *
+   * Skipped entirely when this console is not the routed page (`onHome` absent means it was rendered
+   * directly, as the tests do), so nothing here can rewrite a URL that another owner is managing.
+   */
+  useEffect(() => {
+    if (!onHome) return
+    replacePath(pathForView(view))
+  }, [onHome, view])
   /**
    * Which gallery tab is showing. Lifted here so it survives leaving the gallery and coming
    * back — a tab that silently resets makes the other pane feel like it was not really there.
@@ -140,6 +166,41 @@ export function App({
   )
   const [gallery, setGallery] = useState<GalleryItem[]>(() => loadGallery())
   const [railOpen, setRailOpen] = useState(true)
+
+  /**
+   * How wide the two side panes are. Restored from storage, so a width chosen once stays chosen.
+   *
+   * The widths were `260px` and `320px` in the grid template. Reasonable numbers, and wrong for
+   * anyone whose window is not the one they were picked on: at 2560px the rail spends ten percent of
+   * the screen on truncated titles, and at 1280px the wallet panel wraps every few words.
+   */
+  const [panes, setPanes] = useState<PaneWidths>(() => loadPanes())
+
+  /**
+   * The live width during a drag, written to CSS rather than to React state.
+   *
+   * A pointermove fires up to 120 times a second and each one would otherwise rerender the whole
+   * console — the transcript, every turn, the marketplace grid. Setting a custom property on the
+   * shell moves the grid track directly, on the compositor's own schedule, and React learns the
+   * final number once on release.
+   *
+   * The ref holds what the DOM currently shows so `onCommit` has a value to persist: reading it back
+   * out of `getComputedStyle` would work and would also force a layout on mouse-up.
+   */
+  const shell = useRef<HTMLDivElement | null>(null)
+  const dragWidth = useRef<PaneWidths>(panes)
+
+  const setPaneWidth = useCallback((pane: Pane, px: number) => {
+    const w = clampPane(pane, px)
+    dragWidth.current = { ...dragWidth.current, [pane]: w }
+    shell.current?.style.setProperty(`--${pane}-w`, `${w}px`)
+  }, [])
+
+  const commitPanes = useCallback(() => {
+    const next = { ...dragWidth.current }
+    setPanes(next)
+    savePanes(next)
+  }, [])
 
   const [models, setModels] = useState<CatalogueModel[]>([])
   const [modelsLoading, setModelsLoading] = useState(true)
@@ -1044,10 +1105,26 @@ export function App({
   )
 
   return (
-    <div className={railOpen ? 'shell' : 'shell shell-rail-closed'}>
+    <div
+      ref={shell}
+      className={railOpen ? 'shell' : 'shell shell-rail-closed'}
+      /**
+       * The pane widths as custom properties, which is what lets a drag skip React entirely.
+       *
+       * The grid template reads them through `clamp()`, so the stylesheet still has the last word on
+       * a window too narrow to honour the stored number — and because that clamping happens in CSS,
+       * a temporarily-cramped viewport never overwrites the width the user chose.
+       */
+      style={
+        {
+          '--rail-w': `${panes.rail}px`,
+          '--sidebar-w': `${panes.sidebar}px`,
+        } as React.CSSProperties
+      }
+    >
       {railOpen && (
         <ChatList
-        onHome={onHome}
+          onHome={onHome}
           conversations={conversations}
           activeId={activeId}
           view={view}
@@ -1058,31 +1135,31 @@ export function App({
           onView={setView}
         />
       )}
+      {/* Between the panes it separates, in DOM order, so focus reaches it where it sits. Only when
+          the rail is open: a handle for a hidden pane would resize something invisible. */}
+      {railOpen && (
+        <PaneResizer
+          pane="rail"
+          width={panes.rail}
+          onWidth={(px) => setPaneWidth('rail', px)}
+          onCommit={commitPanes}
+        />
+      )}
 
       <div className="main">
-        <header className="topbar">
-          <button
-            className="rail-toggle"
-            onClick={() => setRailOpen((o) => !o)}
-            aria-label={railOpen ? 'Hide conversations' : 'Show conversations'}
-            aria-expanded={railOpen}
-          >
-            <PanelLeftIcon size={16} aria-hidden="true" />
-          </button>
-          <span className={anonymous ? 'tag tag-free' : 'tag'}>
-            {anonymous ? 'free · no sign-in' : 'signed in'}
-          </span>
-          <span className="spacer" />
-          <ThemeToggle theme={theme} onTheme={setTheme} />
-          {busy && (
-            <button className="ghost-btn" onClick={stop}>
-              Stop
-            </button>
-          )}
-          <button className="ghost-btn" onClick={startNew} disabled={turns.length === 0}>
-            New chat
-          </button>
-        </header>
+        <TopNav
+          view={view}
+          anonymous={anonymous}
+          busy={busy}
+          theme={theme}
+          railOpen={railOpen}
+          hasTurns={turns.length > 0}
+          onView={setView}
+          onRail={() => setRailOpen((o) => !o)}
+          onTheme={setTheme}
+          onStop={stop}
+          onNew={startNew}
+        />
 
         {view === 'gallery' ? (
           <Gallery
@@ -1150,6 +1227,13 @@ export function App({
           </>
         )}
       </div>
+
+      <PaneResizer
+        pane="sidebar"
+        width={panes.sidebar}
+        onWidth={(px) => setPaneWidth('sidebar', px)}
+        onCommit={commitPanes}
+      />
 
       <Sidebar
         wallet={wallet}

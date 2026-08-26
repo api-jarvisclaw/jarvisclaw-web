@@ -11,6 +11,8 @@ import { useEffect, useState } from 'react'
 
 import { listApis, listCatalogue } from '../lib/catalogue'
 import { DEFAULT_BASE_URL } from '../lib/gateway'
+import { navFor } from '../lib/nav'
+import { LANDING_PATH, pathForView } from '../lib/route-path'
 
 /**
  * The landing page at `/`.
@@ -37,7 +39,15 @@ import { DEFAULT_BASE_URL } from '../lib/gateway'
  * number that will be wrong on the screen whose whole job is a first impression. Anything not yet
  * loaded shows a dash rather than 0 — "0 callable APIs" reads as an empty product.
  */
-export function LandingPage({ onEnter }: { onEnter: (prompt?: string) => void }) {
+export function LandingPage({
+  onEnter,
+}: {
+  /**
+   * Into the console. `path` chooses which pane — a nav item for the gallery should arrive at the
+   * gallery, not at the chat with the gallery a click away.
+   */
+  onEnter: (prompt?: string, path?: string) => void
+}) {
   const [counts, setCounts] = useState<{
     models: number | null
     free: number | null
@@ -72,18 +82,47 @@ export function LandingPage({ onEnter }: { onEnter: (prompt?: string) => void })
   return (
     <div className="page">
       <header className="page-nav">
-        <span className="page-brand">
-          <span className="page-mark" aria-hidden="true" />
+        <a className="page-brand" href={LANDING_PATH} aria-label="ducat home">
+          <img className="page-mark" src="/jc.png" alt="" width={22} height={22} />
           ducat
-        </span>
-        <nav>
-          <a href="#how">How it works</a>
-          <a href="#pay">Pricing</a>
-          <a href="#faq">FAQ</a>
-          <a href="https://docs.jarvisclaw.ai" target="_blank" rel="noopener noreferrer">
-            Docs
-          </a>
+        </a>
+
+        {/* The same list the console's bar renders, from lib/nav.ts. Two hand-kept navs drift, and an
+            item present on one bar and missing from the other reads as a link that breaks on some
+            pages. */}
+        <nav aria-label="Sections">
+          {navFor('landing').map((item) =>
+            item.kind === 'anchor' ? (
+              // Classed so the narrow-screen rule can drop the anchors and keep the destinations. The
+              // breakpoint used to hide this whole nav, which was right when every item was an in-page
+              // jump — and became wrong the moment real links joined it, leaving a phone visitor no way
+              // to reach the marketplace or the docs at all.
+              <a key={item.label} className="page-nav-anchor" href={item.to}>
+                {item.label}
+              </a>
+            ) : item.kind === 'view' ? (
+              // A real href into the console pane, so it can be copied or middle-clicked; the click
+              // handler keeps an ordinary click client-side. Modified clicks are left alone —
+              // swallowing cmd-click would turn "open in a new tab" into an in-place navigation.
+              <a
+                key={item.label}
+                href={pathForView(item.view)}
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
+                  e.preventDefault()
+                  onEnter(undefined, pathForView(item.view))
+                }}
+              >
+                {item.label}
+              </a>
+            ) : (
+              <a key={item.label} href={item.href} target="_blank" rel="noopener noreferrer">
+                {item.label}
+              </a>
+            ),
+          )}
         </nav>
+
         <button className="page-cta-sm" onClick={() => onEnter()}>
           Open the console
           <ArrowRightIcon size={13} aria-hidden="true" />

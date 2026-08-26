@@ -49,6 +49,7 @@ export type LinkableNavItem = Exclude<NavItem, { kind: 'anchor' }>
  */
 export const NAV: NavItem[] = [
   { label: 'How it works', kind: 'anchor', to: '#how' },
+  { label: 'Compare', kind: 'anchor', to: '#compare' },
   { label: 'Pricing', kind: 'anchor', to: '#pay' },
   { label: 'Marketplace', kind: 'view', view: 'marketplace' },
   { label: 'Gallery', kind: 'view', view: 'gallery' },

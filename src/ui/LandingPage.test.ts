@@ -79,6 +79,43 @@ describe('the landing copy', () => {
     expect(source).toMatch(/no account, no key, no card/i)
   })
 
+  it('describes the alternatives without strawmanning them', () => {
+    /**
+     * The comparison table exists to answer "why not just use the chat site I already pay for", and a
+     * table whose other columns are strawmen is one nobody believes — including about its own column.
+     *
+     * So each competing column has to say something a user of that product would recognise as true.
+     * Checked by looking for the words that would give it away as a jab: nothing in the other columns
+     * should be calling them bad, only describing what they do.
+     */
+    const block = source.slice(source.indexOf('const COMPARE'), source.indexOf('const OWNERSHIP'))
+    expect(block.length).toBeGreaterThan(200)
+    for (const jab of ['useless', 'terrible', 'rip-off', 'ripoff', 'scam', 'garbage', 'worst']) {
+      expect(block.toLowerCase()).not.toContain(jab)
+    }
+    // And it must not claim to be cheapest. We resell some upstreams at their own price, so undercutting
+    // a direct API key is not a claim this product can make — the honest one is that the price is
+    // quoted before the charge.
+    expect(block).not.toMatch(/cheapest|lowest price|beat any/i)
+    expect(block).toMatch(/quoted before/i)
+  })
+
+  it('claims no ownership this hosted gateway cannot deliver', () => {
+    /**
+     * The "what stays yours" section is modelled on Franklin's, and Franklin can make a stronger claim
+     * than we can: their agent runs on the user's machine, so "if we disappear, your agent still runs"
+     * is true for them. This is a hosted gateway. Copying that sentence would be the easiest lie on
+     * the page.
+     *
+     * What is true and stated: keys never leave the wallet, the transcript never leaves the browser,
+     * and the same API is reachable without this page.
+     */
+    const block = source.slice(source.indexOf('const OWNERSHIP'), source.indexOf('const STEPS'))
+    expect(block.length).toBeGreaterThan(200)
+    expect(block).not.toMatch(/self-host|on your machine|runs locally|zero telemetry|if we disappear/i)
+    expect(block).toMatch(/never leave/i)
+  })
+
   it('keeps every starter something the gateway can actually do', () => {
     // A suggestion that fails on click is worse than none: it is the first thing a visitor tries.
     // Pinned as a count so a careless addition has to be a deliberate one.

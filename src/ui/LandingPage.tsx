@@ -130,14 +130,14 @@ export function LandingPage({
       </header>
 
       <section className="page-hero">
-        <span className="eyebrow">The agent with a wallet</span>
+        <span className="eyebrow">The browser agent with a wallet</span>
         <h1>
           Ask for anything. <em>It pays per call.</em>
         </h1>
         <p className="page-lede">
-          {num(counts.models)} models and {num(counts.apis)} callable APIs behind one chat box.
-          Start with no account, no key and no card — anything that costs money shows its price and
-          asks first.
+          Other chat sites give you one model and a monthly bill. This one holds a wallet: it reaches{' '}
+          {num(counts.models)} models and {num(counts.apis)} callable APIs, pays for each one as it
+          goes, and shows you the price before it does. Start with no account, no key and no card.
         </p>
 
         {/* A live input on the landing page, and it is the whole argument for this product: the
@@ -151,6 +151,28 @@ export function LandingPage({
             <span key={c}>{c}</span>
           ))}
         </div>
+
+        {/* A proof strip, in the same position Franklin puts its wallet card and terminal transcript.
+            Ours is the live catalogue instead of a mock session: it is the claim this page rests on,
+            and unlike a screenshot it cannot go stale. Anything still loading shows a dash. */}
+        <dl className="page-figures">
+          <div>
+            <dt>{num(counts.models)}</dt>
+            <dd>models, one chat box</dd>
+          </div>
+          <div>
+            <dt>{num(counts.free)}</dt>
+            <dd>free right now, no credential</dd>
+          </div>
+          <div>
+            <dt>{num(counts.apis)}</dt>
+            <dd>callable APIs, priced per call</dd>
+          </div>
+          <div>
+            <dt>{num(counts.categories)}</dt>
+            <dd>categories to browse</dd>
+          </div>
+        </dl>
       </section>
 
       <section className="page-band" id="how">
@@ -199,6 +221,46 @@ export function LandingPage({
             </p>
           </article>
         </div>
+
+        {/* The terminal path, in the position Franklin numbers its install steps. Worth a place on this
+            page rather than only in the docs: someone who wants an agent in their own shell is not
+            served by "open the console", and burying the CLI makes the browser look like the only
+            product. The package name is real and published — checked, not assumed. */}
+        <div className="page-steps page-steps-tight">
+          <div className="page-step">
+            <span className="page-step-n">01</span>
+            <h3>Or run it in your terminal</h3>
+            <p>
+              One npm install, Node 20+. The same gateway, the same per-call pricing, no browser.
+            </p>
+            <code className="page-code">npm i -g jarvisclaw</code>
+          </div>
+          <div className="page-step">
+            <span className="page-step-n">02</span>
+            <h3>Start free</h3>
+            <p>
+              The free models need no wallet and no key, in the terminal exactly as they do here.
+            </p>
+            <code className="page-code">jarvisclaw</code>
+          </div>
+          <div className="page-step">
+            <span className="page-step-n">03</span>
+            <h3>Fund it when you need more</h3>
+            <p>
+              Send USDC to a wallet it generates for you. The balance is the cap — when it is empty,
+              it stops rather than billing you.
+            </p>
+            <a
+              className="page-step-link"
+              href="https://docs.jarvisclaw.ai"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Read the CLI docs
+              <ArrowRightIcon size={12} aria-hidden="true" />
+            </a>
+          </div>
+        </div>
       </section>
 
       <section className="page-band" id="what">
@@ -230,6 +292,63 @@ export function LandingPage({
               the CLI or an SDK against the same gateway, at the same per-call price.
             </p>
           </article>
+        </div>
+      </section>
+
+      {/* The comparison, in a table. Franklin's equivalent is the strongest thing on its page, and the
+          reason is that it answers the question a visitor actually has — "why not just use the chat
+          site I already pay for" — instead of listing features.
+          Every cell here is a fact about this gateway, not a jab: the subscription column describes
+          what a subscription is, and the row that matters most to us ("What it can reach") is the one
+          where the difference is structural rather than a matter of degree. */}
+      <section className="page-band" id="compare">
+        <h2>The same question, three ways to answer it</h2>
+        <p className="page-band-lede">
+          You want a five-second video, a gas-price lookup and a long chat. Here is what each kind of
+          product does with that.
+        </p>
+        <div className="page-table-wrap">
+          <table className="page-table">
+            <thead>
+              <tr>
+                <th scope="col">
+                  <span className="page-table-corner">&nbsp;</span>
+                </th>
+                <th scope="col">A chat subscription</th>
+                <th scope="col">Raw API keys</th>
+                <th scope="col" className="page-table-ours">
+                  This console
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {COMPARE.map((row) => (
+                <tr key={row.label}>
+                  <th scope="row">{row.label}</th>
+                  <td>{row.subscription}</td>
+                  <td>{row.keys}</td>
+                  <td className="page-table-ours">{row.ours}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* What you own, in Franklin's "The Commons" position. Ours is a shorter and more honest claim
+          than theirs: their agent runs on your machine, so they can say the vendor disappearing changes
+          nothing. This is a hosted gateway, so the truthful version is narrower — your keys never
+          leave your wallet, your transcript never leaves your browser, and the same API is callable
+          without this page. Overclaiming here would be the easiest lie on the page to tell. */}
+      <section className="page-band" id="own">
+        <h2>What stays yours</h2>
+        <div className="page-cards">
+          {OWNERSHIP.map((o) => (
+            <article className="page-card" key={o.title}>
+              <h3>{o.title}</h3>
+              <p>{o.desc}</p>
+            </article>
+          ))}
         </div>
       </section>
 
@@ -303,6 +422,74 @@ function HeroPrompt({ onEnter }: { onEnter: (prompt?: string) => void }) {
     </form>
   )
 }
+
+/**
+ * The comparison rows.
+ *
+ * Written as descriptions rather than as digs — a table whose middle columns are strawmen is a table
+ * nobody believes, including about its own column. So "a chat subscription" gets credit for being
+ * simple, and "raw API keys" gets credit for being the cheapest per token, because both are true and
+ * the interesting difference is elsewhere.
+ *
+ * `ours` claims nothing this gateway does not do. In particular the price row says "quoted before it
+ * runs", not "cheapest" — we resell some upstreams at their own price and cannot honestly claim to
+ * undercut a direct key.
+ */
+const COMPARE = [
+  {
+    label: 'What it can reach',
+    subscription: 'The models that vendor hosts. A video or an on-chain lookup is a different product.',
+    keys: 'Whatever you have signed up for, one account and one key at a time.',
+    ours: 'Every model and every callable API behind one box — chat, image, video, music, speech, data.',
+  },
+  {
+    label: 'What you pay',
+    subscription: 'A monthly fee, whether you used it or not.',
+    keys: 'Per token, per provider, on a card that has to clear first.',
+    ours: 'Per call, quoted before it runs, and you approve that exact amount.',
+  },
+  {
+    label: 'To start',
+    subscription: 'Email, password, card.',
+    keys: 'An account and a key per provider, each with its own billing.',
+    ours: 'Nothing. The free models answer with no credential at all.',
+  },
+  {
+    label: 'When you run out',
+    subscription: 'Rate limits, usually when you need it most.',
+    keys: 'A failed call and an email about your card.',
+    ours: 'It stops. The wallet balance and your session budget are the only caps.',
+  },
+  {
+    label: 'What it knows about you',
+    subscription: 'An account, a history, and a payment profile.',
+    keys: 'One account per provider.',
+    ours: 'Nothing, if you use it anonymously. Conversations stay in this browser.',
+  },
+]
+
+/**
+ * What stays with the user.
+ *
+ * Deliberately narrower than Franklin's equivalent. Theirs runs on your machine, so it can say the
+ * vendor vanishing changes nothing; this is a hosted gateway, and the same claim would be false.
+ * What IS true is stated exactly: keys never leave the wallet, the transcript never leaves the
+ * browser, and the API is callable without this page.
+ */
+const OWNERSHIP = [
+  {
+    title: 'Your keys',
+    desc: 'Private keys never leave your wallet. This page asks it to sign each payment and never sees one. An API key, if you use one, is held in that tab only and never stored.',
+  },
+  {
+    title: 'Your conversations',
+    desc: 'The transcript lives in this browser, not in an account. That cuts both ways and the FAQ says so: nothing to leak, and nothing that follows you to another device.',
+  },
+  {
+    title: 'Your way out',
+    desc: 'This console is one client of a public HTTP API. The CLI, an SDK or plain curl reach the same gateway at the same per-call price, so nothing here is the only door.',
+  },
+]
 
 const STEPS = [
   {

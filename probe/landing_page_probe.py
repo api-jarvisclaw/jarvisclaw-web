@@ -62,6 +62,45 @@ def main() -> int:
         if faq < 5:
             fails.append(f"only {faq} FAQ entries")
 
+        # The sections modelled on Franklin's page, each checked by its content rather than by its
+        # anchor existing — an empty section with the right id passes the anchor test and shows a
+        # heading over nothing.
+        struct = page.evaluate(
+            """() => ({
+                figures: document.querySelectorAll('.page-figures dt').length,
+                figureValues: [...document.querySelectorAll('.page-figures dt')].map((e) => e.textContent),
+                compareRows: document.querySelectorAll('#compare .page-table tbody tr').length,
+                compareCols: document.querySelectorAll('#compare .page-table thead th').length,
+                ownCards: document.querySelectorAll('#own .page-card').length,
+                cliSteps: document.querySelectorAll('.page-steps-tight .page-step').length,
+                commands: [...document.querySelectorAll('.page-code')].map((e) => e.textContent.trim()),
+            })"""
+        )
+        print(
+            f"       figures={struct['figures']} {struct['figureValues']}"
+            f"  compare={struct['compareRows']}x{struct['compareCols']}"
+            f"  own={struct['ownCards']} cli={struct['cliSteps']}"
+        )
+        print(f"       commands: {struct['commands']}")
+        if struct["figures"] < 4:
+            fails.append(f"the hero proof strip has only {struct['figures']} figures")
+        # A dash here means a fetch never landed. Distinct from the lede check below because these are
+        # the four biggest numbers on the page — if any is missing the strip reads as a broken widget.
+        if "—" in struct["figureValues"]:
+            fails.append(f"a hero figure never loaded: {struct['figureValues']}")
+        if struct["compareRows"] < 4 or struct["compareCols"] < 4:
+            fails.append(
+                f"the comparison table is {struct['compareRows']}x{struct['compareCols']}, too small to compare anything"
+            )
+        if struct["ownCards"] < 3:
+            fails.append(f"the ownership section has {struct['ownCards']} cards")
+        if struct["cliSteps"] < 2:
+            fails.append(f"the CLI path has {struct['cliSteps']} steps")
+        # The install command has to name the package that actually exists on npm. A landing page whose
+        # first instruction fails is worse than one that omits it.
+        if not any("npm i -g jarvisclaw" in c for c in struct["commands"]):
+            fails.append(f"no install command for the published package: {struct['commands']}")
+
         # The counts are the pitch, so they have to be real rather than a dash.
         #
         # Matched against the SLOTS, not the whole sentence. Searching the string for an em dash

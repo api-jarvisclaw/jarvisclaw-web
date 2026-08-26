@@ -35,7 +35,6 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-family: var(--mono);
   font-size: 14.5px;
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -260,7 +259,6 @@
 }
 
 .page-step-n {
-  font-family: var(--mono);
   font-size: 12px;
   color: var(--accent-2-text);
 }
@@ -277,6 +275,141 @@
   font-size: 14px;
   line-height: 1.65;
   color: var(--muted-foreground);
+}
+
+/* The CLI steps, sharing .page-steps but separated from the cards above them by a rule rather than
+   just space — they are a different path to the same product, not three more payment options. */
+.page-steps-tight {
+  margin-top: 30px;
+  padding-top: 28px;
+  border-top: 1px solid var(--border);
+}
+
+.page-step-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--accent-2-text);
+  text-decoration: none;
+}
+
+.page-step-link:hover {
+  text-decoration: underline;
+}
+
+/* A shell command. One of the few places monospace is doing real work rather than decorating —
+   `npm i -g jarvisclaw` is text to be typed exactly, and proportional digits and spacing make it
+   harder to read as a command. */
+.page-code {
+  display: block;
+  margin-top: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--secondary);
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--foreground);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+/* ---- hero figures ---- */
+
+.page-figures {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 44px auto 0;
+  padding: 24px 0 0;
+  border-top: 1px solid var(--border);
+  text-align: left;
+  max-width: 100%;
+}
+
+.page-figures dt {
+  font-size: 26px;
+  font-weight: 680;
+  letter-spacing: -0.03em;
+  /* Tabular figures, not a monospace face. The numbers should line up without the page taking on a
+     terminal look — which is the whole distinction being drawn in the font note in styles.css. */
+  font-variant-numeric: tabular-nums;
+}
+
+.page-figures dd {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+/* ---- comparison table ---- */
+
+/* Scrolls inside its own container. Four columns of prose do not fit a phone, and a table that widens
+   the page body gives the whole document a horizontal scrollbar — which breaks every other section
+   to accommodate this one. */
+.page-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+}
+
+.page-table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.page-table th,
+.page-table td {
+  padding: 14px 16px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.page-table tbody tr:last-child th,
+.page-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.page-table thead th {
+  font-size: 12px;
+  font-weight: 620;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+/* The row label. A `th` with `scope="row"`, so a screen reader announces which comparison each cell
+   belongs to — without it a table of 15 cells is 15 unlabelled fragments. */
+.page-table tbody th {
+  font-weight: 600;
+  color: var(--foreground);
+  width: 18%;
+  min-width: 130px;
+}
+
+.page-table td {
+  color: var(--muted-foreground);
+}
+
+/* Our column, marked by a tint and a readable weight rather than a coloured background — this table
+   is making an argument and it should not look like an ad inside it. */
+.page-table-ours {
+  background: color-mix(in oklab, var(--primary) 5%, var(--card));
+  color: var(--foreground) !important;
+}
+
+.page-table thead .page-table-ours {
+  color: var(--accent-2-text);
 }
 
 .page-cards {
@@ -333,7 +466,6 @@
 .page-faq summary::after {
   content: '+';
   float: right;
-  font-family: var(--mono);
   color: var(--muted-foreground);
 }
 

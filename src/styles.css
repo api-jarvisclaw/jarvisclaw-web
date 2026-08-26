@@ -26,8 +26,23 @@
  * worth making.
  */
 
+/**
+ * Public Sans only. The mono webfont is gone.
+ *
+ * We shipped JetBrains Mono and applied it in 33 places, and the list is the problem: conversation
+ * titles, marketplace card headings, gallery notes, the landing page's brand and its step numbers. A
+ * monospace typeface on ordinary prose is the single strongest visual signal of a machine-generated
+ * page — it reads as a terminal pretending to be a product.
+ *
+ * The reference is the main site, and it was measured, not assumed: jarvisclaw.ai resolves
+ * `--font-sans` to `"Public Sans", sans-serif` and `--font-mono` to a plain system stack
+ * (`ui-monospace, SFMono-Regular, Menlo, …`). It loads no mono webfont at all. So matching it means
+ * dropping the import, not swapping it — and the system stack still renders the few places where
+ * monospace is doing real work: a wallet address, a raw JSON payload, an aligned column of prices.
+ *
+ * It also removes five woff2 files from the bundle, which is a real cost this was paying for a look.
+ */
 @import '@fontsource-variable/public-sans';
-@import '@fontsource-variable/jetbrains-mono';
 
 :root {
   /* ── light: JarvisClaw neutral white + cobalt ──
@@ -116,7 +131,13 @@
      declares. Naming them 'Public Sans' instead matches nothing and falls through to the
      system stack — which still looks deliberate, so it is easy to miss. */
   --sans: 'Public Sans Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* The system stack, exactly as the main site resolves it — no webfont. `ui-monospace` picks SF Mono
+     on macOS and Cascadia on Windows, both of which are better fitted to their platform than a face
+     we could ship. Kept as a variable because monospace is still correct for a handful of things
+     (a wallet address, a raw payload, a column of aligned prices); what it is not correct for is
+     prose, which is where the 33 usages had spread to. */
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+    monospace;
 
   /* Tells the browser which built-in colours to use for form controls, scrollbars and the
      like. Without it a light page keeps dark scrollbars, which is the giveaway that a theme
@@ -941,7 +962,6 @@ body.is-resizing * {
 }
 
 .answered-by .tool-name {
-  font-family: var(--mono);
   font-size: 12px;
 }
 
@@ -1034,7 +1054,6 @@ body.is-resizing * {
    that substitution has to be readable, not buried in muted text. */
 .hint-model {
   color: var(--foreground);
-  font-family: var(--mono);
   font-size: 11.5px;
 }
 
@@ -1221,7 +1240,6 @@ body.is-resizing * {
 
 .rail-count {
   margin-left: auto;
-  font-family: var(--mono);
   font-size: 10.5px;
   color: var(--muted-foreground);
 }
@@ -1433,7 +1451,6 @@ body.is-resizing * {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   color: var(--muted-foreground);
-  font-family: var(--mono);
   font-size: 11px;
   cursor: pointer;
 }
@@ -1857,7 +1874,6 @@ body.is-resizing * {
 .rail-row-age {
   flex: none;
   color: var(--muted-foreground);
-  font-family: var(--mono);
   font-size: 11px;
 }
 
@@ -2042,7 +2058,6 @@ body.is-resizing * {
 }
 
 .picker-name {
-  font-family: var(--mono);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2161,7 +2176,6 @@ body.is-resizing * {
 }
 
 .picker-row-name {
-  font-family: var(--mono);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2284,7 +2298,6 @@ body.is-resizing * {
 }
 
 .market-cat-n {
-  font-family: var(--mono);
   font-size: 11px;
   opacity: 0.7;
 }
@@ -2361,7 +2374,6 @@ body.is-resizing * {
   color: var(--foreground);
   padding: 5px 12px;
   font-size: 12.5px;
-  font-family: var(--mono);
 }
 
 .market-chip:hover {
@@ -2405,7 +2417,6 @@ body.is-resizing * {
   font-size: 15px;
   font-weight: 650;
   margin: 0;
-  font-family: var(--mono);
   overflow-wrap: anywhere;
 }
 
@@ -2463,7 +2474,6 @@ body.is-resizing * {
   align-items: baseline;
   gap: 9px;
   margin-bottom: 10px;
-  font-family: var(--mono);
   font-size: 12px;
   color: var(--muted-foreground);
 }
@@ -2801,7 +2811,6 @@ body.is-resizing * {
 }
 
 .seedance-count {
-  font-family: var(--mono);
   font-size: 12px;
   color: var(--muted-foreground);
 }
@@ -2816,7 +2825,6 @@ body.is-resizing * {
   border-radius: 999px;
   border: 1px solid color-mix(in oklab, var(--glow-brand) 35%, var(--border));
   background: color-mix(in oklch, var(--glow-brand) 10%, transparent);
-  font-family: var(--mono);
   font-size: 9.5px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -3057,7 +3065,6 @@ body.is-resizing * {
 }
 
 .showcase-note code {
-  font-family: var(--mono);
   font-size: 11px;
   padding: 1px 5px;
   border-radius: 4px;

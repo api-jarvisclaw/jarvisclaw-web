@@ -936,6 +936,27 @@ export function App({
               tracker.current.record(e.tool ?? 'call', e.spentUsd)
               setSpendVersion((v) => v + 1)
             }
+            /**
+             * A paid API this session could not reach, stated by the page rather than by the model.
+             *
+             * The agent is already told to report the name, the price and the unlock path. It does not
+             * reliably do it: measured on "北京时间是几点", a free-tier model was handed
+             * "Timezone Lookup, $0.005750, connect a wallet" and answered with an invented timestamp,
+             * mentioning neither. A user who is never told the capability exists cannot choose to
+             * unlock it, so the fact is rendered from the event.
+             *
+             * A notice, not an error: nothing failed. The API is there and has a price.
+             */
+            if (e.unpayableCall) {
+              const { name, priceUsd } = e.unpayableCall
+              setTurns((t) => [
+                ...t,
+                {
+                  kind: 'notice',
+                  text: `${name} would answer this — $${priceUsd.toFixed(6)} per call. Connect a wallet or sign in with your JarvisClaw account to use it. Anything the answer above says about live data was not retrieved from it.`,
+                },
+              ])
+            }
             patchAgent((t) => {
               for (let i = t.steps.length - 1; i >= 0; i--) {
                 if (t.steps[i].tool === e.tool && t.steps[i].running) {

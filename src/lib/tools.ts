@@ -57,6 +57,15 @@ export interface ToolResult {
    * agent loop uses it to stop retrying for the rest of the message.
    */
   unpayable?: boolean
+  /**
+   * What the unpayable call would have cost, for the UI to state directly.
+   *
+   * Carried as data rather than left to the model's prose because the model is the unreliable half:
+   * handed a price and an instruction to report it, a free-tier model answered with an invented
+   * timestamp and mentioned neither the price nor the wallet. A user who is never told a paid
+   * capability exists cannot choose to unlock it.
+   */
+  unpayableCall?: { name: string; id: number; priceUsd: number }
 }
 
 export interface Tool {
@@ -297,17 +306,45 @@ const callApi: Tool = {
      * is a dialog that can only end in disappointment.
      */
     if (ctx.anonymous) {
+      /**
+       * The wording matters more than it looks, and the first version of it caused a worse bug than
+       * the one it fixed.
+       *
+       * It ended with "Answer whatever part of their question you can without it", and a free-tier
+       * model read that as licence to answer the whole thing from its own knowledge. Measured on
+       * "北京时间是几点": it replied "现在时间是 2024年12月30日 04:13" — invented, on a day in 2026,
+       * having received nothing but a price. It also never mentioned the price or the wallet, which
+       * was the one thing this branch exists to say.
+       *
+       * A confidently wrong number is worse than the "I don't have access to a clock API" it
+       * replaced: that answer only made the product look limited, this one hands the user false data
+       * they have no reason to doubt. So the instruction is now explicit about the specific thing it
+       * must not do — state the value it failed to fetch — rather than trusting a general hint.
+       */
       return {
         output:
-          `${name} (id ${id}) costs $${priceUsd.toFixed(6)} per call and this session cannot pay ` +
-          `for it — there is no wallet connected and no API key. Tell the user the API exists, name ` +
-          `it and its price, and say that connecting a wallet or signing in with a JarvisClaw ` +
-          `account unlocks it. Answer whatever part of their question you can without it. ` +
-          `Do not call call_api again in this session.`,
+          `NOT CALLED — no payment method. ${name} (id ${id}) costs $${priceUsd.toFixed(6)} per ` +
+          `call. This session has no wallet and no API key, so no data was retrieved from it.\n\n` +
+          `You received NO result from this API. You must therefore:\n` +
+          `1. Tell the user that ${name} would answer this and costs $${priceUsd.toFixed(6)} per ` +
+          `call, and that connecting a wallet or signing in with a JarvisClaw account unlocks it.\n` +
+          `2. DO NOT state, guess or estimate the value you were trying to fetch — not even ` +
+          `approximately. You do not have it.\n` +
+          `3. Answer only the parts of the question that need no live data at all, and say plainly ` +
+          `which part you could not answer.\n` +
+          `4. Do not call call_api again in this session.`,
         spentUsd: 0,
         // Not `declined`: the user refused nothing. Marked unpayable so the agent loop can stop
         // offering the tool for the rest of this message.
         unpayable: true,
+        /**
+         * Structured, so the UI can state this without depending on the model repeating it.
+         *
+         * The model is the unreliable half here — it already dropped the price and the wallet from its
+         * answer once. A free-tier model that ignores an instruction leaves the user with no way to
+         * know a paid capability exists, so the fact travels as data as well as prose.
+         */
+        unpayableCall: { name, id, priceUsd },
       }
     }
 

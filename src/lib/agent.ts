@@ -59,6 +59,31 @@ function systemPrompt(opts: { anonymous: boolean }): string {
       'question needs live data, a specific catalogue entry, or a file produced.',
     '- Never call the same tool twice with near-identical arguments. If a search did not find it, ' +
       'a reworded search will not either — say what you found and what you could not.',
+    /**
+     * The fabrication ban, and its position here is the correction of my own mistake.
+     *
+     * I first wrote this into `call_api`'s no-payment branch, which was the wrong place twice over.
+     * It only fired when the model actually reached that branch — and the measured failure was a
+     * model that never called `call_api` at all: one `search_apis`, then "当前大约是下午 5:19" and
+     * "2025年5月29日", both invented, on a day in 2026. A rule inside a tool cannot govern a turn
+     * that does not use the tool.
+     *
+     * It also has nothing to do with payment. A session WITH a wallet whose call fails, times out or
+     * returns an error will invent the same value for the same reason: the model has no clock, no
+     * price feed and no ledger, and asking it for one produces a plausible number rather than a
+     * refusal. So the rule is unconditional and sits with the other unconditional rules.
+     *
+     * Enumerated rather than left as "do not make things up", because the general form is advice the
+     * model already believes it follows. What it does not recognise is that "roughly 5:19pm" IS
+     * making something up — it reads as a helpful hedge. Naming the categories and banning the
+     * approximation is what closes that gap.
+     */
+    '- NEVER state a value you did not retrieve. You have no clock, no price feed, no ledger and no ' +
+      'live data of any kind of your own. That means: never give the current time or date, a current ' +
+      'price, rate, balance, score or holding, or any other live figure, unless a tool call in this ' +
+      'conversation actually returned it. Approximations are not exempt — "roughly 5pm", "around ' +
+      '$60,000" and "currently about 12%" are fabrications presented as help. If you could not ' +
+      'retrieve it, say plainly that you cannot know it and say what would answer it.',
   ]
 
   lines.push(
@@ -139,6 +164,14 @@ export interface AgentEvent {
   result?: string
   spentUsd?: number
   declined?: boolean
+  /**
+   * For tool-end: a paid call this session had no way to make, with what it would have cost.
+   *
+   * Surfaced to the UI so the price and the unlock path are stated whether or not the model repeats
+   * them. It did not, once: given a price and told to report it, a free-tier model answered with a
+   * fabricated timestamp and mentioned neither. The instruction stays, and this is the backstop.
+   */
+  unpayableCall?: { name: string; id: number; priceUsd: number }
   /** For done: which concrete model answered, since auto/free resolves per request. */
   model?: string
 }
@@ -565,6 +598,7 @@ async function* runOneTool(
       result: res.output,
       spentUsd: res.spentUsd,
       declined: res.declined,
+      unpayableCall: res.unpayableCall,
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

@@ -143,6 +143,40 @@ describe('the free session is told the price, not that the capability is missing
     expect(String(history[0].content)).toBe(SYSTEM_PROMPT)
   })
 
+  it('bans inventing live values, unconditionally', async () => {
+    /**
+     * The rule whose POSITION was the bug, twice.
+     *
+     * I first put it in `call_api`'s no-payment branch. Two things wrong with that, both measured:
+     *
+     *   it only fires if the model reaches that branch. The observed failure did not — one
+     *   `search_apis`, no `call_api`, then "当前大约是下午 5:19" and "2025年5月29日", both invented on
+     *   a day in 2026. A rule inside a tool cannot govern a turn that does not call the tool.
+     *
+     *   it has nothing to do with payment. A funded session whose call errors or times out invents the
+     *   same value for the same reason — the model has no clock, so asked for one it produces a
+     *   plausible number rather than a refusal.
+     *
+     * So it belongs in the prompt, for every session. Asserted for both, because scoping it to the
+     * anonymous one would reproduce the second mistake.
+     */
+    for (const anonymous of [true, false]) {
+      stubTurns([[frame({ choices: [{ delta: { content: 'ok' } }] })]])
+      const history: ChatMessage[] = []
+      await collect(runAgent(history, 'hello', { ...anon, anonymous }))
+      const prompt = String(history[0].content)
+
+      expect(prompt).toMatch(/NEVER state a value you did not retrieve/)
+      expect(prompt).toMatch(/no clock/)
+      // The categories, named. "Do not make things up" is advice the model already believes it
+      // follows; what it does not recognise is that a hedged time is making something up.
+      expect(prompt).toMatch(/current time or date/)
+      // And the approximation loophole closed explicitly — this is the form the failure actually took.
+      expect(prompt).toMatch(/Approximations are not exempt/)
+      expect(prompt).toMatch(/roughly 5pm/)
+    }
+  })
+
   it('tells every session to answer directly when it already knows', async () => {
     // The counterweight that was missing. Checked for both session kinds because the overthinking is
     // not specific to the anonymous one — it was just worst there.
@@ -235,9 +269,40 @@ describe('a paid call with no wallet reports the price', () => {
     expect(res.output).toContain('Timezone Lookup')
     expect(res.output).toContain('0.005750')
     expect(res.output).toMatch(/connecting a wallet or signing in/)
-    // The instruction that prevents the observed failure: the model must not report the capability as
-    // absent when it has just been handed the API's name and price.
-    expect(res.output).toMatch(/Tell the user the API exists/)
+  })
+
+  it('forbids inventing the value it failed to fetch', async () => {
+    /**
+     * The assertion that came from a measured regression, and it replaced a weaker one.
+     *
+     * The first wording of this branch ended "Answer whatever part of their question you can without
+     * it", which a free-tier model read as licence to answer the whole question from its own
+     * knowledge. Live result on "北京时间是几点": "现在时间是 2024年12月30日 04:13" — invented, on a
+     * day in 2026, from a tool result containing nothing but a price. It mentioned neither the price
+     * nor the wallet.
+     *
+     * A confidently wrong value is worse than the "I don't have access to a clock API" this replaced:
+     * that only made the product look limited, this hands the user false data they cannot check. So
+     * the ban has to name the act — stating the value — rather than hint at it.
+     */
+    stubCatalogue({ resource_id: 447, name: 'Timezone Lookup', display_price: 0.00575 })
+    const res = await tools.call_api.run({ id: 447 }, priced)
+
+    expect(res.output).toMatch(/NOT CALLED/)
+    expect(res.output).toMatch(/You received NO result/)
+    expect(res.output).toMatch(/DO NOT state, guess or estimate/)
+    expect(res.output).toMatch(/not even\s+approximately/)
+    // The phrase that caused it must not come back.
+    expect(res.output).not.toMatch(/Answer whatever part of their question you can/)
+  })
+
+  it('carries the price as data, not only as prose', async () => {
+    // The model is the unreliable half — it dropped both the price and the wallet from its answer
+    // once. The UI renders this so a user is told the capability exists whatever the model says.
+    stubCatalogue({ resource_id: 447, name: 'Timezone Lookup', display_price: 0.00575 })
+    const res = await tools.call_api.run({ id: 447 }, priced)
+
+    expect(res.unpayableCall).toEqual({ name: 'Timezone Lookup', id: 447, priceUsd: 0.00575 })
   })
 
   it('is not marked as declined', async () => {

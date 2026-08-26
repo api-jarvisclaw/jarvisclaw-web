@@ -201,3 +201,99 @@ describe('relativeAge', () => {
     expect(relativeAge(now + 60_000, now)).toBe('just now')
   })
 })
+
+describe('inline media bytes never reach localStorage', () => {
+  /**
+   * The bug this pins, measured in a browser before the fix:
+   *
+   *   this origin's localStorage holds ~4 MB
+   *   one 30s speech clip is ~640 KB of base64
+   *   7 such conversations were written, then QuotaExceededError
+   *   13 of the next 20 were NEVER PERSISTED, silently
+   *
+   * `saveConversations` catches its own exception, so after the first failure every later write
+   * failed too and a refresh returned the user to whatever was last written. That is the reported
+   * "generated content disappears when I refresh" — not a missing save call, a save that could not
+   * fit and said nothing.
+   */
+  function speechTurn(b64: string): Turn {
+    return {
+      kind: 'media',
+      id: 't1',
+      media: 'speech',
+      b64,
+      mediaKey: 'blob-key-1',
+      prompt: 'say hello',
+      model: 'elevenlabs/turbo-v2.5',
+      spentUsd: 0.02,
+    }
+  }
+
+  it('strips the base64 payload but keeps the key that finds it', () => {
+    const store = installStore()
+    const big = 'A'.repeat(500_000)
+    saveConversations([
+      { id: 'c1', title: 'x', updatedAt: 1, turns: [speechTurn(big)], history: [] },
+    ])
+    const raw = store.get('jarvisclaw.conversations.v1') ?? ''
+    expect(raw).not.toContain(big)
+    // The key must survive, or the clip is unrecoverable after a reload — which would trade one
+    // data-loss bug for another.
+    expect(raw).toContain('blob-key-1')
+  })
+
+  it('keeps a whole transcript small enough that the quota is unreachable', () => {
+    const store = installStore()
+    const big = 'A'.repeat(640 * 1024)
+    const list: Conversation[] = []
+    for (let i = 0; i < 50; i++) {
+      list.push({
+        id: `c${i}`,
+        title: `speech ${i}`,
+        updatedAt: i,
+        turns: [{ ...speechTurn(big), id: `t${i}`, mediaKey: `k${i}` } as Turn],
+        history: [],
+      })
+    }
+    saveConversations(list)
+    const bytes = (store.get('jarvisclaw.conversations.v1') ?? '').length
+    // 50 speech conversations — the cap — used to be ~32 MB and is now a few KB. Asserted against
+    // a real budget rather than a ratio: 4 MB is what this origin measured.
+    expect(bytes).toBeLessThan(200_000)
+  })
+
+  it('leaves a turn with no inline bytes untouched', () => {
+    installStore()
+    const turn: Turn = {
+      kind: 'media',
+      id: 't2',
+      media: 'video',
+      url: 'https://cdn.jarvisclaw.ai/gallery/x.mp4',
+      prompt: 'a clip',
+      model: 'seedance',
+      spentUsd: 0.83,
+    }
+    saveConversations([{ id: 'c1', title: 'x', updatedAt: 1, turns: [turn], history: [] }])
+    const back = loadConversations()
+    expect(back[0].turns[0]).toEqual(turn)
+  })
+
+  it('round-trips a stripped turn through load without losing the rest of it', () => {
+    const store = installStore()
+    saveConversations([
+      { id: 'c1', title: 'x', updatedAt: 1, turns: [speechTurn('AAAA')], history: [] },
+    ])
+    const back = loadConversations()
+    const t = back[0].turns[0]
+    expect(t.kind).toBe('media')
+    if (t.kind === 'media') {
+      expect(t.b64).toBeUndefined()
+      expect(t.mediaKey).toBe('blob-key-1')
+      expect(t.spentUsd).toBe(0.02)
+      // The price and prompt are the receipt. Losing those alongside the bytes would leave a row
+      // that cost money and says nothing about what it was.
+      expect(t.prompt).toBe('say hello')
+    }
+    expect(store.size).toBe(1)
+  })
+})

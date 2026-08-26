@@ -20,6 +20,7 @@ import {
   saveGallery,
   type GalleryItem,
 } from './lib/gallery'
+import { putMedia, pruneMedia } from './lib/blobstore'
 import { DEFAULT_BASE_URL, FREE_MODEL, type ChatMessage, type Credential } from './lib/gateway'
 import type { Account } from './lib/account'
 import {
@@ -28,6 +29,7 @@ import {
   DEFAULT_OPTIONS,
   GENERATIONS,
   generate,
+  mediaMimeType,
   modeForModel,
   type AsyncJob,
   type GenerationKind,
@@ -400,9 +402,27 @@ export function App() {
         })
       }
 
+      /**
+       * Inline bytes go to IndexedDB, so the clip survives a reload.
+       *
+       * Only when there is no URL to archive. Speech returns base64 rather than a link, and the
+       * CDN Worker cannot copy it — it fetches from an allowlisted host and a `data:` URL has no
+       * host. So these bytes exist in this browser only.
+       *
+       * Awaited before patching the turn, so `mediaKey` is set before anything persists. The old
+       * code put the base64 straight into the turn, where `saveConversations` wrote it to
+       * localStorage: seven 30s clips filled this origin's 4 MB budget, after which every
+       * conversation write failed silently and a refresh discarded everything since.
+       */
+      let mediaKey: string | undefined
+      if (!shownUrl && media.b64) {
+        mediaKey = (await putMedia(newId(), media.b64, mediaMimeType(kind))) ?? undefined
+      }
+
       patchMediaTurn(turnId, convId, {
         url: shownUrl,
         b64: media.b64,
+        mediaKey,
         raw: media.raw,
         job: undefined,
         timedOut: false,
@@ -495,7 +515,12 @@ export function App() {
     for (const turn of conv.turns) {
       // Only turns that were still waiting. A finished or failed one has no job left, and
       // re-polling a completed job would be a pointless request against a paid endpoint.
-      if (turn.kind !== 'media' || !turn.job || turn.url || turn.b64) continue
+      //
+      // `mediaKey` is checked alongside `url`, and it has to be: `b64` is deliberately stripped
+      // before persisting, so after a reload a FINISHED speech turn has neither url nor b64 and
+      // would look unfinished. Testing only those two would re-poll a completed job on every
+      // reload — a request against a paid endpoint for media already in hand.
+      if (turn.kind !== 'media' || !turn.job || turn.url || turn.b64 || turn.mediaKey) continue
       // Cleared before resuming: the stored `waitedMs` measured the PREVIOUS session's wait, so
       // leaving it would show a counter that jumps backwards the moment the first poll lands.
       // `timedOut` goes too — a wait that has just restarted has not timed out.
@@ -510,6 +535,24 @@ export function App() {
         conv.id,
       )
     }
+
+    /**
+     * Drops blobs no conversation refers to any more.
+     *
+     * Deleting a conversation removes its keys from localStorage and leaves the bytes stranded in
+     * IndexedDB — invisible, unreachable, and counting against a 6 GB quota. Without this the
+     * store only ever grows.
+     *
+     * Keys are collected from EVERY conversation, not just the active one: pruning against the
+     * open conversation alone would delete the audio belonging to all the others.
+     */
+    const live = new Set<string>()
+    for (const c of conversations) {
+      for (const t of c.turns) {
+        if (t.kind === 'media' && t.mediaKey) live.add(t.mediaKey)
+      }
+    }
+    void pruneMedia(live)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on mount, by design
   }, [])
 

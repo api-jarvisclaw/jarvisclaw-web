@@ -78,14 +78,53 @@ function isConversation(v: unknown): v is Conversation {
   )
 }
 
+/**
+ * Strips inline media bytes out of a turn before it is written.
+ *
+ * THE reason the history used to vanish on refresh. Speech endpoints return audio as base64 in the
+ * body rather than as a URL, and that string went into a turn, and turns are serialised into one
+ * localStorage value. Measured in a browser:
+ *
+ *   this origin's localStorage holds ~4 MB
+ *   one 30s speech clip is ~640 KB of base64
+ *   7 such conversations were written, then QuotaExceededError
+ *   13 of the next 20 were never persisted, silently
+ *
+ * After the first quota failure EVERY later write fails, so a refresh returns the user to whatever
+ * was last written successfully. The bytes now live in IndexedDB (6 GB here, and stored as a Blob
+ * rather than base64) and the turn keeps a short key.
+ *
+ * `b64` is dropped rather than moved by this function: uploading is async and saving is not, so the
+ * caller stores the blob and sets `mediaKey` before persisting. Dropping unconditionally here is
+ * the safety net — a turn that reaches localStorage with base64 in it is the bug, whatever path
+ * brought it there.
+ */
+function stripInlineBytes(turns: Turn[]): Turn[] {
+  return turns.map((t) => {
+    if (t.kind !== 'media') return t
+    if (!('b64' in t) || t.b64 === undefined) return t
+    const { b64: _dropped, ...rest } = t
+    return rest as Turn
+  })
+}
+
 export function saveConversations(list: Conversation[]): void {
   try {
     // Trimmed before writing: localStorage is a few MB, and a transcript with tool output
     // is not small. Dropping the oldest is better than a quota error that loses the lot.
-    const trimmed = [...list].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_CONVERSATIONS)
+    const trimmed = [...list]
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, MAX_CONVERSATIONS)
+      .map((c) => ({ ...c, turns: stripInlineBytes(c.turns) }))
     localStorage.setItem(KEY, JSON.stringify(trimmed))
   } catch {
     // A full or unavailable store is not worth interrupting a working conversation over.
+    //
+    // Still silent, and that is now defensible where it was not before: with inline bytes gone a
+    // transcript is text, MAX_CONVERSATIONS caps the count, and hitting 4 MB of prose takes
+    // thousands of messages. It was indefensible when one speech clip could consume a sixth of
+    // the budget. If this ever fires again the cause is different and worth finding rather than
+    // papering over.
   }
 }
 

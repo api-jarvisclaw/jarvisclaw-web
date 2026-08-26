@@ -347,7 +347,7 @@ button:not(:disabled):active {
   align-items: center;
   gap: 12px;
   padding: 14px 24px;
-  border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, var(--glow-brand) 15%);
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 70%, var(--glow-brand) 15%);
   background: var(--card);
   /* Fixed, for the same reason as .composer: it is the other end of the pinned frame, and
      flex would otherwise compress it to make room for a long transcript. */
@@ -385,7 +385,7 @@ button:not(:disabled):active {
 
 .tag-free {
   color: var(--success-text);
-  border-color: color-mix(in oklch, var(--success) 40%, var(--border));
+  border-color: color-mix(in oklab, var(--success) 40%, var(--border));
 }
 
 .spacer {
@@ -404,7 +404,7 @@ button:not(:disabled):active {
 
 .ghost-btn:hover:not(:disabled) {
   color: var(--foreground);
-  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
   box-shadow: 0 0 12px -3px var(--glow-brand);
 }
 
@@ -429,7 +429,7 @@ button:not(:disabled):active {
 
 .theme-toggle:hover {
   color: var(--foreground);
-  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
 }
 
 /* Both icons occupy the same cell and cross over by rotating and scaling — the console does the
@@ -503,7 +503,7 @@ button:not(:disabled):active {
   margin-bottom: 18px;
   padding: 4px 12px;
   border-radius: 999px;
-  border: 1px solid color-mix(in oklch, var(--accent-2) 28%, var(--border));
+  border: 1px solid color-mix(in oklab, var(--accent-2) 28%, var(--border));
   background: color-mix(in oklch, var(--accent-2) 10%, transparent);
 }
 
@@ -556,7 +556,7 @@ button:not(:disabled):active {
   background: linear-gradient(
     to bottom,
     color-mix(in oklch, var(--card) 80%, transparent),
-    color-mix(in oklch, var(--card) 92%, var(--glow-brand) 8%)
+    color-mix(in oklab, var(--card) 92%, var(--glow-brand) 8%)
   );
   color: var(--foreground);
   border: 1px solid var(--border);
@@ -567,7 +567,7 @@ button:not(:disabled):active {
 }
 
 .suggestion:hover {
-  border-color: color-mix(in oklch, var(--glow-brand) 50%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 50%, var(--border));
   box-shadow: 0 0 16px -5px var(--glow-brand);
   transform: translateY(-1px);
 }
@@ -684,7 +684,7 @@ button:not(:disabled):active {
 /* Only the running state pulses; a finished step must sit still or the transcript never
    settles visually. */
 .tool-row.is-running {
-  border-color: color-mix(in oklch, var(--glow-brand) 40%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 40%, var(--border));
 }
 
 /* The spinner carries the running state now. A pulse here would be a SECOND animation on the
@@ -748,8 +748,8 @@ button:not(:disabled):active {
   align-self: flex-start;
   max-width: 78%;
   color: var(--destructive-text);
-  border: 1px solid color-mix(in oklch, var(--destructive) 35%, var(--border));
-  background: color-mix(in oklch, var(--destructive) 12%, var(--card));
+  border: 1px solid color-mix(in oklab, var(--destructive) 35%, var(--border));
+  background: color-mix(in oklab, var(--destructive) 12%, var(--card));
   border-radius: var(--radius-lg);
   padding: 11px 15px;
   font-size: 14px;
@@ -760,15 +760,15 @@ button:not(:disabled):active {
   max-width: 78%;
   font-size: 13px;
   color: var(--warning-text);
-  border: 1px solid color-mix(in oklch, var(--warning) 30%, var(--border));
-  background: color-mix(in oklch, var(--warning) 10%, var(--card));
+  border: 1px solid color-mix(in oklab, var(--warning) 30%, var(--border));
+  background: color-mix(in oklab, var(--warning) 10%, var(--card));
   border-radius: var(--radius-lg);
   padding: 9px 14px;
 }
 /* ---- composer ---- */
 
 .composer {
-  border-top: 1px solid color-mix(in oklch, var(--border) 70%, var(--glow-brand) 12%);
+  border-top: 1px solid color-mix(in oklab, var(--border) 70%, var(--glow-brand) 12%);
   padding: 16px 24px 20px;
   background: color-mix(in oklch, var(--card) 45%, var(--background));
   /* Never give up height to the transcript. Once .main is capped to the viewport, flex
@@ -840,7 +840,7 @@ button:not(:disabled):active {
 /* ---- sidebar ---- */
 
 .sidebar {
-  border-left: 1px solid color-mix(in oklch, var(--sidebar-border) 60%, var(--glow-brand) 10%);
+  border-left: 1px solid color-mix(in oklab, var(--sidebar-border) 60%, var(--glow-brand) 10%);
   padding: 20px;
   /* Same pairing as .transcript: a grid item also defaults to min-height:auto, so this pane
      would grow past the row and push the document taller. The wallet and spend panels are
@@ -876,7 +876,7 @@ button:not(:disabled):active {
   background: linear-gradient(
     to bottom,
     var(--card),
-    color-mix(in oklch, var(--card) 94%, var(--glow-brand) 6%)
+    color-mix(in oklab, var(--card) 94%, var(--glow-brand) 6%)
   );
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
@@ -967,6 +967,27 @@ button:not(:disabled):active {
   font-size: 11px;
 }
 
+/* How long a row's file lasts. Quiet by default; a warning when it is on a clock, because the
+   only rows worth interrupting someone for are the ones that expire. */
+.gallery-retention {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+}
+
+.gallery-retention svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.gallery-retention.is-at-risk {
+  color: var(--warning-text);
+}
+
 .gallery-actions {
   display: flex;
   gap: 12px;
@@ -1047,7 +1068,7 @@ button:not(:disabled):active {
 
 .panel-btn-quiet:hover {
   color: var(--foreground);
-  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
   box-shadow: none;
 }
 
@@ -1119,7 +1140,7 @@ button:not(:disabled):active {
 
 .account-key:hover:not(:disabled) {
   background: color-mix(in oklch, var(--accent) 45%, transparent);
-  border-color: color-mix(in oklch, var(--glow-brand) 35%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 35%, var(--border));
 }
 
 .account-key:disabled {
@@ -1436,7 +1457,7 @@ button:not(:disabled):active {
 .dialog {
   background: color-mix(in oklch, var(--popover) 92%, transparent);
   backdrop-filter: blur(16px) saturate(1.2);
-  border: 1px solid color-mix(in oklch, var(--border) 60%, var(--glow-brand) 20%);
+  border: 1px solid color-mix(in oklab, var(--border) 60%, var(--glow-brand) 20%);
   border-radius: var(--radius-xl);
   padding: 24px;
   max-width: 440px;
@@ -1498,7 +1519,7 @@ button:not(:disabled):active {
 }
 
 .decline:hover {
-  border-color: color-mix(in oklch, var(--glow-brand) 40%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 40%, var(--border));
 }
 
 /* ---- left rail: navigation + conversation history ---- */
@@ -1509,7 +1530,7 @@ button:not(:disabled):active {
   gap: 2px;
   padding: 14px 10px;
   overflow: hidden;
-  border-right: 1px solid color-mix(in oklch, var(--sidebar-border) 60%, var(--glow-brand) 10%);
+  border-right: 1px solid color-mix(in oklab, var(--sidebar-border) 60%, var(--glow-brand) 10%);
   background: color-mix(in oklch, var(--sidebar) 88%, transparent);
   backdrop-filter: blur(12px);
 }
@@ -1558,7 +1579,7 @@ button:not(:disabled):active {
 .rail-item-active {
   color: var(--foreground);
   background: color-mix(in oklch, var(--glow-brand) 14%, transparent);
-  border-color: color-mix(in oklch, var(--glow-brand) 35%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 35%, var(--border));
 }
 
 /* Fixed width so the labels line up whatever icon each row uses. An SVG now: font-family,
@@ -1682,7 +1703,7 @@ button:not(:disabled):active {
 
 .rail-toggle:hover {
   color: var(--foreground);
-  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
 }
 
 /* ---- composer shell: one bordered box holding text + tools ---- */
@@ -1750,7 +1771,7 @@ button:not(:disabled):active {
 .mode-btn-active {
   color: var(--foreground);
   background: color-mix(in oklch, var(--glow-brand) 16%, transparent);
-  border-color: color-mix(in oklch, var(--glow-brand) 40%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 40%, var(--border));
 }
 
 .mode-glyph {
@@ -1810,7 +1831,7 @@ button:not(:disabled):active {
 }
 
 .picker-trigger:hover {
-  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
 }
 
 .picker-name {
@@ -1856,7 +1877,7 @@ button:not(:disabled):active {
   max-width: min(340px, calc(100vw - 40px));
   padding: 10px;
   border-radius: var(--radius-xl);
-  border: 1px solid color-mix(in oklch, var(--border) 60%, var(--glow-brand) 20%);
+  border: 1px solid color-mix(in oklab, var(--border) 60%, var(--glow-brand) 20%);
   background: color-mix(in oklch, var(--popover) 96%, transparent);
   backdrop-filter: blur(16px) saturate(1.2);
   box-shadow: 0 0 30px -8px var(--glow-brand), 0 20px 50px -18px var(--shadow-strong);
@@ -1901,7 +1922,7 @@ button:not(:disabled):active {
 .picker-tab-active {
   color: var(--foreground);
   background: color-mix(in oklch, var(--glow-brand) 16%, transparent);
-  border-color: color-mix(in oklch, var(--glow-brand) 35%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 35%, var(--border));
 }
 
 .picker-rows {
@@ -2044,7 +2065,7 @@ button:not(:disabled):active {
 
 .market-cat:hover {
   color: var(--foreground);
-  border-color: color-mix(in oklch, var(--glow-brand) 40%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 40%, var(--border));
 }
 
 /* The selected state carries a real background rather than only a border tint. With 18 pills on
@@ -2092,7 +2113,7 @@ button:not(:disabled):active {
 }
 
 .market-page-btn:not(:disabled):hover {
-  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
 }
 
 .market-page-at {
@@ -2137,7 +2158,7 @@ button:not(:disabled):active {
 }
 
 .market-chip:hover {
-  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
 }
 
 .market-note-error {
@@ -2162,13 +2183,13 @@ button:not(:disabled):active {
   background: linear-gradient(
     to bottom,
     var(--card),
-    color-mix(in oklch, var(--card) 94%, var(--glow-brand) 6%)
+    color-mix(in oklab, var(--card) 94%, var(--glow-brand) 6%)
   );
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .market-card:hover {
-  border-color: color-mix(in oklch, var(--glow-brand) 40%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 40%, var(--border));
   box-shadow: 0 0 20px -8px var(--glow-brand);
   transform: translateY(-1px);
 }
@@ -2211,7 +2232,7 @@ button:not(:disabled):active {
 }
 
 .market-ask:hover {
-  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
   box-shadow: 0 0 12px -4px var(--glow-brand);
 }
 
@@ -2226,7 +2247,7 @@ button:not(:disabled):active {
   background: linear-gradient(
     to bottom,
     var(--card),
-    color-mix(in oklch, var(--card) 94%, var(--glow-brand) 6%)
+    color-mix(in oklab, var(--card) 94%, var(--glow-brand) 6%)
   );
 }
 
@@ -2574,7 +2595,7 @@ button:not(:disabled):active {
   gap: 3px;
   padding: 1px 6px;
   border-radius: 999px;
-  border: 1px solid color-mix(in oklch, var(--glow-brand) 35%, var(--border));
+  border: 1px solid color-mix(in oklab, var(--glow-brand) 35%, var(--border));
   background: color-mix(in oklch, var(--glow-brand) 10%, transparent);
   font-family: var(--mono);
   font-size: 9.5px;
@@ -2630,7 +2651,7 @@ button:not(:disabled):active {
 }
 
 .showcase-card:hover {
-  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
   box-shadow: 0 2px 10px var(--shadow-color);
 }
 

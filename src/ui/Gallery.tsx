@@ -1,7 +1,20 @@
-import { CheckIcon, CopyIcon, ExternalLinkIcon, SparklesIcon } from 'lucide-react'
+import {
+  AlertTriangleIcon,
+  ArchiveIcon,
+  CheckIcon,
+  CopyIcon,
+  ExternalLinkIcon,
+  SparklesIcon,
+} from 'lucide-react'
 import { lazy, Suspense, useMemo, useState } from 'react'
 
-import { galleryTotalUsd, type GalleryItem } from '../lib/gallery'
+import {
+  galleryTotalUsd,
+  RETENTION_NOTE,
+  retentionIsAtRisk,
+  retentionOf,
+  type GalleryItem,
+} from '../lib/gallery'
 import { SEEDANCE_COUNT } from '../lib/seedance-count'
 import { SHOWCASE, showcaseMode, showcaseUrl, type ShowcaseItem } from '../lib/showcase'
 
@@ -106,6 +119,33 @@ export function Gallery({
         <MinePane items={items} onRemove={onRemove} />
       )}
     </div>
+  )
+}
+
+/**
+ * One line saying how long this artifact lasts.
+ *
+ * Per row, because the answer differs per row and the difference matters: an archived file has no
+ * expiry, a cached one is gone in about a day, and one still on the provider's host is gone in
+ * hours. The page previously claimed "stored permanently" about all three.
+ *
+ * The at-risk ones get a download link rather than only a warning. Telling someone their file
+ * expires tomorrow without offering the one action that saves it is worse than saying nothing —
+ * it produces worry instead of a copy. `download` on a cross-origin href does not force a save
+ * (the browser navigates instead), so this opens it and says so.
+ */
+function RetentionLine({ item }: { item: GalleryItem }) {
+  const r = retentionOf(item)
+  const atRisk = retentionIsAtRisk(r)
+  return (
+    <p className={atRisk ? 'gallery-retention is-at-risk' : 'gallery-retention'}>
+      {atRisk ? (
+        <AlertTriangleIcon size={11} aria-hidden="true" />
+      ) : (
+        <ArchiveIcon size={11} aria-hidden="true" />
+      )}
+      {RETENTION_NOTE[r]}
+    </p>
   )
 }
 
@@ -309,13 +349,15 @@ function MinePane({
         <span className="eyebrow">Your creations</span>
         <h1>Nothing here yet</h1>
         <p>
-          Images, video, music and speech you generate are stored permanently and collected here.
-          Use the buttons under the message box to make something — or start from one of the
-          prompts in the other tab.
+          Images, video, music and speech you generate are collected here, with what each one
+          cost. Use the buttons under the message box to make something — or start from one of
+          the prompts in the other tabs.
         </p>
         <p className="empty-fine">
-          The list is kept in this browser, since there is no account to attach it to. The files
-          themselves live on the CDN and stay put.
+          Most files are copied to our CDN and kept with no expiry. A few cannot be — an archive
+          can fail, and speech arrives as raw bytes with no URL to copy — so every row says how
+          long that one actually lasts. The list itself is kept in this browser, since there is no
+          account to attach it to.
         </p>
       </div>
     )
@@ -351,6 +393,13 @@ function MinePane({
                 <span className="tool-name">{item.model}</span>
                 <span className="price">${item.usd.toFixed(6)}</span>
               </div>
+              {/* How long THIS row survives, per row rather than one blanket claim.
+                  The page used to say "stored permanently" about everything, which is true of an
+                  archived file and false of one whose archive failed — that URL is the provider's
+                  own and expires within hours. Saying it per row is the only version that is
+                  accurate, and the at-risk ones get a warning colour and a download link because
+                  the note is useless if you cannot act on it. */}
+              <RetentionLine item={item} />
               <div className="gallery-actions">
                 <a href={item.url} target="_blank" rel="noopener noreferrer">
                   Open

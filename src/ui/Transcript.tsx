@@ -1,6 +1,7 @@
 import { CheckIcon, LoaderIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
+import { getMediaUrl } from '../lib/blobstore'
 import { mediaMimeType } from '../lib/modality'
 
 export interface ToolStep {
@@ -38,7 +39,24 @@ export type Turn =
       id: string
       media: 'image' | 'video' | 'music' | 'speech'
       url?: string
+      /**
+       * Inline bytes, for this page load only.
+       *
+       * NEVER persisted — `saveConversations` strips it. Speech returns audio as base64 rather
+       * than a URL, and one 30s clip is ~640 KB of it; seven of those filled this origin's 4 MB
+       * localStorage, after which every conversation write failed silently and a refresh threw
+       * away everything since. The bytes go to IndexedDB and `mediaKey` points at them.
+       */
       b64?: string
+      /**
+       * Key into the IndexedDB blob store, for media that arrived as bytes rather than a URL.
+       *
+       * This is what makes a speech clip survive a reload. It is NOT a substitute for the R2
+       * archive: anything with an http(s) URL is copied to the CDN and is permanent and
+       * shareable, whereas this exists in one browser only — the CDN Worker copies from an
+       * allowlisted host and inline bytes have no host to copy from.
+       */
+      mediaKey?: string
       raw?: string
       prompt: string
       model: string
@@ -184,15 +202,51 @@ function TurnView({ turn }: { turn: Turn }) {
 }
 
 function MediaView({ turn }: { turn: Extract<Turn, { kind: 'media' }> }) {
+  /**
+   * Bytes recovered from IndexedDB after a reload.
+   *
+   * A speech clip arrives as base64 and `turn.b64` carries it for this page load, but that field
+   * is never persisted (it filled a 4 MB localStorage in seven clips and silently killed every
+   * later write). After a refresh the turn has only `mediaKey`, and this is what turns it back
+   * into something playable.
+   */
+  const [storedUrl, setStoredUrl] = useState<string | null>(null)
+  useEffect(() => {
+    // Only when there is nothing else to show. A turn with a CDN URL or bytes still in memory
+    // needs no lookup, and doing one anyway would hit IndexedDB on every render of every clip.
+    if (turn.url || turn.b64 || !turn.mediaKey) return
+    let revoke: string | null = null
+    let live = true
+    void getMediaUrl(turn.mediaKey).then((url) => {
+      if (!live) {
+        // Resolved after unmount. Revoking here rather than leaking: an object URL pins its blob
+        // in memory until released, and a long scroll through a transcript of clips would hold
+        // every one of them.
+        if (url) URL.revokeObjectURL(url)
+        return
+      }
+      revoke = url
+      setStoredUrl(url)
+    })
+    return () => {
+      live = false
+      if (revoke) URL.revokeObjectURL(revoke)
+    }
+  }, [turn.url, turn.b64, turn.mediaKey])
+
   // A data: URL for base64 payloads, with the mime type of the actual medium. It used to be
   // hardcoded `image/png`, which is right for an image and silently broken for a clip: an
   // <audio> element handed an image mime type renders a dead player, so a paid speech call
   // looked like it produced nothing.
   //
-  // The deployed CSP now sets `media-src 'self' data: https:`. Without it a data: clip is
-  // refused by default-src, which is the same dead player by a different cause — stated here
+  // The deployed CSP sets `media-src 'self' data: https: blob:`. Without it a data: or blob: clip
+  // is refused by default-src, which is the same dead player by a different cause — stated here
   // rather than discovered, because a blank result after a real charge is the worst outcome.
-  const src = turn.url ?? (turn.b64 ? `data:${mediaMimeType(turn.media)};base64,${turn.b64}` : undefined)
+  const src =
+    turn.url ??
+    (turn.b64 ? `data:${mediaMimeType(turn.media)};base64,${turn.b64}` : undefined) ??
+    storedUrl ??
+    undefined
 
   return (
     <div className="turn turn-agent">

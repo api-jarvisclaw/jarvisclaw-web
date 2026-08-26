@@ -45,6 +45,7 @@ export function ChatList({
   onOpen,
   onDelete,
   onView,
+  onHome,
 }: {
   conversations: Conversation[]
   activeId: string | null
@@ -54,6 +55,8 @@ export function ChatList({
   onOpen: (id: string) => void
   onDelete: (id: string) => void
   onView: (v: RailView) => void
+  /** Back to the landing page. Omitted when there is nowhere to go back to. */
+  onHome?: () => void
 }) {
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
@@ -62,10 +65,20 @@ export function ChatList({
 
   return (
     <nav className="rail">
-      <div className="rail-brand">
-        <span className="brand-mark" aria-hidden="true" />
-        <span className="rail-brand-name">JarvisClaw</span>
-      </div>
+      {/* The brand is the way back to the landing page, which is where a logo already leads on
+          every other site — so this needs no extra nav item competing with "New chat". Rendered as
+          a plain div when there is nowhere to go, rather than a button that does nothing. */}
+      {onHome ? (
+        <button className="rail-brand rail-brand-link" onClick={onHome} aria-label="Back to the home page">
+          <span className="brand-mark" aria-hidden="true" />
+          <span className="rail-brand-name">JarvisClaw</span>
+        </button>
+      ) : (
+        <div className="rail-brand">
+          <span className="brand-mark" aria-hidden="true" />
+          <span className="rail-brand-name">JarvisClaw</span>
+        </div>
+      )}
 
       <button className="rail-item rail-item-strong" onClick={onNew}>
         <PlusIcon className="rail-glyph" size={16} aria-hidden="true" />

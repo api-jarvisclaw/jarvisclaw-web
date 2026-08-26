@@ -33,6 +33,8 @@
   /* ── light: JarvisClaw neutral white + cobalt ──
      The console keeps its neutrals achromatic on purpose (hue collapses under alpha
      compositing), so --border and --input carry no chroma at all. */
+  /* Shared by the transcript turns and the composer; see the note above .transcript. */
+  --chat-measure: 860px;
   --background: oklch(0.98 0.006 250);
   --foreground: oklch(0.24 0.028 270);
   --card: oklch(1 0 0);
@@ -469,6 +471,22 @@ button:not(:disabled):active {
 
 /* ---- transcript ---- */
 
+/* ---- the reading measure ----
+ *
+ * MEASURED problem, at vw=2560 before this existed:
+ *
+ *   .transcript      width 1980  left 260
+ *   .composer-shell  width  860  left 820
+ *   .empty           width  620  left 935
+ *
+ * Three different widths and three different left edges. The composer already capped itself at
+ * 860px and centred; the transcript did not cap at all, so messages ran the full 1980px of a
+ * column whose input sat in an 860px box a third of the way in. Nothing lined up, and on a wide
+ * monitor a line of chat text was ~250 characters — unreadable regardless of the alignment.
+ *
+ * One token, used by the turns AND the composer, so the two cannot drift apart again. 860px is
+ * kept because it is what the composer already was: roughly 90 characters at this font size, and
+ * changing it would have moved the input for no reason. */
 .transcript {
   flex: 1;
   /* Matching .main — see the measured note on .shell. `overflow-y: auto` was always here and
@@ -483,6 +501,16 @@ button:not(:disabled):active {
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+/* Every direct child of the transcript is centred on the same measure as the composer. Applied to
+   the children rather than by giving .transcript itself a max-width: the SCROLL container has to
+   stay full width, or the scrollbar detaches from the pane's edge and sits in the middle of it. */
+.transcript > * {
+  width: 100%;
+  max-width: var(--chat-measure);
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .empty {
@@ -1713,9 +1741,26 @@ button:not(:disabled):active {
   border-radius: var(--radius-xl);
   background: var(--card);
   padding: 10px 12px;
-  max-width: 860px;
+  max-width: var(--chat-measure);
   margin: 0 auto;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* The composer sat 5px left of the turns above it, and the cause took measuring to see:
+ *
+ *   .transcript  clientWidth 1970  offsetWidth 1980   (scrollbar-gutter: stable)
+ *   .composer    clientWidth 1980  offsetWidth 1980
+ *
+ * `scrollbar-gutter: stable` reserves 10px inside the transcript at all times, so its centred
+ * children centre within 1970 while the composer's centre within 1980 — half the difference each
+ * side. `scrollbar-gutter` on the composer does nothing, because it only applies to scroll
+ * containers; that was my first attempt and it changed nothing at all.
+ *
+ * The fix is to reserve the same space explicitly. Not by removing the gutter from the transcript:
+ * it exists so the first message does not shift the column sideways the moment the pane becomes
+ * scrollable, which is a worse artefact than 5px. */
+.composer {
+  padding-right: calc(24px + 10px);
 }
 
 /* Focus lives on the container, not the textarea: the box is the control as far as the
@@ -2625,188 +2670,6 @@ button:not(:disabled):active {
   font-size: 12.5px;
   line-height: 1.55;
   color: var(--muted-foreground);
-}
-
-/* ---- landing content on the first screen ---- */
-
-/* The wrapper, not a page. `.empty` inside it keeps `margin: auto` so the hero still centres in
-   the viewport when nothing has scrolled — the sections below simply extend past the fold, inside
-   the transcript's own scroll container. The composer is unaffected: measured at vh 900/720/620,
-   it stays pinned and the document never scrolls. */
-.landing {
-  display: flex;
-  flex-direction: column;
-  padding-bottom: 8px;
-}
-
-/* Centring only applies while the hero is alone on screen. With sections after it, `margin: auto`
-   on all sides would push the hero away from them. */
-.landing .empty {
-  margin: auto auto 0;
-  padding-top: 8vh;
-  padding-bottom: 40px;
-}
-
-.landing-band {
-  max-width: 760px;
-  width: 100%;
-  margin: 0 auto;
-  padding: 34px 20px 0;
-  border-top: 1px solid var(--border);
-}
-
-.landing-band:first-of-type {
-  border-top: none;
-}
-
-.landing-band h2 {
-  margin: 0 0 4px;
-  font-size: 17px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  color: var(--foreground);
-}
-
-.landing-lede {
-  margin: 0 0 16px;
-  font-size: 13.5px;
-  line-height: 1.55;
-  color: var(--muted-foreground);
-}
-
-.landing-band > h2 + .landing-steps,
-.landing-band > h2 + .landing-cards,
-.landing-band > h2 + .landing-faq {
-  margin-top: 16px;
-}
-
-.landing-steps {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-}
-
-.landing-step-n {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--accent-2-text);
-}
-
-.landing-step h3 {
-  margin: 6px 0 4px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--foreground);
-}
-
-.landing-step p,
-.landing-card p {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--muted-foreground);
-}
-
-.landing-cards {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-}
-
-/* Flat `--card`, no gradient. The gradient variants in this file mix a chromatic glow into a
-   neutral, which is what produced the pink tint; more importantly a first screen with five tinted
-   panels is the "too AI" look this console deliberately avoids. */
-.landing-card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  background: var(--card);
-  padding: 15px 16px;
-}
-
-.landing-card > svg {
-  color: var(--accent-2-text);
-  margin-bottom: 8px;
-}
-
-.landing-card h3 {
-  margin: 0 0 5px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--foreground);
-}
-
-.landing-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 10px;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--accent-2-text);
-  font: inherit;
-  font-size: 12.5px;
-  font-weight: 550;
-}
-
-.landing-link:hover {
-  text-decoration: underline;
-}
-
-.landing-faq {
-  display: flex;
-  flex-direction: column;
-}
-
-.landing-faq details {
-  border-bottom: 1px solid var(--border);
-}
-
-.landing-faq details:last-child {
-  border-bottom: none;
-}
-
-/* `<details>` rather than a JS accordion: six answers of which someone reads one, and the browser
-   already does this correctly including keyboard and find-in-page. */
-.landing-faq summary {
-  cursor: pointer;
-  padding: 11px 0;
-  font-size: 13.5px;
-  font-weight: 550;
-  color: var(--foreground);
-  list-style: none;
-}
-
-.landing-faq summary::-webkit-details-marker {
-  display: none;
-}
-
-.landing-faq summary::after {
-  content: '+';
-  float: right;
-  font-family: var(--mono);
-  color: var(--muted-foreground);
-}
-
-.landing-faq details[open] summary::after {
-  content: '2';
-}
-
-.landing-faq p {
-  margin: 0 0 13px;
-  font-size: 13px;
-  line-height: 1.65;
-  color: var(--muted-foreground);
-}
-
-.landing-foot {
-  max-width: 760px;
-  width: 100%;
-  margin: 30px auto 0;
-  padding: 0 20px;
-  font-size: 12.5px;
-  color: var(--muted-foreground);
-  text-align: center;
 }
 
 /* ---- showcase grid ---- */

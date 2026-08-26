@@ -1,0 +1,383 @@
+/* The landing page at `/`.
+ *
+ * Its own stylesheet, because it shares nothing with the console but the design tokens. A real
+ * page on a real route, so it is full-bleed: no grid columns, no fixed panes, its own scrolling
+ * document.
+ *
+ * The first attempt put this content in the console's empty state and it was the wrong shape —
+ * trapped in a 1fr column between a 260px rail and a 320px sidebar, a landing page rendered at
+ * 860px in the middle of a 2560px window with chat furniture either side of it.
+ */
+
+.page {
+  min-height: 100%;
+  overflow-y: auto;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.page-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 28px;
+  border-bottom: 1px solid var(--border);
+  /* The one blur on this page, and it is on an overlay — the console's own convention. A sticky
+     bar over scrolling content is exactly the case backdrop-filter exists for. */
+  background: color-mix(in oklab, var(--background) 82%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.page-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 14.5px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.page-mark {
+  width: 15px;
+  height: 15px;
+  border-radius: 5px;
+  background: var(--primary);
+}
+
+.page-nav nav {
+  display: flex;
+  gap: 20px;
+  margin-right: auto;
+}
+
+.page-nav nav a {
+  color: var(--muted-foreground);
+  font-size: 13.5px;
+  text-decoration: none;
+}
+
+.page-nav nav a:hover {
+  color: var(--foreground);
+}
+
+.page-cta-sm,
+.page-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font: inherit;
+  font-weight: 600;
+}
+
+.page-cta-sm {
+  padding: 8px 15px;
+  font-size: 13px;
+}
+
+.page-cta {
+  padding: 12px 24px;
+  font-size: 15px;
+}
+
+.page-cta-sm:hover,
+.page-cta:hover {
+  filter: brightness(1.08);
+}
+
+/* ---- hero ---- */
+
+.page-hero {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 72px 24px 64px;
+  text-align: center;
+}
+
+.page-hero h1 {
+  margin: 16px 0 18px;
+  font-size: clamp(34px, 5.2vw, 56px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.08;
+}
+
+.page-hero h1 em {
+  font-style: normal;
+  color: var(--accent-2-text);
+}
+
+.page-lede {
+  margin: 0 auto 30px;
+  max-width: 62ch;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+}
+
+/* The hero's live input. The product's claim is "you can just type", so the page demonstrates
+   that rather than describing it. */
+.page-prompt {
+  display: flex;
+  gap: 9px;
+  max-width: 620px;
+  margin: 0 auto;
+}
+
+.page-prompt input {
+  flex: 1;
+  min-width: 0;
+  padding: 13px 16px;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 14.5px;
+}
+
+.page-prompt input:focus {
+  outline: none;
+  border-color: var(--glow-brand);
+  box-shadow: 0 0 0 1px var(--glow-brand);
+}
+
+.page-prompt button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 0 20px;
+  border: none;
+  border-radius: var(--radius-xl);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.page-prompt button:hover {
+  filter: brightness(1.08);
+}
+
+.page-hero-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.page-hero-chips span {
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* ---- bands ---- */
+
+.page-band {
+  padding: 56px 24px;
+  border-top: 1px solid var(--border);
+}
+
+/* Alternating background so consecutive sections read as separate without a rule between each. */
+.page-band-alt {
+  background: color-mix(in oklab, var(--muted) 45%, var(--background));
+}
+
+.page-band > * {
+  max-width: 960px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.page-band h2 {
+  margin: 0 0 6px;
+  font-size: clamp(20px, 2.6vw, 27px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.page-band-lede {
+  margin: 0 0 26px;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+}
+
+.page-band h2 + .page-steps,
+.page-band h2 + .page-cards,
+.page-band h2 + .page-faq {
+  margin-top: 26px;
+}
+
+.page-steps {
+  display: grid;
+  gap: 22px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.page-step-n {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent-2-text);
+}
+
+.page-step h3 {
+  margin: 8px 0 6px;
+  font-size: 16px;
+  font-weight: 620;
+}
+
+.page-step p,
+.page-card p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--muted-foreground);
+}
+
+.page-cards {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+/* Flat --card, no gradient. The gradient variants in styles.css mix a chromatic glow into a
+   neutral, which is what produced the pink tint; and a page of tinted panels is the "too AI" look
+   this product deliberately avoids. */
+.page-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+  padding: 20px;
+}
+
+.page-card > svg {
+  color: var(--accent-2-text);
+  margin-bottom: 10px;
+}
+
+.page-card h3 {
+  margin: 0 0 7px;
+  font-size: 15.5px;
+  font-weight: 620;
+}
+
+/* ---- faq ---- */
+
+.page-faq details {
+  border-bottom: 1px solid var(--border);
+}
+
+.page-faq details:last-child {
+  border-bottom: none;
+}
+
+/* <details> rather than a JS accordion: six answers of which someone reads one, and the browser
+   already handles keyboard access and find-in-page correctly. */
+.page-faq summary {
+  cursor: pointer;
+  padding: 15px 0;
+  font-size: 15px;
+  font-weight: 550;
+  list-style: none;
+}
+
+.page-faq summary::-webkit-details-marker {
+  display: none;
+}
+
+.page-faq summary::after {
+  content: '+';
+  float: right;
+  font-family: var(--mono);
+  color: var(--muted-foreground);
+}
+
+.page-faq details[open] summary::after {
+  content: '−';
+}
+
+.page-faq p {
+  margin: 0 0 17px;
+  max-width: 72ch;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--muted-foreground);
+}
+
+/* ---- close + footer ---- */
+
+.page-close {
+  padding: 68px 24px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.page-close h2 {
+  margin: 0 0 8px;
+  font-size: clamp(22px, 3vw, 32px);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.page-close p {
+  margin: 0 0 24px;
+  color: var(--muted-foreground);
+  font-size: 15px;
+}
+
+.page-foot {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 22px 28px 34px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+.page-foot nav {
+  display: flex;
+  gap: 18px;
+  margin-left: auto;
+}
+
+.page-foot a {
+  color: var(--muted-foreground);
+  text-decoration: none;
+}
+
+.page-foot a:hover {
+  color: var(--foreground);
+}
+
+@media (max-width: 720px) {
+  /* The in-page anchors go first: the brand and the CTA are what a narrow screen needs, and four
+     links wrapping onto a second row pushes the hero down for no benefit. */
+  .page-nav nav {
+    display: none;
+  }
+
+  .page-prompt {
+    flex-direction: column;
+  }
+
+  .page-prompt button {
+    justify-content: center;
+    padding: 12px 20px;
+  }
+}

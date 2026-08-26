@@ -75,7 +75,15 @@ import { Transcript, type Turn } from './ui/Transcript'
  * enough to mint more keys and read the account. Conversations ARE persisted — see
  * lib/conversations.ts for what is and is not written.
  */
-export function App() {
+export function App({
+  initialPrompt,
+  onHome,
+}: {
+  /** A prompt typed into the landing page's hero, to run once on arrival. */
+  initialPrompt?: string
+  /** Back to the landing page. */
+  onHome?: () => void
+} = {}) {
   const [turns, setTurns] = useState<Turn[]>([])
   const [busy, setBusy] = useState(false)
   // No API key state. A key pasted into a page is a plaintext bearer credential, and it
@@ -580,6 +588,26 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on mount, by design
   }, [])
 
+  /**
+   * Runs a prompt handed over from the landing page's hero, exactly once.
+   *
+   * Guarded by a ref rather than a dependency list: `send` is a useCallback that changes whenever
+   * the model or credential does, so listing it would re-send the same prompt on the next render —
+   * a second paid call the user did not ask for. That is the failure this guard exists for, not a
+   * lint appeasement.
+   *
+   * Deliberately NOT awaited or blocked on: `send` opens the consent dialog for anything paid, and
+   * the free tier answers without one. Either way the user sees their own words on screen first.
+   */
+  const handoffSent = useRef(false)
+  useEffect(() => {
+    if (handoffSent.current) return
+    if (!initialPrompt || initialPrompt.trim() === '') return
+    handoffSent.current = true
+    void send(initialPrompt)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, by design; see above
+  }, [initialPrompt])
+
   /** Generation (image/video/music): quote, ask, then run. */
   const runGeneration = useCallback(
     async (kind: GenerationKind, prompt: string, convId: string) => {
@@ -1019,6 +1047,7 @@ export function App() {
     <div className={railOpen ? 'shell' : 'shell shell-rail-closed'}>
       {railOpen && (
         <ChatList
+        onHome={onHome}
           conversations={conversations}
           activeId={activeId}
           view={view}
@@ -1098,10 +1127,7 @@ export function App() {
                 <Landing
                   models={models}
                   marketplaceTotal={marketSize?.total ?? null}
-                  marketplaceCategories={marketSize?.categories ?? null}
                   onSuggestion={send}
-                  onOpenMarketplace={() => setView('marketplace')}
-                  onOpenGallery={() => setView('gallery')}
                 />
               }
             />

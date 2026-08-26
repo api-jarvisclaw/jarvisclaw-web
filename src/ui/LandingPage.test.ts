@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 /**
- * The first screen's copy, checked as source text.
+ * The landing page's copy and the console's empty state, checked as source text.
  *
  * This is the page a newcomer judges the product by, and its failure mode is not a crash — it is a
  * confident sentence that is false. Two of those are possible here and both have already happened
@@ -19,7 +19,18 @@ import { describe, expect, it } from 'vitest'
  * test would pass on a hardcoded number as readily as a live one.
  */
 
-const source = readFileSync(new URL('./Landing.tsx', import.meta.url), 'utf8')
+/**
+ * BOTH files, concatenated.
+ *
+ * The marketing copy lives in `LandingPage.tsx` (the page at `/`) and the console's own empty state
+ * in `Landing.tsx`. Two of these checks apply to the FAQ, which is only in the page; the count and
+ * dash rules apply to both, because both make the same numeric claim. Reading them together means
+ * moving a line between the two cannot quietly escape a check — which is exactly what happened when
+ * the FAQ moved and two tests started passing on a file that no longer contained it.
+ */
+const source =
+  readFileSync(new URL('./LandingPage.tsx', import.meta.url), 'utf8') +
+  readFileSync(new URL('./Landing.tsx', import.meta.url), 'utf8')
 
 describe('the landing copy', () => {
   it('hardcodes no catalogue counts', () => {

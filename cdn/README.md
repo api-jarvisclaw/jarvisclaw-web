@@ -86,13 +86,40 @@ wrangler r2 bucket lifecycle remove jarvisclaw-media --name auto-cleanup
 
 ## The showcase prefix
 
-`showcase/` holds the 32 prompt-gallery assets, uploaded once by `upload-showcase.ps1`. They are
-copied to our own R2 rather than hotlinked for two independent reasons, both measured:
+`showcase/` holds two prompt collections — 146 files in total — uploaded by
+`upload-showcase.ps1`. Pass `-Match 'sd-'` to send only the second set; re-uploading all 146 to
+add one is slow and each redundant PUT is another chance at a partial write on a file that was
+already correct.
+
+| set | files | source |
+|---|---|---|
+| Franklin gallery | 36 | franklin.run/gallery |
+| Seedance prompts | 110 (105 posters + 5 clips) | YouMind-OpenLab/awesome-seedance-2-prompts, CC BY 4.0 |
+
+They are copied to our own R2 rather than hotlinked for two independent reasons, both measured:
 
 - the app's CSP allows images from `self`, `data:` and `https:` — but a third-party host also
-  needs to permit hotlinking, and nothing guarantees franklin.run will keep those paths;
-- `POST /gallery` refuses the source outright: `403 {"error":"source host franklin.run is not
-  allowed"}`. That allowlist is doing its job; it is not a bug to route around.
+  needs to permit hotlinking, and nothing guarantees franklin.run (or pbs.twimg.com, which hosts
+  92 of the Seedance frames) will keep those paths. A deleted tweet is a hole in the gallery;
+- `POST /gallery` refuses every one of those sources outright: `403 {"error":"source host
+  franklin.run is not allowed"}`. That allowlist is doing its job; it is not a bug to route
+  around.
+
+### Why only 5 of 105 Seedance entries have a clip
+
+The collection publishes most of its videos as Cloudflare Stream, which serves HLS and DASH
+manifests and no direct file. Measured on one of those ids:
+
+```
+/manifest/video.m3u8    200 application/vnd.apple.mpegurl
+/manifest/video.mpd     200 application/dash+xml
+/downloads/default.mp4  404
+```
+
+Playing HLS needs a JS player, and `script-src 'self'` has no reason to admit one on a page that
+holds an API key. The 5 playable entries are the ones whose MP4 the repo published on GitHub
+Releases. The other 100 ship as a result frame plus the prompt, and `seedance.ts` carries a
+`playable` flag so the UI renders them as stills rather than as players with nothing behind them.
 
 The upload script is PowerShell, not sh. Running the sh version through Git Bash on Windows
 resolves `wrangler` to the npm shim under a `/mnt/c` path whose bundled workerd binary does not

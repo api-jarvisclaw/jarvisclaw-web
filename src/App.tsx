@@ -1,8 +1,7 @@
-import { PanelLeftIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { runAgent, type AgentEvent } from './lib/agent'
-import { listCatalogue, type CatalogueModel } from './lib/catalogue'
+import { listApis, listCatalogue, type CatalogueModel } from './lib/catalogue'
 import {
   deriveTitle,
   loadConversations,
@@ -20,6 +19,7 @@ import {
   saveGallery,
   type GalleryItem,
 } from './lib/gallery'
+import { putMedia, pruneMedia } from './lib/blobstore'
 import { DEFAULT_BASE_URL, FREE_MODEL, type ChatMessage, type Credential } from './lib/gateway'
 import type { Account } from './lib/account'
 import {
@@ -28,6 +28,7 @@ import {
   DEFAULT_OPTIONS,
   GENERATIONS,
   generate,
+  mediaMimeType,
   modeForModel,
   type AsyncJob,
   type GenerationKind,
@@ -43,12 +44,16 @@ import {
 } from './lib/settings'
 import { SpendTracker, TYPICAL_AGENT_STEPS } from './lib/spend'
 import { applyTheme, loadTheme, saveTheme, type Theme } from './lib/theme'
-import { ChatList } from './ui/ChatList'
+import { ChatList, type RailView } from './ui/ChatList'
 import { Composer } from './ui/Composer'
 import { ConsentDialog, type PendingSpend } from './ui/ConsentDialog'
 import { Gallery, type GalleryTab } from './ui/Gallery'
+import { Landing } from './ui/Landing'
 import { Marketplace } from './ui/Marketplace'
-import { ThemeToggle } from './ui/ThemeToggle'
+import { PaneResizer } from './ui/PaneResizer'
+import { TopNav } from './ui/TopNav'
+import { clampPane, loadPanes, savePanes, type Pane, type PaneWidths } from './lib/panes'
+import { pathForView, replacePath } from './lib/route-path'
 import {
   isUserRejection,
   selectEvmRequirement,
@@ -72,7 +77,18 @@ import { Transcript, type Turn } from './ui/Transcript'
  * enough to mint more keys and read the account. Conversations ARE persisted — see
  * lib/conversations.ts for what is and is not written.
  */
-export function App() {
+export function App({
+  initialPrompt,
+  initialView,
+  onHome,
+}: {
+  /** A prompt typed into the landing page's hero, to run once on arrival. */
+  initialPrompt?: string
+  /** Which pane the URL asked for — `/gallery` opens the gallery rather than the chat. */
+  initialView?: RailView
+  /** Back to the landing page. */
+  onHome?: () => void
+} = {}) {
   const [turns, setTurns] = useState<Turn[]>([])
   const [busy, setBusy] = useState(false)
   // No API key state. A key pasted into a page is a plaintext bearer credential, and it
@@ -106,7 +122,28 @@ export function App() {
    */
   const [activeId, setActiveId] = useState<string | null>(() => loadConversations()[0]?.id ?? null)
   const [turnsRestored, setTurnsRestored] = useState(false)
-  const [view, setView] = useState<'chat' | 'marketplace' | 'gallery'>('chat')
+  /**
+   * Which pane is showing, seeded from the URL.
+   *
+   * `/gallery` has to arrive with the gallery open, not open the chat and then swap — that swap is
+   * visible, and it makes a shared link look like it went to the wrong place.
+   */
+  const [view, setView] = useState<RailView>(initialView ?? 'chat')
+
+  /**
+   * Keeps the address bar naming the pane on screen.
+   *
+   * `replaceState`, not push. Clicking Marketplace, then Gallery, then back to chat would otherwise
+   * bury the landing page three entries deep, so Back — which everywhere else leaves the section —
+   * would instead walk backwards through the panes one at a time.
+   *
+   * Skipped entirely when this console is not the routed page (`onHome` absent means it was rendered
+   * directly, as the tests do), so nothing here can rewrite a URL that another owner is managing.
+   */
+  useEffect(() => {
+    if (!onHome) return
+    replacePath(pathForView(view))
+  }, [onHome, view])
   /**
    * Which gallery tab is showing. Lifted here so it survives leaving the gallery and coming
    * back — a tab that silently resets makes the other pane feel like it was not really there.
@@ -130,8 +167,50 @@ export function App() {
   const [gallery, setGallery] = useState<GalleryItem[]>(() => loadGallery())
   const [railOpen, setRailOpen] = useState(true)
 
+  /**
+   * How wide the two side panes are. Restored from storage, so a width chosen once stays chosen.
+   *
+   * The widths were `260px` and `320px` in the grid template. Reasonable numbers, and wrong for
+   * anyone whose window is not the one they were picked on: at 2560px the rail spends ten percent of
+   * the screen on truncated titles, and at 1280px the wallet panel wraps every few words.
+   */
+  const [panes, setPanes] = useState<PaneWidths>(() => loadPanes())
+
+  /**
+   * The live width during a drag, written to CSS rather than to React state.
+   *
+   * A pointermove fires up to 120 times a second and each one would otherwise rerender the whole
+   * console — the transcript, every turn, the marketplace grid. Setting a custom property on the
+   * shell moves the grid track directly, on the compositor's own schedule, and React learns the
+   * final number once on release.
+   *
+   * The ref holds what the DOM currently shows so `onCommit` has a value to persist: reading it back
+   * out of `getComputedStyle` would work and would also force a layout on mouse-up.
+   */
+  const shell = useRef<HTMLDivElement | null>(null)
+  const dragWidth = useRef<PaneWidths>(panes)
+
+  const setPaneWidth = useCallback((pane: Pane, px: number) => {
+    const w = clampPane(pane, px)
+    dragWidth.current = { ...dragWidth.current, [pane]: w }
+    shell.current?.style.setProperty(`--${pane}-w`, `${w}px`)
+  }, [])
+
+  const commitPanes = useCallback(() => {
+    const next = { ...dragWidth.current }
+    setPanes(next)
+    savePanes(next)
+  }, [])
+
   const [models, setModels] = useState<CatalogueModel[]>([])
   const [modelsLoading, setModelsLoading] = useState(true)
+  /**
+   * Marketplace size, for the landing copy. Null until loaded, NOT 0.
+   *
+   * The distinction is the whole point: "0 callable APIs" on a page still fetching reads as an
+   * empty product, on the one screen whose job is a first impression. Null renders as a dash.
+   */
+  const [marketSize, setMarketSize] = useState<{ total: number; categories: number } | null>(null)
   const [model, setModel] = useState<string>(FREE_MODEL)
   const [mode, setMode] = useState<GenerationKind | 'chat'>('chat')
   // Per-mode, so switching from Image to Video and back does not lose the size you chose. Not
@@ -197,6 +276,22 @@ export function App() {
       .finally(() => {
         if (!ac.signal.aborted) setModelsLoading(false)
       })
+
+    /**
+     * One page of one row, purely for the count.
+     *
+     * `page_size=1` because only `total` and the category facet are wanted — the facet comes back
+     * with every response regardless of page size, so this is the cheapest possible way to ask.
+     * Pulling a real page would download 24 endpoint descriptions to render one number.
+     *
+     * Read live rather than hardcoded because these numbers MOVE: the facet reported 26 categories
+     * one afternoon and 18 the next. A number typed into the source is a number that will be wrong
+     * on the first screen.
+     */
+    listApis({ baseUrl, signal: ac.signal, pageSize: 1 })
+      .then((page) => setMarketSize({ total: page.total, categories: page.categories.length }))
+      .catch(() => undefined)
+
     return () => ac.abort()
   }, [baseUrl])
 
@@ -400,9 +495,27 @@ export function App() {
         })
       }
 
+      /**
+       * Inline bytes go to IndexedDB, so the clip survives a reload.
+       *
+       * Only when there is no URL to archive. Speech returns base64 rather than a link, and the
+       * CDN Worker cannot copy it — it fetches from an allowlisted host and a `data:` URL has no
+       * host. So these bytes exist in this browser only.
+       *
+       * Awaited before patching the turn, so `mediaKey` is set before anything persists. The old
+       * code put the base64 straight into the turn, where `saveConversations` wrote it to
+       * localStorage: seven 30s clips filled this origin's 4 MB budget, after which every
+       * conversation write failed silently and a refresh discarded everything since.
+       */
+      let mediaKey: string | undefined
+      if (!shownUrl && media.b64) {
+        mediaKey = (await putMedia(newId(), media.b64, mediaMimeType(kind))) ?? undefined
+      }
+
       patchMediaTurn(turnId, convId, {
         url: shownUrl,
         b64: media.b64,
+        mediaKey,
         raw: media.raw,
         job: undefined,
         timedOut: false,
@@ -495,7 +608,12 @@ export function App() {
     for (const turn of conv.turns) {
       // Only turns that were still waiting. A finished or failed one has no job left, and
       // re-polling a completed job would be a pointless request against a paid endpoint.
-      if (turn.kind !== 'media' || !turn.job || turn.url || turn.b64) continue
+      //
+      // `mediaKey` is checked alongside `url`, and it has to be: `b64` is deliberately stripped
+      // before persisting, so after a reload a FINISHED speech turn has neither url nor b64 and
+      // would look unfinished. Testing only those two would re-poll a completed job on every
+      // reload — a request against a paid endpoint for media already in hand.
+      if (turn.kind !== 'media' || !turn.job || turn.url || turn.b64 || turn.mediaKey) continue
       // Cleared before resuming: the stored `waitedMs` measured the PREVIOUS session's wait, so
       // leaving it would show a counter that jumps backwards the moment the first poll lands.
       // `timedOut` goes too — a wait that has just restarted has not timed out.
@@ -510,8 +628,46 @@ export function App() {
         conv.id,
       )
     }
+
+    /**
+     * Drops blobs no conversation refers to any more.
+     *
+     * Deleting a conversation removes its keys from localStorage and leaves the bytes stranded in
+     * IndexedDB — invisible, unreachable, and counting against a 6 GB quota. Without this the
+     * store only ever grows.
+     *
+     * Keys are collected from EVERY conversation, not just the active one: pruning against the
+     * open conversation alone would delete the audio belonging to all the others.
+     */
+    const live = new Set<string>()
+    for (const c of conversations) {
+      for (const t of c.turns) {
+        if (t.kind === 'media' && t.mediaKey) live.add(t.mediaKey)
+      }
+    }
+    void pruneMedia(live)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on mount, by design
   }, [])
+
+  /**
+   * Runs a prompt handed over from the landing page's hero, exactly once.
+   *
+   * Guarded by a ref rather than a dependency list: `send` is a useCallback that changes whenever
+   * the model or credential does, so listing it would re-send the same prompt on the next render —
+   * a second paid call the user did not ask for. That is the failure this guard exists for, not a
+   * lint appeasement.
+   *
+   * Deliberately NOT awaited or blocked on: `send` opens the consent dialog for anything paid, and
+   * the free tier answers without one. Either way the user sees their own words on screen first.
+   */
+  const handoffSent = useRef(false)
+  useEffect(() => {
+    if (handoffSent.current) return
+    if (!initialPrompt || initialPrompt.trim() === '') return
+    handoffSent.current = true
+    void send(initialPrompt)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, by design; see above
+  }, [initialPrompt])
 
   /** Generation (image/video/music): quote, ask, then run. */
   const runGeneration = useCallback(
@@ -748,6 +904,23 @@ export function App() {
               t.text += e.text ?? ''
             })
             break
+          /**
+           * A retry is starting over, so clear what the abandoned attempt streamed.
+           *
+           * Only reachable now that delivery is live. While events were buffered until the response
+           * finished, a failed attempt's buffer was simply dropped and the user never saw it. Now
+           * the words are on screen, and without this the retry's text appends to them — one turn
+           * that reads as a single answer and is really two halves of different ones.
+           *
+           * Reasoning is cleared too. It belongs to the attempt that was abandoned, and leaving it
+           * beside a fresh answer attributes one model's thinking to another's words.
+           */
+          case 'reset':
+            patchAgent((t) => {
+              t.text = ''
+              t.reasoning = ''
+            })
+            break
           case 'reasoning':
             patchAgent((t) => {
               t.reasoning += e.text ?? ''
@@ -763,6 +936,27 @@ export function App() {
               tracker.current.record(e.tool ?? 'call', e.spentUsd)
               setSpendVersion((v) => v + 1)
             }
+            /**
+             * A paid API this session could not reach, stated by the page rather than by the model.
+             *
+             * The agent is already told to report the name, the price and the unlock path. It does not
+             * reliably do it: measured on "北京时间是几点", a free-tier model was handed
+             * "Timezone Lookup, $0.005750, connect a wallet" and answered with an invented timestamp,
+             * mentioning neither. A user who is never told the capability exists cannot choose to
+             * unlock it, so the fact is rendered from the event.
+             *
+             * A notice, not an error: nothing failed. The API is there and has a price.
+             */
+            if (e.unpayableCall) {
+              const { name, priceUsd } = e.unpayableCall
+              setTurns((t) => [
+                ...t,
+                {
+                  kind: 'notice',
+                  text: `${name} would answer this — $${priceUsd.toFixed(6)} per call. Connect a wallet or sign in with your JarvisClaw account to use it. Anything the answer above says about live data was not retrieved from it.`,
+                },
+              ])
+            }
             patchAgent((t) => {
               for (let i = t.steps.length - 1; i >= 0; i--) {
                 if (t.steps[i].tool === e.tool && t.steps[i].running) {
@@ -771,6 +965,10 @@ export function App() {
                     running: false,
                     spentUsd: e.spentUsd ?? 0,
                     declined: e.declined,
+                    // Carried through so the row can say "not called" instead of "free". A refused
+                    // paid call spends nothing, and without this the row was indistinguishable
+                    // from a genuinely free tool having run.
+                    unpayable: e.unpayable,
                   }
                   break
                 }
@@ -949,115 +1147,167 @@ export function App() {
   )
 
   return (
-    <div className={railOpen ? 'shell' : 'shell shell-rail-closed'}>
-      {railOpen && (
-        <ChatList
-          conversations={conversations}
-          activeId={activeId}
-          view={view}
-          galleryCount={gallery.length}
-          onNew={startNew}
-          onOpen={openConversation}
-          onDelete={deleteConversation}
-          onView={setView}
-        />
-      )}
-
-      <div className="main">
-        <header className="topbar">
-          <button
-            className="rail-toggle"
-            onClick={() => setRailOpen((o) => !o)}
-            aria-label={railOpen ? 'Hide conversations' : 'Show conversations'}
-            aria-expanded={railOpen}
-          >
-            <PanelLeftIcon size={16} aria-hidden="true" />
-          </button>
-          <span className={anonymous ? 'tag tag-free' : 'tag'}>
-            {anonymous ? 'free · no sign-in' : 'signed in'}
-          </span>
-          <span className="spacer" />
-          <ThemeToggle theme={theme} onTheme={setTheme} />
-          {busy && (
-            <button className="ghost-btn" onClick={stop}>
-              Stop
-            </button>
-          )}
-          <button className="ghost-btn" onClick={startNew} disabled={turns.length === 0}>
-            New chat
-          </button>
-        </header>
-
-        {view === 'gallery' ? (
-          <Gallery
-            items={gallery}
-            tab={galleryTab}
-            onTab={setGalleryTab}
-            onRemove={(id) =>
-              setGallery((g) => {
-                const next = removeFromGallery(g, id)
-                saveGallery(next)
-                return next
-              })
-            }
-            /**
-             * Loads a showcase prompt into the composer instead of running it.
-             *
-             * Deliberately NOT run-on-click. These prompts carry
-             * `{argument name="…" default="…"}` markers where their author expected an edit, and
-             * a one-click run would charge for a verbatim reproduction of someone else's example
-             * before the user had a chance to change the headline. So the prompt lands in the box,
-             * in the right mode, and the existing consent dialog still asks before any money moves.
-             */
-            onUsePrompt={(prompt, promptMode) => {
-              setView('chat')
-              setMode(promptMode)
-              setDraft(prompt)
-            }}
-          />
-        ) : view === 'marketplace' ? (
-          <Marketplace
-            baseUrl={baseUrl}
-            onAsk={(prompt) => {
-              setView('chat')
-              void send(prompt)
-            }}
-          />
-        ) : (
-          <>
-            <Transcript turns={turns} onSuggestion={send} />
-            <Composer
-              busy={busy}
-              anonymous={anonymous}
-              models={models}
-              modelsLoading={modelsLoading}
-              model={model}
-              mode={mode}
-              options={mode === 'chat' ? {} : genOptions[mode]}
-              onModel={setModel}
-              onMode={setMode}
-              onOptions={(o) => {
-                if (mode !== 'chat') setGenOptions((prev) => ({ ...prev, [mode]: o }))
-              }}
-              onSend={send}
-              draft={draft}
-            />
-          </>
-        )}
-      </div>
-
-      <Sidebar
-        wallet={wallet}
-        spend={spend}
-        settings={settings}
-        account={account}
-        keyName={apiKey?.name ?? null}
-        onSettings={applySettings}
-        onAccount={setAccount}
-        onKey={setApiKey}
-        onWallet={setWallet}
+    /**
+     * The window: one global bar, then the three panes beneath it.
+     *
+     * The bar used to be rendered inside `.main` — the grid's middle column — which made it a pane
+     * toolbar rather than a global bar: it started after the rail's right border and stopped at the
+     * sidebar's left one, with two vertical rules cutting the row into thirds and the brand stranded
+     * in the rail beside it.
+     *
+     * The rows are `auto` then `minmax(0, 1fr)`. The `0` floor is what still allows the panes to be
+     * shorter than their content, which is the permission their `overflow-y: auto` needs before it can
+     * do anything — the same constraint `.shell` states, moved up a level now that `.shell` is no
+     * longer the element capped to the viewport.
+     */
+    <div className="frame">
+      <TopNav
+        view={view}
+        anonymous={anonymous}
+        busy={busy}
+        theme={theme}
+        railOpen={railOpen}
+        hasTurns={turns.length > 0}
+        onView={setView}
+        onRail={() => setRailOpen((o) => !o)}
+        onTheme={setTheme}
+        onStop={stop}
+        onNew={startNew}
+        onHome={onHome}
       />
 
+      <div
+        ref={shell}
+        className={railOpen ? 'shell' : 'shell shell-rail-closed'}
+        /**
+         * The pane widths as custom properties, which is what lets a drag skip React entirely.
+         *
+         * The grid template reads them through `clamp()`, so the stylesheet still has the last word on
+         * a window too narrow to honour the stored number — and because that clamping happens in CSS,
+         * a temporarily-cramped viewport never overwrites the width the user chose.
+         */
+        style={
+          {
+            '--rail-w': `${panes.rail}px`,
+            '--sidebar-w': `${panes.sidebar}px`,
+          } as React.CSSProperties
+        }
+      >
+        {railOpen && (
+          <ChatList
+            conversations={conversations}
+            activeId={activeId}
+            view={view}
+            galleryCount={gallery.length}
+            onNew={startNew}
+            onOpen={openConversation}
+            onDelete={deleteConversation}
+            onView={setView}
+          />
+        )}
+        {/* Between the panes it separates, in DOM order, so focus reaches it where it sits. Only when
+            the rail is open: a handle for a hidden pane would resize something invisible. */}
+        {railOpen && (
+          <PaneResizer
+            pane="rail"
+            width={panes.rail}
+            onWidth={(px) => setPaneWidth('rail', px)}
+            onCommit={commitPanes}
+          />
+        )}
+
+        <div className="main">
+          {view === 'gallery' ? (
+            <Gallery
+              items={gallery}
+              tab={galleryTab}
+              onTab={setGalleryTab}
+              onRemove={(id) =>
+                setGallery((g) => {
+                  const next = removeFromGallery(g, id)
+                  saveGallery(next)
+                  return next
+                })
+              }
+              /**
+               * Loads a showcase prompt into the composer instead of running it.
+               *
+               * Deliberately NOT run-on-click. These prompts carry
+               * `{argument name="…" default="…"}` markers where their author expected an edit, and
+               * a one-click run would charge for a verbatim reproduction of someone else's example
+               * before the user had a chance to change the headline. So the prompt lands in the box,
+               * in the right mode, and the existing consent dialog still asks before any money moves.
+               */
+              onUsePrompt={(prompt, promptMode) => {
+                setView('chat')
+                setMode(promptMode)
+                setDraft(prompt)
+              }}
+            />
+          ) : view === 'marketplace' ? (
+            <Marketplace
+              baseUrl={baseUrl}
+              onAsk={(prompt) => {
+                setView('chat')
+                void send(prompt)
+              }}
+            />
+          ) : (
+            <>
+              <Transcript
+                turns={turns}
+                empty={
+                  <Landing
+                    models={models}
+                    marketplaceTotal={marketSize?.total ?? null}
+                    onSuggestion={send}
+                  />
+                }
+              />
+              <Composer
+                busy={busy}
+                anonymous={anonymous}
+                models={models}
+                modelsLoading={modelsLoading}
+                model={model}
+                mode={mode}
+                options={mode === 'chat' ? {} : genOptions[mode]}
+                onModel={setModel}
+                onMode={setMode}
+                onOptions={(o) => {
+                  if (mode !== 'chat') setGenOptions((prev) => ({ ...prev, [mode]: o }))
+                }}
+                onSend={send}
+                draft={draft}
+              />
+            </>
+          )}
+        </div>
+
+        <PaneResizer
+          pane="sidebar"
+          width={panes.sidebar}
+          onWidth={(px) => setPaneWidth('sidebar', px)}
+          onCommit={commitPanes}
+        />
+
+        <Sidebar
+          wallet={wallet}
+          spend={spend}
+          settings={settings}
+          account={account}
+          keyName={apiKey?.name ?? null}
+          onSettings={applySettings}
+          onAccount={setAccount}
+          onKey={setApiKey}
+          onWallet={setWallet}
+        />
+      </div>
+
+      {/* Outside the shell, deliberately. The shell sets `overflow: hidden` to stop a pane growing a
+          document scrollbar, and a clipping ancestor clips a fixed descendant too — so a dialog left
+          in there could be cut off by the very rule that keeps the composer pinned. This one asks the
+          user to approve a charge, which makes "partly off screen" the worst possible outcome. */}
       {pending && (
         <ConsentDialog
           pending={pending}

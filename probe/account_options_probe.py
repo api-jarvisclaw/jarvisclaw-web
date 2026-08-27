@@ -40,7 +40,7 @@ from playwright.async_api import async_playwright
 # 127.0.0.1 are both rejected with no allow-origin header at all. So the account half of this
 # probe can only run against the deployed site; a local server would (correctly) show the
 # "unavailable here" state and every check below would fail for the right reason.
-URL = sys.argv[1] if len(sys.argv) > 1 else "https://chat.jarvisclaw.ai"
+URL = sys.argv[1] if len(sys.argv) > 1 else "https://ducat.jarvisclaw.ai"
 
 # The platform's own response shapes. Field names and the envelope come from model.Token and
 # common.PageInfo; getting these wrong is the failure mode the unit tests also pin.

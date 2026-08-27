@@ -23,18 +23,28 @@
   # eval, so a stored-XSS payload has nowhere to execute.
   #
   # localhost is listed so `bun run dev` behaves like production rather than only
-  # failing once deployed. It costs nothing here: a page served from chat.jarvisclaw.ai
+  # failing once deployed. It costs nothing here: a page served from ducat.jarvisclaw.ai
   # cannot be made to reach a visitor's own localhost by an attacker who does not
   # already control that machine.
+  #
+  # Nothing in this policy names this app's OWN host. `'self'` is resolved against whichever
+  # origin served the page, which is why the same file is correct on both ducat. and the
+  # superseded chat. hostname during the move.
   # media-src is required for the generated audio and video to play at all. Without it
   # both fall back to default-src 'self', and a paid clip renders a dead player — which is
   # indistinguishable from a charge that produced nothing. `data:` covers inlined base64
   # (speech upstreams return bytes, not a URL) and `https:` covers the CDN the gateway
   # rewrites media URLs to. img-src carries https: for the same reason.
+  #
+  # `blob:` is what lets a speech clip survive a reload. Those bytes are stored in IndexedDB
+  # and handed to the player as an object URL, because keeping the base64 in the transcript
+  # filled localStorage in seven clips and silently stopped every later save. Omitting blob:
+  # here would restore the clip from storage and then refuse to play it — a dead player again,
+  # by a third distinct cause.
   # cdn.jarvisclaw.ai is in connect-src because the gallery POSTs there to archive a paid
   # artifact into R2. Without it that request is blocked before it is sent and every generated
   # file silently keeps its expiring upstream URL.
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' data: https:; connect-src 'self' https://api.jarvisclaw.ai https://cdn.jarvisclaw.ai http://localhost:3000 http://127.0.0.1:3000; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; object-src 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' data: https: blob:; connect-src 'self' https://api.jarvisclaw.ai https://cdn.jarvisclaw.ai http://localhost:3000 http://127.0.0.1:3000; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'none'; object-src 'none'
 
 # Hashed asset filenames, so these are safe to cache permanently. index.html is
 # deliberately NOT in this rule: it must be revalidated or a deploy would not reach

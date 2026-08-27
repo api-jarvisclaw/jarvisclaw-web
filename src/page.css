@@ -1,0 +1,701 @@
+/* The landing page at `/`.
+ *
+ * Its own stylesheet, because it shares nothing with the console but the design tokens. A real
+ * page on a real route, so it is full-bleed: no grid columns, no fixed panes, its own scrolling
+ * document.
+ *
+ * The first attempt put this content in the console's empty state and it was the wrong shape —
+ * trapped in a 1fr column between a 260px rail and a 320px sidebar, a landing page rendered at
+ * 860px in the middle of a 2560px window with chat furniture either side of it.
+ */
+
+.page {
+  min-height: 100%;
+  overflow-y: auto;
+  background: var(--background);
+  color: var(--foreground);
+
+  /* One measure and one gutter for the whole page.
+   *
+   * Declared here rather than repeated per section because the failure they prevent is exactly the one
+   * measured in this file: four different left edges (24 / 240 / 354 / 410) on one page, each from a
+   * rule that was locally reasonable. A shared variable makes "does this line up" a question with one
+   * answer instead of five. */
+  --page-measure: 1020px;
+  --page-gutter: 28px;
+}
+
+/* The bar's background and border span the window; its contents sit on the page measure, so the brand
+   lines up with the section headings underneath rather than hugging the window edge. */
+.page-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 1px solid var(--border);
+  padding-inline: var(--page-gutter);
+  /* The one blur on this page, and it is on an overlay — the console's own convention. A sticky
+     bar over scrolling content is exactly the case backdrop-filter exists for. */
+  background: color-mix(in oklab, var(--background) 82%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.page-nav-inner {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  max-width: var(--page-measure);
+  margin-inline: auto;
+  padding-block: 13px;
+}
+
+/* The wordmark.
+ *
+ * It read "ducat" at 14.5px — two problems beyond the name itself. It was the same size as the nav
+ * links beside it, so nothing marked it as the brand rather than a seventh menu item; and it carried
+ * no optical letter-spacing, so it read as default text rather than set type.
+ *
+ * The name is now the product's, matching the console's bar, the tab icon and the main site. */
+.page-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  /* An anchor, so the link defaults need undoing. It points at `/` from `/` — which is what a logo does
+     everywhere, and it gives someone who scrolled to the FAQ the ordinary way back to the top. */
+  color: inherit;
+  text-decoration: none;
+  flex: none;
+}
+
+.page-brand-name {
+  font-size: 17px;
+  font-weight: 700;
+  /* Tight enough to read as a set wordmark rather than a run of body text, and not so tight that the
+     letters touch at this size. */
+  letter-spacing: -0.021em;
+  white-space: nowrap;
+}
+
+/* The real logo, the same file the console's bar and the tab icon use. It was a solid `--primary`
+   square, which made this the third different mark for one product. */
+.page-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  object-fit: contain;
+  flex: none;
+}
+
+/* ---- footer brand ---- */
+
+.page-foot-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 650;
+  color: var(--foreground);
+  letter-spacing: -0.015em;
+}
+
+.page-foot-brand img {
+  border-radius: 5px;
+  object-fit: contain;
+}
+
+.page-nav nav {
+  display: flex;
+  gap: 18px;
+  margin-right: auto;
+  /* Scrolls rather than wrapping. This bar is `position: sticky` with a border-bottom, so a second
+     row of items makes the whole bar taller and the border lands halfway down the hero — and it does
+     so only at the widths where the items happen not to fit, which is how it gets missed. */
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* `min-width: 0` alone was wrong here, and measurably so: at 390px flex crushed this to width 0 and
+     the eight items vanished entirely rather than scrolling — an overflow container with no width has
+     nothing to scroll. The basis is what gives it something to shrink FROM, and the floor is what stops
+     the shrinking at a width where two items are still legible. */
+  flex: 1 1 auto;
+  min-width: 4rem;
+}
+
+.page-nav nav::-webkit-scrollbar {
+  display: none;
+}
+
+.page-nav nav a {
+  color: var(--muted-foreground);
+  font-size: 13.5px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.page-nav nav a:hover {
+  color: var(--foreground);
+}
+
+.page-cta-sm,
+.page-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  border-radius: 999px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font: inherit;
+  font-weight: 600;
+}
+
+.page-cta-sm {
+  padding: 8px 15px;
+  font-size: 13px;
+  /* The one thing on this bar that must stay clickable at any width, so it neither shrinks nor wraps.
+     Measured at 768px: it wrapped to two lines and took the sticky bar from 65px to 85px, dropping the
+     border partway down the hero. The nav yields instead — it scrolls, so it can lose space without
+     losing anything. */
+  flex: none;
+  white-space: nowrap;
+}
+
+.page-cta {
+  padding: 12px 24px;
+  font-size: 15px;
+}
+
+.page-cta-sm:hover,
+.page-cta:hover {
+  filter: brightness(1.08);
+}
+
+/* ---- hero ---- */
+
+/* The hero shares the page measure and the page gutter, so its outer edge matches every band below it.
+   The narrower measures inside it — the lede at 62ch, the input at 620px — are deliberate and stay:
+   a 1020px line of body text is unreadable, and a full-width single-line input looks like a search
+   engine. Those are centred WITHIN this box, which is why they read as intentional rather than ragged. */
+/* The gutter is added TO the measure here, not taken out of it.
+ *
+ * Measured otherwise: the hero's own children landed at 238 while every band's landed at 210, because
+ * capping the box at 1020 and then padding it 28px leaves 964px of content — the gutter counted twice.
+ * The bands do not have this problem because their padding is on the full-width section and the measure
+ * is on the children inside it. Two correct-looking rules producing a 28px step down the page. */
+.page-hero {
+  max-width: calc(var(--page-measure) + var(--page-gutter) * 2);
+  margin: 0 auto;
+  padding: clamp(56px, 7vw, 88px) var(--page-gutter) clamp(48px, 6vw, 72px);
+  text-align: center;
+}
+
+.page-hero h1 {
+  margin: 16px 0 18px;
+  font-size: clamp(34px, 5.2vw, 56px);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.08;
+}
+
+.page-hero h1 em {
+  font-style: normal;
+  color: var(--accent-2-text);
+}
+
+.page-lede {
+  margin: 0 auto 30px;
+  max-width: 62ch;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+}
+
+/* The hero's live input. The product's claim is "you can just type", so the page demonstrates
+   that rather than describing it. */
+.page-prompt {
+  display: flex;
+  gap: 9px;
+  max-width: 620px;
+  margin: 0 auto;
+}
+
+.page-prompt input {
+  flex: 1;
+  min-width: 0;
+  padding: 13px 16px;
+  border-radius: var(--radius-xl);
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 14.5px;
+}
+
+.page-prompt input:focus {
+  outline: none;
+  border-color: var(--glow-brand);
+  box-shadow: 0 0 0 1px var(--glow-brand);
+}
+
+.page-prompt button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 0 20px;
+  border: none;
+  border-radius: var(--radius-xl);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.page-prompt button:hover {
+  filter: brightness(1.08);
+}
+
+.page-hero-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.page-hero-chips span {
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* ---- bands ---- */
+
+/* Vertical rhythm from one pair of numbers, not a different padding per section. `clamp` scales the
+   space with the viewport so a phone does not get desktop-sized gaps between sections it has to
+   scroll past. */
+.page-band {
+  padding: clamp(48px, 6vw, 76px) var(--page-gutter);
+  border-top: 1px solid var(--border);
+}
+
+/* Alternating background so consecutive sections read as separate without a rule between each. */
+.page-band-alt {
+  background: color-mix(in oklab, var(--muted) 45%, var(--background));
+}
+
+/* One measure for the whole page, so every section shares a left edge.
+ *
+ * MEASURED before this: the page had four of them. Section headings sat at left=24 while their own
+ * card grids sat at left=240 — a 216px mismatch on every band — and the hero was centred on a third
+ * edge with its input on a fourth.
+ *
+ * The cause was shorthand order, not a missing rule. `.page-band > *` set `margin-left/right: auto`,
+ * and `.page-band h2` — written AFTER it, same specificity — reset `margin: 0 0 6px`. The shorthand
+ * writes all four sides, so it silently replaced the auto centring with 0. Every heading on the page
+ * was flush against the section padding while its body was centred in 960px.
+ *
+ * Fixed by giving the band an inner measure of its own rather than centring each child, which removes
+ * the chance for any one child's margin shorthand to opt out. */
+.page-band > * {
+  max-width: var(--page-measure);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.page-band h2 {
+  /* margin-bottom only. A `margin` shorthand here would rewrite the `auto` sides above and put this
+     heading back at the section's padding edge, 216px left of its own content — which is exactly the
+     bug this file used to have. */
+  margin-block: 0 6px;
+  font-size: clamp(20px, 2.6vw, 27px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.page-band-lede {
+  /* margin-block, for the same reason as the h2 above: this is a direct child of .page-band, so a
+     `margin` shorthand would overwrite the auto sides and strand it at the padding edge. Two
+     elements had this bug; it is a property of the shorthand, not of one rule. */
+  margin-block: 0 26px;
+  max-width: 68ch;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+}
+
+.page-band h2 + .page-steps,
+.page-band h2 + .page-cards,
+.page-band h2 + .page-faq {
+  margin-top: 26px;
+}
+
+.page-steps {
+  display: grid;
+  gap: 22px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.page-step-n {
+  font-size: 12px;
+  color: var(--accent-2-text);
+}
+
+.page-step h3 {
+  margin: 8px 0 6px;
+  font-size: 16px;
+  font-weight: 620;
+}
+
+.page-step p,
+.page-card p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--muted-foreground);
+}
+
+/* The CLI steps, sharing .page-steps but separated from the cards above them by a rule rather than
+   just space — they are a different path to the same product, not three more payment options. */
+.page-steps-tight {
+  margin-top: 30px;
+  padding-top: 28px;
+  border-top: 1px solid var(--border);
+}
+
+.page-step-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--accent-2-text);
+  text-decoration: none;
+}
+
+.page-step-link:hover {
+  text-decoration: underline;
+}
+
+/* A shell command. One of the few places monospace is doing real work rather than decorating —
+   `npm i -g jarvisclaw` is text to be typed exactly, and proportional digits and spacing make it
+   harder to read as a command. */
+.page-code {
+  display: block;
+  margin-top: 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--secondary);
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--foreground);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+/* ---- hero figures ---- */
+
+.page-figures {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 44px auto 0;
+  padding: 24px 0 0;
+  border-top: 1px solid var(--border);
+  text-align: left;
+  max-width: 100%;
+}
+
+.page-figures dt {
+  font-size: 26px;
+  font-weight: 680;
+  letter-spacing: -0.03em;
+  /* Tabular figures, not a monospace face. The numbers should line up without the page taking on a
+     terminal look — which is the whole distinction being drawn in the font note in styles.css. */
+  font-variant-numeric: tabular-nums;
+}
+
+.page-figures dd {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+/* ---- comparison table ---- */
+
+/* Scrolls inside its own container. Four columns of prose do not fit a phone, and a table that widens
+   the page body gives the whole document a horizontal scrollbar — which breaks every other section
+   to accommodate this one. */
+.page-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+}
+
+.page-table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.page-table th,
+.page-table td {
+  padding: 14px 16px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.page-table tbody tr:last-child th,
+.page-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.page-table thead th {
+  font-size: 12px;
+  font-weight: 620;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+/* The row label. A `th` with `scope="row"`, so a screen reader announces which comparison each cell
+   belongs to — without it a table of 15 cells is 15 unlabelled fragments. */
+.page-table tbody th {
+  font-weight: 600;
+  color: var(--foreground);
+  width: 18%;
+  min-width: 130px;
+}
+
+.page-table td {
+  color: var(--muted-foreground);
+}
+
+/* Our column, marked by a tint and a readable weight rather than a coloured background — this table
+   is making an argument and it should not look like an ad inside it. */
+.page-table-ours {
+  background: color-mix(in oklab, var(--primary) 5%, var(--card));
+  color: var(--foreground) !important;
+}
+
+.page-table thead .page-table-ours {
+  color: var(--accent-2-text);
+}
+
+.page-cards {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+/* Flat --card, no gradient. The gradient variants in styles.css mix a chromatic glow into a
+   neutral, which is what produced the pink tint; and a page of tinted panels is the "too AI" look
+   this product deliberately avoids. */
+.page-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+  padding: 20px;
+}
+
+.page-card > svg {
+  color: var(--accent-2-text);
+  margin-bottom: 10px;
+}
+
+.page-card h3 {
+  margin: 0 0 7px;
+  font-size: 15.5px;
+  font-weight: 620;
+}
+
+/* ---- faq ---- */
+
+.page-faq details {
+  border-bottom: 1px solid var(--border);
+}
+
+.page-faq details:last-child {
+  border-bottom: none;
+}
+
+/* <details> rather than a JS accordion: six answers of which someone reads one, and the browser
+   already handles keyboard access and find-in-page correctly. */
+.page-faq summary {
+  cursor: pointer;
+  padding: 15px 0;
+  font-size: 15px;
+  font-weight: 550;
+  list-style: none;
+}
+
+.page-faq summary::-webkit-details-marker {
+  display: none;
+}
+
+.page-faq summary::after {
+  content: '+';
+  float: right;
+  color: var(--muted-foreground);
+}
+
+.page-faq details[open] summary::after {
+  content: '−';
+}
+
+.page-faq p {
+  margin: 0 0 17px;
+  max-width: 72ch;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--muted-foreground);
+}
+
+/* ---- close + footer ---- */
+
+/* Measured at 1392px wide before this — the widest thing on the page, because it had padding but no
+   measure at all. A closing line stretched across the full window after six sections at 1020px reads
+   as a different page. */
+.page-close {
+  padding: clamp(56px, 7vw, 84px) var(--page-gutter);
+  border-top: 1px solid var(--border);
+  text-align: center;
+}
+
+.page-close > * {
+  max-width: var(--page-measure);
+  margin-inline: auto;
+}
+
+/* margin-block on both, for the third and fourth time in this file: a `margin` shorthand on a direct
+   child overwrites the `auto` sides from `.page-close > *` and strands the element at the padding edge.
+   Measured here as left=28 against every other section's 210. */
+.page-close h2 {
+  margin-block: 0 8px;
+  font-size: clamp(22px, 3vw, 32px);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.page-close p {
+  margin-block: 0 24px;
+  color: var(--muted-foreground);
+  font-size: 15px;
+}
+
+/* The footer's rule spans the window, its CONTENT sits on the page measure — so the line reads as the
+   bottom of the page while the text still lines up with the six sections above it. Padding alone
+   (which is what this had) leaves the content at the window edge on a wide monitor. */
+.page-foot {
+  border-top: 1px solid var(--border);
+  padding-inline: var(--page-gutter);
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+.page-foot-inner {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  max-width: var(--page-measure);
+  margin-inline: auto;
+  padding-block: 24px 36px;
+}
+
+.page-foot nav {
+  display: flex;
+  gap: 18px;
+  margin-left: auto;
+}
+
+.page-foot a {
+  color: var(--muted-foreground);
+  text-decoration: none;
+}
+
+.page-foot a:hover {
+  color: var(--foreground);
+}
+
+@media (max-width: 720px) {
+  /* The in-page anchors go, and only they.
+   *
+   * This rule was `.page-nav nav { display: none }`, written when every item in here was an in-page
+   * jump — and correct then, because a jump is reachable by scrolling anyway. It became wrong the
+   * moment real destinations joined the list: at 390px it hid Marketplace, Gallery and Docs together
+   * with the anchors, so a phone visitor had no route to any of them. Measured as `navW=0`, which is
+   * also why the scroll fallback did nothing — an overflow container of zero width has nothing to
+   * scroll.
+   *
+   * The anchors are still the right thing to drop. They are the items whose function survives being
+   * removed. */
+  .page-nav-anchor {
+    display: none;
+  }
+
+  .page-prompt {
+    flex-direction: column;
+  }
+
+  .page-prompt button {
+    justify-content: center;
+    padding: 12px 20px;
+  }
+}
+
+/* Below this the bar holds a wordmark, five destinations and a CTA, and the three stop fitting.
+ *
+ * Measured at 390px: the wordmark grew from 68px to 118px when it became "JarvisClaw" at 17px, and the
+ * CTA was pushed to right=413 in a 390px window — off the screen, and it is the bar's only button.
+ *
+ * The wordmark keeps its size and the CTA keeps its label; the gutter tightens and the CTA loses padding
+ * it does not need on a phone. Shrinking the wordmark instead would undo the change that made it read as
+ * a brand, and truncating the CTA would leave the primary action unreadable. */
+@media (max-width: 560px) {
+  .page {
+    --page-gutter: 18px;
+  }
+
+  .page-nav-inner {
+    gap: 12px;
+  }
+
+  .page-cta-sm {
+    padding: 8px 12px;
+  }
+
+  /* The nav's own gap can go tighter too, since it scrolls: its items stay reachable either way, and the
+     space it gives up is what keeps the CTA on screen. */
+  .page-nav nav {
+    gap: 14px;
+  }
+}
+
+/* The smallest phones still in use — a 320px iPhone SE, a 360px Android.
+ *
+ * Measured after the tightening above: the CTA still ran to right=373 in a 360px window. Three items
+ * simply do not fit, so one has to give up something, and the CTA's LABEL is the right thing to shorten:
+ * "Open" beside an arrow, next to a wordmark, in the top-right corner is unambiguous, whereas dropping
+ * the button leaves the page with no call to action and dropping the nav leaves it with no navigation.
+ *
+ * Done in CSS rather than by branching the markup on a width, because a JS breakpoint would have to
+ * listen for resize and would flash the wrong label on first paint. */
+@media (max-width: 380px) {
+  .page-cta-label {
+    /* Only the words are hidden; the arrow and the button's own label for assistive tech both stay. */
+    display: none;
+  }
+
+  .page-cta-sm::before {
+    content: 'Open';
+  }
+}

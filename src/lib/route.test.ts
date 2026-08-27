@@ -60,6 +60,38 @@ describe('listFreeModels', () => {
     return expect(listFreeModels(OPTS)).resolves.toEqual(['nvidia/step-3.7-flash'])
   })
 
+  it('accepts the shape the endpoint actually sends, with no `free` field at all', async () => {
+    /**
+     * The case every test above invented its way around, and the reason this function returned
+     * an empty list in production for as long as it has existed.
+     *
+     * Each of those stubs writes `free: true`. The live endpoint does not send that field on a
+     * free row — it sends `{model, pricing_type, note: "completely free"}`, and `free: false`
+     * appears on the separate `cheap` array instead. Verified against
+     * `/api/discovery/free-models`: 10 rows under `free`, none carrying the field. So the old
+     * `free === true` filter matched nothing, `listFreeModels` returned `[]` on every call, and
+     * the fallback chain had no models to retry a failed request with — silently, because an
+     * empty list is a legitimate value.
+     *
+     * Membership in the array is the signal. This asserts the real payload.
+     */
+    stubFreeModels([
+      { model: 'nvidia/step-3.7-flash', pricing_type: 'per-token', note: 'completely free' },
+      { model: 'zai/glm-4-flash', pricing_type: 'per-token', note: 'completely free' },
+    ] as never)
+    expect(await listFreeModels(OPTS)).toEqual(['nvidia/step-3.7-flash', 'zai/glm-4-flash'])
+  })
+
+  it('still excludes a row the endpoint explicitly marks unfree', async () => {
+    // Absence means free; `false` is respected where it appears. Both halves asserted so the
+    // loosened filter cannot become "accept everything".
+    stubFreeModels([
+      { model: 'nvidia/step-3.7-flash' } as never,
+      { model: 'zai/glm-4-air', free: false },
+    ])
+    expect(await listFreeModels(OPTS)).toEqual(['nvidia/step-3.7-flash'])
+  })
+
   it('drops the virtual auto/* names', async () => {
     // auto/free is priced at zero and so appears in this list. Falling back from
     // auto/free to auto/free retries the exact failure that triggered the fallback.
@@ -146,6 +178,56 @@ describe('ModelRouter', () => {
     expect(await r.current()).toBe('nvidia/a')
     expect(await r.current()).toBe('nvidia/a')
     expect(r.retired).toEqual([FREE_MODEL])
+  })
+
+  it('tries a retired model again once its retirement ages out', async () => {
+    /**
+     * Reported from a screenshot: "Every free model the gateway offers is unavailable right now"
+     * rendered at the top of a turn that `qwen3.6-flash` then answered. Both came from this class.
+     *
+     * `dead` never emptied, so once a session had exhausted the list — one bad minute on a free
+     * pool is enough — every later message reported exhaustion WITHOUT making a request, while the
+     * models themselves had recovered. "Unavailable" here means capacity exhausted, which is a
+     * condition of the minute, not a property of the model.
+     */
+    stubFreeModels([{ model: 'nvidia/a', free: true }])
+    const r = new ModelRouter(OPTS)
+    const err = new GatewayError('Free model capacity exhausted', 429)
+
+    expect(await r.markFailed(FREE_MODEL, err)).toBe('try-next')
+    expect(await r.markFailed('nvidia/a', err)).toBe('exhausted')
+    // Everything retired: this is the state that produced the contradictory error.
+    expect(await r.current()).toBeUndefined()
+
+    vi.useFakeTimers()
+    try {
+      // Past RETIRE_MS (5 minutes). The window is that long because a model destined to 429
+      // takes 30-34s to say so, measured live, and an agent turn walks the list per step.
+      vi.setSystemTime(Date.now() + 301_000)
+      // Retirements have aged out, so the pool is offered again rather than declared dead for the
+      // rest of the session.
+      expect(await r.current()).toBe(FREE_MODEL)
+      expect(r.retired).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a model retired while the retirement is still fresh', async () => {
+    // The counterweight. Expiring immediately would re-try a model that just failed, on the same
+    // message, which is the retry storm the retirement exists to prevent.
+    stubFreeModels([{ model: 'nvidia/a', free: true }])
+    const r = new ModelRouter(OPTS)
+    await r.markFailed(FREE_MODEL, new GatewayError('Free model capacity exhausted', 429))
+
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(Date.now() + 30_000)
+      expect(await r.current()).toBe('nvidia/a')
+      expect(r.retired).toEqual([FREE_MODEL])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('loads the candidate list only once', async () => {

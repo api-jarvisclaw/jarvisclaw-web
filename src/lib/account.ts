@@ -34,6 +34,7 @@
  */
 
 import { DEFAULT_BASE_URL } from './gateway'
+import { CANONICAL_ORIGIN } from './host'
 
 export interface Account {
   id: number
@@ -135,7 +136,8 @@ async function platformCall<T>(
 /**
  * MEASURED against production, not assumed. I first listed the localhost dev origins here on the
  * grounds that they appear in this app's CSP — and a probe still logged the CORS error, because
- * the CSP and the GATEWAY's whitelist are different lists maintained in different places:
+ * the CSP and the GATEWAY's whitelist are different lists maintained in different places.
+ * Measured, when the site was on the previous hostname:
  *
  *   https://chat.jarvisclaw.ai  -> access-control-allow-origin: https://chat.jarvisclaw.ai
  *   http://localhost:3000       -> no header at all (rejected)
@@ -143,8 +145,22 @@ async function platformCall<T>(
  *
  * So account sign-in works on the deployed site only. Adding a dev origin here does not make it
  * work; it has to be added to CORS_ALLOWED_ORIGINS on the gateway host first, and then here.
+ *
+ * One origin, derived from CANONICAL_HOST rather than written out again. The old
+ * `chat.jarvisclaw.ai` is NOT listed: it is detached from the Worker, so nothing is served from
+ * it and the entry would be dead weight in a list whose whole job is to be exact.
+ *
+ * Not a security hole, to be precise about it — `chat.` is a subdomain of a zone we control, so
+ * nobody else can take that name and use the entry. The reason to leave it out is that a list
+ * gating credentials should say what is true, and a stale entry invites the assumption that some
+ * other host is expected to work.
+ *
+ * The gateway's own `CORS_ALLOWED_ORIGINS` is the other half of this and lives on the gateway
+ * host. Adding an origin here does not make it work — that env var has to name it first, and
+ * getting the ORDER wrong is a real failure: ship this bundle before the gateway change and every
+ * credentialed request from the new host is a 403 the browser reports with no detail.
  */
-const CREDENTIALED_ORIGINS = ['https://chat.jarvisclaw.ai']
+const CREDENTIALED_ORIGINS = [CANONICAL_ORIGIN]
 
 function sessionCheckAllowed(): boolean {
   if (typeof window === 'undefined') return false
@@ -310,21 +326,21 @@ export const SIGN_IN_URL = `${DEFAULT_BASE_URL}/en/sign-in?redirect=%2Fen%2Fkeys
 export const KEYS_URL = `${DEFAULT_BASE_URL}/en/keys`
 
 /**
- * The host the sign-in link actually opens, derived rather than written out.
+ * Where a new visitor creates an account.
  *
- * The button said "Sign in on jarvisclaw.ai" while linking to api.jarvisclaw.ai. Both serve the
- * same SPA, but they are different hosts and the session cookie is set on the one the link opens
- * — so the label was naming a host the flow does not use. Deriving it means the two cannot drift
- * again when DEFAULT_BASE_URL changes.
+ * `/en/sign-up`, verified the same way `/en/sign-in` had to be — by the route files, not by a
+ * status code. The console's route tree has `(auth)/sign-up.tsx` rendering the real component,
+ * and `(auth)/register.tsx` exists only as a `redirect()` to it. So `/en/register` also works,
+ * and pointing at the redirect instead of the destination would add a hop for no reason.
+ *
+ * Both of those answer 200 in an SPA, and so does `/en/nonsense-xyz` — that is the trap this
+ * codebase already fell into once, shipping `/en/login` on the strength of a 200 when the page
+ * rendered "Not Found". The route files are the only source of truth that can distinguish them.
+ *
+ * It carries the same `redirect` as sign-in: a new account whose first stop is a dashboard has to
+ * go hunting for the keys page, and the whole reason they signed up from here is to get a key.
  */
-export const SIGN_IN_HOST = (() => {
-  try {
-    return new URL(DEFAULT_BASE_URL).host
-  } catch {
-    // A malformed base URL is not worth breaking the panel over; the link is still correct.
-    return 'jarvisclaw.ai'
-  }
-})()
+export const SIGN_UP_URL = `${DEFAULT_BASE_URL}/en/sign-up?redirect=%2Fen%2Fkeys`
 
 /**
  * Whether this origin can read a platform session at all.

@@ -104,6 +104,9 @@ export function isModelUnavailable(err: unknown): boolean {
 
 interface RawFreeModel {
   model?: string
+  /**
+   * Present on `cheap` rows, ABSENT on `free` rows. Not the free signal — see below.
+   */
   free?: boolean
 }
 
@@ -118,11 +121,23 @@ interface RawFreeModel {
  * `auto/free` and the other virtual names are dropped: they are priced at zero and so
  * appear in this list, but falling back from `auto/free` to `auto/free` retries the
  * failure that started it.
+ *
+ * Membership in the `free` array IS the free signal. This used to require `free === true`
+ * on each row, and the endpoint does not send that field on free rows — it sends
+ * `{model, pricing_type, note: "completely free"}`, while `free: false` appears on the
+ * SEPARATE `cheap` array. So the filter matched nothing and this function returned an empty
+ * list on every call, silently: the fallback chain had no models in it and a failed request
+ * had nothing to retry with. Verified live against `/api/discovery/free-models` — 10 rows in
+ * `free`, none carrying the field.
+ *
+ * A defensive `free !== false` is kept so a row the endpoint ever marks unfree is excluded
+ * even if it appears here, but absence is treated as free because that is what the payload
+ * means.
  */
 export async function listFreeModels(opts: RequestOptions = {}): Promise<string[]> {
   const data = await getJson<{ free?: RawFreeModel[] }>('/api/discovery/free-models', opts)
   return (data.free ?? [])
-    .filter((m) => m.free === true && typeof m.model === 'string' && m.model !== '')
+    .filter((m) => m.free !== false && typeof m.model === 'string' && m.model !== '')
     .map((m) => m.model as string)
     .filter((name) => !name.startsWith('auto'))
 }
@@ -374,15 +389,33 @@ export async function streamChat(
 
   try {
     for (;;) {
+      if (opts.signal?.aborted) break
       const { done, value } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
       const frames = buffer.split(/\r?\n\r?\n/)
       buffer = frames.pop() ?? ''
-      for (const frame of frames) handleFrame(frame)
+      for (const frame of frames) {
+        /**
+         * Checked per FRAME, not only per chunk, and that is what makes an abort actually stop
+         * the work.
+         *
+         * A caller can abort from inside `onDelta` — the runaway-reasoning guard in the agent
+         * loop does exactly that. Aborting the fetch makes the next `reader.read()` reject, so
+         * a stream that arrives in many small chunks stops promptly. But everything already
+         * decoded is dispatched by this inner loop with no exit, so a single large chunk is
+         * processed to its end no matter what the caller decided halfway through.
+         *
+         * That is not a hypothetical: the runaway response measured on the live console was
+         * 229,295 characters, and how much of it lands in one chunk is up to the network. This
+         * check makes the guard depend on the abort rather than on chunk sizes.
+         */
+        if (opts.signal?.aborted) break
+        handleFrame(frame)
+      }
     }
     // A stream that ends without a trailing blank line leaves its last frame here.
-    if (buffer.trim() !== '') handleFrame(buffer)
+    if (!opts.signal?.aborted && buffer.trim() !== '') handleFrame(buffer)
   } finally {
     reader.releaseLock()
   }

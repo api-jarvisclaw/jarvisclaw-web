@@ -1,4 +1,4 @@
-# Deploying chat.jarvisclaw.ai
+# Deploying ducat.jarvisclaw.ai
 
 This is a **standalone static site**. It shares nothing with the gateway but the public
 HTTP API: no shared build, no shared deploy, no shared process. The gateway can be
@@ -25,23 +25,73 @@ To deploy:
 
 ```
 bun install && bun run build      # tsc --noEmit runs first, so a type error fails here
-wrangler deploy                    # uploads dist/ and points chat.jarvisclaw.ai at it
+wrangler deploy                    # uploads dist/ and points ducat.jarvisclaw.ai at it
 ```
 
 `wrangler deploy` needs `wrangler login` once per machine. There is no CI deploy on
 purpose: nothing in `.github/workflows/` holds a Cloudflare credential, and a deploy that
 publishes a page holding an API key is worth doing deliberately.
 
-The config declares `chat.jarvisclaw.ai` as a `custom_domain` route. That matters — the
-domain already exists on the zone, and omitting it here would let a later deploy quietly
-fall back to a `*.workers.dev` URL.
+The config declares `ducat.jarvisclaw.ai` as a `custom_domain` route. That matters —
+omitting it would let a later deploy quietly fall back to a `*.workers.dev` URL.
 
 ### DNS
 
 Nothing to add by hand. Attaching the custom domain to the Worker is what routes the
-hostname; there is no CNAME record for `chat` on the zone, and none is needed.
+hostname; there is no CNAME record for `ducat` on the zone, and none is needed.
 
-`chat` and `app` were both unused before this; nothing else answers on either.
+### The hostname changed, and one thing must change with it
+
+The site was served from `chat.jarvisclaw.ai`. That name is **detached**, deliberately:
+every `chat.jarvisclaw.ai` URL is now dead and nothing in this repo rescues one. (I argued
+for keeping it attached with a 301, since this is the page a user returns to while a paid
+video renders; that was declined because the name had not been handed out widely.)
+
+#### One loose end: `chat` answers 522, it does not stop resolving
+
+Removing the pattern from `routes` detaches the Worker but **leaves the DNS record**, so
+Cloudflare still proxies the hostname with nothing behind it. Measured after the move:
+
+```
+chat.jarvisclaw.ai   -> 522, server: cloudflare     (proxying to nothing)
+ducat.jarvisclaw.ai  -> 200                          (the new site)
+```
+
+A 522 reads as "the site is broken" rather than "the site moved", which is the worse of the
+two failures — and it cannot be cleaned up from here: the OAuth token `wrangler login`
+issues carries `zone (read)`, not DNS write. **Delete the `chat` record in the Cloudflare
+dashboard** (DNS → Records) so the name returns NXDOMAIN instead. Until that is done, anyone
+holding an old link sees a Cloudflare error page.
+
+**The gateway's `CORS_ALLOWED_ORIGINS` must name the new origin, and it must be changed
+FIRST.** This is not a nicety — it is the whole difference between a working site and one
+where sign-in and wallet payments fail with a 403 the browser reports without detail, and
+which leaves nothing in the gateway's own logs. Anonymous and free-model traffic keeps
+working throughout, so the site looks fine until someone tries to spend money.
+
+```bash
+# APPEND. Replacing the line drops the origins already there.
+ssh -F ~/.ssh/prod_config prod "sudo bash -c '
+cd /root/jarvisclaw
+cp .env .env.bak.ducat.\$(date +%Y%m%d%H%M%S)
+grep -q \"ducat.jarvisclaw.ai\" .env || sed -i \"s|^CORS_ALLOWED_ORIGINS=.*|&,https://ducat.jarvisclaw.ai|\" .env
+grep -o \"CORS_ALLOWED_ORIGINS=.*\" .env'"
+# then re-run deploy.sh — env is read only at container start
+```
+
+Verify before deploying the frontend (see `.claude/uat_deploy_sop.md` §2.10 for the full
+three-part check, including that an unknown origin still gets a 403):
+
+```bash
+curl -si -X OPTIONS https://api.jarvisclaw.ai/v1/chat/completions \
+  -H 'Origin: https://ducat.jarvisclaw.ai' \
+  -H 'Access-Control-Request-Method: POST' \
+  -H 'Access-Control-Request-Headers: content-type,x-payment' \
+  | grep -i 'access-control-allow-'
+```
+
+`src/lib/host.test.ts` pins the hostname against `wrangler.jsonc`, so the constant and the
+route cannot drift apart silently — but no test can check the gateway's env var from here.
 
 ### One expected console error
 

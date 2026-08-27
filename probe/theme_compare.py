@@ -34,7 +34,7 @@ from playwright.async_api import async_playwright
 
 MAIN = "https://api.jarvisclaw.ai/en/login"
 import os
-CHAT = os.environ.get("CHAT_URL", "https://chat.jarvisclaw.ai")
+CHAT = os.environ.get("CHAT_URL", "https://ducat.jarvisclaw.ai")
 
 TOKENS = [
     "--background",

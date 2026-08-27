@@ -26,7 +26,7 @@ import asyncio
 
 from playwright.async_api import async_playwright
 
-URL = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("CHAT_URL", "https://chat.jarvisclaw.ai")
+URL = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("CHAT_URL", "https://ducat.jarvisclaw.ai")
 
 # Pairs of (label, foreground token or literal, background token). Chosen for what a user has to
 # be able to read, not for coverage: body copy, muted hints, the money colours, and the labels on

@@ -12,7 +12,7 @@ import json, sys
 from playwright.sync_api import sync_playwright
 
 CONSOLE = "https://api.jarvisclaw.ai/en/sign-in"
-CHAT = __import__("os").environ.get("CHAT_URL", "https://chat.jarvisclaw.ai/")
+CHAT = __import__("os").environ.get("CHAT_URL", "https://ducat.jarvisclaw.ai/")
 
 PROBE = """() => {
   const seen = [];

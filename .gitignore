@@ -13,3 +13,8 @@ probe/*.json
 # actually live and are served from, and a git object is permanent even after a delete. Refetch
 # with cdn/fetch-showcase.py if the upload ever has to be repeated.
 cdn/showcase/
+
+# Intermediate parser output. `parse-seedance.py` writes it and `gen-seedance-data.py` consumes it
+# to produce src/lib/seedance.ts, which IS committed — so this is a duplicate of tracked content
+# that would drift from it silently the moment either script changes. Regenerate, do not commit.
+cdn/_seedance_rows.json

@@ -1,3 +1,16 @@
+# Optional name filter, so a second collection can be added without re-uploading the first.
+# The directory holds two sets: the Franklin gallery (36 files) and the Seedance prompt collection
+# (110, prefixed sd-). Re-sending all 146 every time is slow and pointless, and each redundant PUT
+# is another chance at a partial write on a file that was already correct.
+#
+#   .\upload-showcase.ps1              # everything
+#   .\upload-showcase.ps1 -Match 'sd-' # only the seedance assets
+#
+# `param` MUST be the first statement in the file — PowerShell rejects it anywhere else, and the
+# error names a line far from the cause. Hence the block sitting above the file's own header
+# comment rather than beside the loop it belongs to.
+param([string]$Match = '')
+
 # Uploads the prompt-gallery assets to R2 under showcase/.
 #
 # PowerShell rather than sh, and that is not a preference. Running the .sh version through Git
@@ -32,8 +45,10 @@ $types = @{
 }
 
 $done = 0
+$skipped = 0
 $failed = @()
 foreach ($f in Get-ChildItem $dir -File) {
+  if ($Match -ne '' -and $f.Name -notlike "$Match*") { $skipped++; continue }
   $ct = $types[$f.Extension.ToLower()]
   if (-not $ct) { Write-Host "skipping $($f.Name) (unknown type)"; continue }
   Write-Host "-> showcase/$($f.Name) ($ct)"
@@ -42,6 +57,6 @@ foreach ($f in Get-ChildItem $dir -File) {
 }
 
 Write-Host ""
-Write-Host "uploaded $done, failed $($failed.Count)"
+Write-Host "uploaded $done, skipped $skipped, failed $($failed.Count)"
 if ($failed.Count -gt 0) { $failed | ForEach-Object { Write-Host "  FAILED $_" } }
 Write-Host "verify: curl -sI https://cdn.jarvisclaw.ai/showcase/ecom-crocs.jpg"

@@ -11,6 +11,7 @@ sends them, so the browser enforces the deployed policy against the deployed bun
 import re
 import sys
 from functools import partial
+import os
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -44,6 +45,25 @@ RULES = parse_headers(DIST.parent / "public" / "_headers")
 
 
 class Handler(SimpleHTTPRequestHandler):
+    def do_GET(self):
+        """SPA fallback, matching the Worker's `not_found_handling: single-page-application`.
+
+        Needed the moment this app gained routes: `/chat` is not a file, so without this the probe
+        gets a 404 page and every assertion about the console reports as a missing element. That is
+        a probe defect that looks exactly like a broken app — the same one that cost a run on the
+        main site's homepage.
+
+        Rewritten in `do_GET`, NOT `send_head`: the 404 for a missing extensionless path is produced
+        before send_head runs, so an override there sits doing nothing. Confirmed by logging.
+
+        Only extensionless paths fall back. A missing /assets/x.js must stay a 404, or a broken
+        asset reference becomes a confusing parse error instead.
+        """
+        target = self.translate_path(self.path)
+        if not os.path.exists(target) and "." not in os.path.basename(target):
+            self.path = "/index.html"
+        return super().do_GET()
+
     def end_headers(self) -> None:
         for pattern, name, value in RULES:
             if pattern.match(self.path.split("?")[0]):

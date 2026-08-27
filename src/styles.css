@@ -26,13 +26,30 @@
  * worth making.
  */
 
+/**
+ * Public Sans only. The mono webfont is gone.
+ *
+ * We shipped JetBrains Mono and applied it in 33 places, and the list is the problem: conversation
+ * titles, marketplace card headings, gallery notes, the landing page's brand and its step numbers. A
+ * monospace typeface on ordinary prose is the single strongest visual signal of a machine-generated
+ * page — it reads as a terminal pretending to be a product.
+ *
+ * The reference is the main site, and it was measured, not assumed: jarvisclaw.ai resolves
+ * `--font-sans` to `"Public Sans", sans-serif` and `--font-mono` to a plain system stack
+ * (`ui-monospace, SFMono-Regular, Menlo, …`). It loads no mono webfont at all. So matching it means
+ * dropping the import, not swapping it — and the system stack still renders the few places where
+ * monospace is doing real work: a wallet address, a raw JSON payload, an aligned column of prices.
+ *
+ * It also removes five woff2 files from the bundle, which is a real cost this was paying for a look.
+ */
 @import '@fontsource-variable/public-sans';
-@import '@fontsource-variable/jetbrains-mono';
 
 :root {
   /* ── light: JarvisClaw neutral white + cobalt ──
      The console keeps its neutrals achromatic on purpose (hue collapses under alpha
      compositing), so --border and --input carry no chroma at all. */
+  /* Shared by the transcript turns and the composer; see the note above .transcript. */
+  --chat-measure: 860px;
   --background: oklch(0.98 0.006 250);
   --foreground: oklch(0.24 0.028 270);
   --card: oklch(1 0 0);
@@ -114,7 +131,13 @@
      declares. Naming them 'Public Sans' instead matches nothing and falls through to the
      system stack — which still looks deliberate, so it is easy to miss. */
   --sans: 'Public Sans Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* The system stack, exactly as the main site resolves it — no webfont. `ui-monospace` picks SF Mono
+     on macOS and Cascadia on Windows, both of which are better fitted to their platform than a face
+     we could ship. Kept as a variable because monospace is still correct for a handful of things
+     (a wallet address, a raw payload, a column of aligned prices); what it is not correct for is
+     prose, which is where the 33 usages had spread to. */
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+    monospace;
 
   /* Tells the browser which built-in colours to use for form controls, scrollbars and the
      like. Without it a light page keeps dark scrollbars, which is the giveaway that a theme
@@ -272,21 +295,59 @@ button:not(:disabled):active {
 
 /* ---- shell ---- */
 
+/* ---- frame ---- */
+
+/* The window: the global bar, then the three panes.
+ *
+ * This element now holds the constraint `.shell` used to. The bar was previously rendered inside the
+ * middle column, which made it a pane toolbar — it began after the rail's border and stopped at the
+ * sidebar's, cut into thirds by two vertical rules, with the brand stranded in the rail beside it.
+ *
+ * `auto` then `minmax(0, 1fr)`: the bar takes the height it needs and the panes take the rest. The `0`
+ * floor is the load-bearing half — a grid item defaults to `min-height: auto`, meaning it refuses to
+ * be shorter than its content, so without it a long transcript makes this row taller than the window
+ * and the document scrolls, taking the composer with it. That was the original pinning bug, and moving
+ * the cap up a level is where it has to be restated. */
+.frame {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  overflow: hidden;
+}
+
 .shell {
   position: relative;
   z-index: 1;
   display: grid;
-  grid-template-columns: 260px 1fr 320px;
-  /* Caps the row to the viewport, which is what pins the composer.
+  /* Both side panes are user-set widths, supplied as custom properties by App and defaulted here so
+   * the stylesheet still renders on its own. The two 6px tracks are the drag handles.
    *
-   * `height: 100%` on its own was never enough. The row track was implicit, and an implicit
-   * row is `auto` — it sizes to its tallest item and overflows the height declared right
-   * below it. So a long transcript made the row 5358px tall inside a 780px window, the
-   * document scrolled, and the composer went with it, being the last child of .main.
+   * `clamp()` rather than the bare variable, and the third argument is the point: `28vw` is what
+   * keeps a pane dragged wide on a large monitor from swallowing the transcript when the SAME session
+   * is later resized to a laptop. React never hears that resize — there is no listener — so if the
+   * cap were enforced in JS the panes would stay at their stored pixel width and the middle column
+   * would collapse toward zero.
    *
-   * `minmax(0, 100%)` addresses both halves: `100%` caps the row, and the `0` floor is what
-   * allows the panes inside to be SHORTER than their content — the permission their own
-   * `overflow-y: auto` needs before it can do anything.
+   * Doing it here also means a cramped viewport never OVERWRITES the stored choice: CSS renders a
+   * narrower pane, storage still holds the number the user picked, and widening the window restores
+   * it. A JS clamp would have to write back to get the same effect, and would then have destroyed
+   * the preference. The floors match PANE_BOUNDS in lib/panes.ts — a test asserts they agree, because
+   * a CSS floor above the JS one makes the last stretch of a drag appear to stick. */
+  grid-template-columns:
+    clamp(200px, var(--rail-w, 260px), 28vw) 6px
+    minmax(0, 1fr)
+    6px clamp(260px, var(--sidebar-w, 320px), 28vw);
+  /* Caps the row, which is what pins the composer.
+   *
+   * `100%` here is now `100%` of the frame's second row rather than of the window — the global bar took
+   * the first. Getting that wrong is a specific bug: `height: 100vh` would size this to the whole
+   * window while it starts 65px down, so the composer would sit exactly one bar-height below the fold.
+   *
+   * `minmax(0, 100%)` addresses both halves: `100%` caps the row, and the `0` floor is what allows the
+   * panes inside to be SHORTER than their content — the permission their own `overflow-y: auto` needs
+   * before it can do anything. A grid item defaults to `min-height: auto`, which is a refusal to be
+   * shorter than its content; a long transcript made this row 5358px tall inside a 780px window, the
+   * document scrolled, and the composer went with it as the last child of .main.
    *
    * MEASURED, and worth knowing before editing any of this: this rule, `overflow: hidden`
    * below, `min-height: 0` on .main and `min-height: 0` on .transcript are REDUNDANT with one
@@ -298,12 +359,60 @@ button:not(:disabled):active {
    * what they prevent is a chat app whose input sits four screens below the fold. */
   grid-template-rows: minmax(0, 100%);
   height: 100%;
+  min-height: 0;
   /* Clips rather than growing a document scrollbar, if a pane ever escapes the row. */
   overflow: hidden;
 }
 
+/* Rail hidden, so its column and its handle both go. Not `display: none` on the pane alone: an empty
+   200px track would leave a gap where the rail was. */
 .shell-rail-closed {
-  grid-template-columns: 1fr 320px;
+  grid-template-columns: minmax(0, 1fr) 6px clamp(260px, var(--sidebar-w, 320px), 28vw);
+}
+
+/* ---- pane resizers ---- */
+
+/* A 6px track that shows a wider hit area than it draws.
+ *
+ * 6px is about as narrow as a pointer target can be before it becomes a game, and it is still thinner
+ * than the 1px border it sits beside would suggest — so the visible line stays the pane's own border
+ * and this element is transparent until touched. */
+.pane-resizer {
+  position: relative;
+  z-index: 5;
+  cursor: col-resize;
+  /* No background of its own: the panes either side already draw a border, and a third line here
+     reads as a double rule. */
+  background: transparent;
+  /* Stops a drag from being interpreted as a scroll gesture on a touchpad or touchscreen, which is
+     what makes the handle unusable on a laptop with an aggressive gesture layer. */
+  touch-action: none;
+}
+
+.pane-resizer:hover,
+.pane-resizer:focus-visible {
+  background: color-mix(in oklab, var(--glow-brand) 55%, transparent);
+  outline: none;
+}
+
+/* Focus has to be visible on its own terms — a keyboard user gets no hover, and this is a control
+   with no text and no icon, so without a mark of its own it is invisible when focused. */
+.pane-resizer:focus-visible {
+  background: var(--primary);
+}
+
+/* While a drag is in progress, applied to <body> so it covers the panes the pointer crosses.
+   Without the cursor rule the pointer flickers between col-resize and the transcript's text cursor;
+   without user-select the drag highlights the whole conversation it passes over. */
+body.is-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* Every descendant, because `user-select: none` on body alone is overridden by anything that sets
+   `user-select: text` — and the transcript does, so the selection bug survived the first fix. */
+body.is-resizing * {
+  user-select: none !important;
 }
 
 /* The responsive rules for these panes live at the END of this file, not here.
@@ -342,16 +451,44 @@ button:not(:disabled):active {
 
 /* ---- topbar ---- */
 
+/* The global bar: full window width, above all three panes.
+ *
+ * It used to live inside `.main` and so spanned only the middle column — starting after the rail's
+ * right border and stopping at the sidebar's left one, with two vertical rules cutting the row into
+ * thirds. That is a pane toolbar, not a global bar. It is now the frame's first row.
+ *
+ * The `flex: none` it carried is gone with the flex parent; the `auto` row track it sits in already
+ * means "the height you need", and `.frame`'s `minmax(0, 1fr)` second row is what stops the panes
+ * pushing it off. */
 .topbar {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 14px 24px;
-  border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, var(--glow-brand) 15%);
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 70%, var(--glow-brand) 15%);
   background: var(--card);
-  /* Fixed, for the same reason as .composer: it is the other end of the pinned frame, and
-     flex would otherwise compress it to make room for a long transcript. */
+  /* Above the panes' own backdrop-filter. A blurred pane creates a containing block, and without a
+     stacking order the rail's blur can paint over the bar's bottom border. */
+  position: relative;
+  z-index: 2;
+}
+
+/* The brand, at the window's left edge. Sized to line up with the rail's items beneath it: the mark's
+   left edge and the rail glyphs' should share a column, or the bar reads as a separate site. */
+.topbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
   flex: none;
+  color: inherit;
+  text-decoration: none;
+}
+
+.topbar-brand-name {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.015em;
+  white-space: nowrap;
 }
 
 .brand {
@@ -363,14 +500,57 @@ button:not(:disabled):active {
   letter-spacing: -0.015em;
 }
 
-/* The mark: a gradient chip rather than an image, so it needs no asset and inherits the
-   brand gradient if the palette moves. */
+/* The mark: the real logo. It was a gradient chip, on the reasoning that a chip needs no asset —
+   and the cost was that the tab, the main site and this rail each showed a different mark for one
+   product. Dimensions are set in the markup as well so the row does not reflow when the image
+   arrives; `object-fit: contain` keeps a non-square source from being stretched. */
 .brand-mark {
   width: 24px;
   height: 24px;
   border-radius: 7px;
-  background: var(--gradient-brand);
+  object-fit: contain;
   flex: none;
+}
+
+/* ---- top nav ---- */
+
+.topnav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  /* Scrolls rather than wrapping. A wrapped nav makes the topbar two rows tall, and the topbar is
+     `flex: none` inside the pinned frame — so the second row would come out of the transcript's
+     height at every width where the items happen not to fit. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.topnav::-webkit-scrollbar {
+  display: none;
+}
+
+.topnav-item {
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.topnav-item:hover {
+  color: var(--foreground);
+  background: color-mix(in oklab, var(--glow-brand) 12%, transparent);
+}
+
+/* The open pane. A background tint rather than the gradient underline the gallery tabs use: this bar
+   also holds external links, and an underline on one of them would imply it too is a pane of this
+   app rather than another site. */
+.topnav-item-active {
+  color: var(--foreground);
+  background: color-mix(in oklab, var(--glow-brand) 18%, transparent);
 }
 
 .tag {
@@ -381,11 +561,22 @@ button:not(:disabled):active {
   border-radius: 999px;
   padding: 3px 11px;
   background: var(--card);
+  /* Never shrinks and never wraps.
+   *
+   * Measured at 1280px once the nav joined this bar: flex handed the shortfall to every item that
+   * could give, "free · no sign-in" broke across two lines, and the topbar grew from 65px to 85px —
+   * which comes straight out of the transcript, since the bar is `flex: none` inside the pinned frame.
+   *
+   * This is also the label that must not be ambiguous at any width: it is the difference between
+   * "this will cost money" and "this will not". The nav is the item that yields instead — it scrolls,
+   * so it can lose space without losing anything. */
+  flex: none;
+  white-space: nowrap;
 }
 
 .tag-free {
   color: var(--success-text);
-  border-color: color-mix(in oklch, var(--success) 40%, var(--border));
+  border-color: color-mix(in oklab, var(--success) 40%, var(--border));
 }
 
 .spacer {
@@ -400,11 +591,16 @@ button:not(:disabled):active {
   padding: 7px 13px;
   font-size: 13px;
   font-weight: 500;
+  /* Same reason as .tag: with the nav sharing this bar, "New chat" wrapped to two lines at 1280px and
+     took the topbar's height with it. These buttons are also used outside the topbar, where neither
+     property changes anything — nothing else places them under width pressure. */
+  flex: none;
+  white-space: nowrap;
 }
 
 .ghost-btn:hover:not(:disabled) {
   color: var(--foreground);
-  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
   box-shadow: 0 0 12px -3px var(--glow-brand);
 }
 
@@ -429,7 +625,7 @@ button:not(:disabled):active {
 
 .theme-toggle:hover {
   color: var(--foreground);
-  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
 }
 
 /* Both icons occupy the same cell and cross over by rotating and scaling — the console does the
@@ -469,6 +665,22 @@ button:not(:disabled):active {
 
 /* ---- transcript ---- */
 
+/* ---- the reading measure ----
+ *
+ * MEASURED problem, at vw=2560 before this existed:
+ *
+ *   .transcript      width 1980  left 260
+ *   .composer-shell  width  860  left 820
+ *   .empty           width  620  left 935
+ *
+ * Three different widths and three different left edges. The composer already capped itself at
+ * 860px and centred; the transcript did not cap at all, so messages ran the full 1980px of a
+ * column whose input sat in an 860px box a third of the way in. Nothing lined up, and on a wide
+ * monitor a line of chat text was ~250 characters — unreadable regardless of the alignment.
+ *
+ * One token, used by the turns AND the composer, so the two cannot drift apart again. 860px is
+ * kept because it is what the composer already was: roughly 90 characters at this font size, and
+ * changing it would have moved the input for no reason. */
 .transcript {
   flex: 1;
   /* Matching .main — see the measured note on .shell. `overflow-y: auto` was always here and
@@ -483,6 +695,16 @@ button:not(:disabled):active {
   display: flex;
   flex-direction: column;
   gap: 20px;
+}
+
+/* Every direct child of the transcript is centred on the same measure as the composer. Applied to
+   the children rather than by giving .transcript itself a max-width: the SCROLL container has to
+   stay full width, or the scrollbar detaches from the pane's edge and sits in the middle of it. */
+.transcript > * {
+  width: 100%;
+  max-width: var(--chat-measure);
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .empty {
@@ -503,7 +725,7 @@ button:not(:disabled):active {
   margin-bottom: 18px;
   padding: 4px 12px;
   border-radius: 999px;
-  border: 1px solid color-mix(in oklch, var(--accent-2) 28%, var(--border));
+  border: 1px solid color-mix(in oklab, var(--accent-2) 28%, var(--border));
   background: color-mix(in oklch, var(--accent-2) 10%, transparent);
 }
 
@@ -556,7 +778,7 @@ button:not(:disabled):active {
   background: linear-gradient(
     to bottom,
     color-mix(in oklch, var(--card) 80%, transparent),
-    color-mix(in oklch, var(--card) 92%, var(--glow-brand) 8%)
+    color-mix(in oklab, var(--card) 92%, var(--glow-brand) 8%)
   );
   color: var(--foreground);
   border: 1px solid var(--border);
@@ -567,7 +789,7 @@ button:not(:disabled):active {
 }
 
 .suggestion:hover {
-  border-color: color-mix(in oklch, var(--glow-brand) 50%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 50%, var(--border));
   box-shadow: 0 0 16px -5px var(--glow-brand);
   transform: translateY(-1px);
 }
@@ -635,6 +857,62 @@ button:not(:disabled):active {
   color: var(--foreground);
 }
 
+/* The live tail of the reasoning stream, shown only while no answer text exists yet.
+   Measured: the first reasoning frame lands in 1.3-1.8s and the first content frame 23-91s
+   later, so this fills the gap the "Thinking" label used to sit through silently.
+
+   Single-line and clipped, deliberately: this must not push the composer around or grow the
+   scroll height while it updates several times a second. `direction: rtl` keeps the newest
+   end of the text visible when it overflows, with `text-align: left` restoring reading order
+   for the Latin and CJK inside it. */
+.reasoning-tail {
+  align-self: flex-start;
+  max-width: 78%;
+  margin-top: -2px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: color-mix(in oklch, var(--muted-foreground) 72%, transparent);
+  /* The mono face is half the signal. An answer is set in the sans stack, so reasoning in mono
+     reads as machine output at a glance — which is what the "leaking into the answer" report was
+     really about: this text looked exactly like a reply. */
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Clipping moved onto the text span, since the row is now a flex container: `direction: rtl`
+   keeps the newest end visible when it overflows, `text-align: left` restores reading order for
+   the Latin and CJK inside it. */
+.reasoning-tail > span:last-child {
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+/* Says what the text is. Without it the tail was unlabelled prose sitting where a reply goes. */
+.reasoning-tail-label {
+  flex: none;
+  font-family: var(--sans);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, var(--muted-foreground) 58%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Nothing animates here, but the tail is a moving element by nature. Kept visible because
+     it is information about progress, not decoration that can be dropped. */
+  .reasoning-tail {
+    opacity: 1;
+  }
+}
+
 /* ---- tool steps ---- */
 
 .tool-row {
@@ -684,7 +962,7 @@ button:not(:disabled):active {
 /* Only the running state pulses; a finished step must sit still or the transcript never
    settles visually. */
 .tool-row.is-running {
-  border-color: color-mix(in oklch, var(--glow-brand) 40%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 40%, var(--border));
 }
 
 /* The spinner carries the running state now. A pulse here would be a SECOND animation on the
@@ -702,6 +980,47 @@ button:not(:disabled):active {
   50% {
     opacity: 1;
   }
+}
+
+/* The collapsed summary for finished catalogue lookups.
+
+   Shaped like a .tool-row (same pill, same mono face) because it IS the same class of thing —
+   one line standing for several. Quieter than a real row: no border, so a turn that only
+   searched the catalogue does not present a bordered pill as if it had called something. */
+.tool-plumbing {
+  align-self: flex-start;
+  max-width: 78%;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+}
+
+.tool-plumbing > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  padding: 5px 12px;
+  border-radius: 999px;
+  /* No border and no background: this is the least important line in the turn. */
+  color: var(--muted-foreground);
+}
+
+/* Removes the default disclosure triangle in WebKit; `display` on the summary already
+   suppresses the marker in Firefox. The check icon is the affordance. */
+.tool-plumbing > summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-plumbing > summary:hover {
+  color: var(--foreground);
+}
+
+/* The expanded rows sit indented under the summary so the grouping is visible without a
+   second border. gap matches the transcript's own row rhythm. */
+.tool-plumbing[open] > .tool-row {
+  margin-left: 18px;
+  margin-top: 5px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -740,7 +1059,6 @@ button:not(:disabled):active {
 }
 
 .answered-by .tool-name {
-  font-family: var(--mono);
   font-size: 12px;
 }
 
@@ -748,8 +1066,8 @@ button:not(:disabled):active {
   align-self: flex-start;
   max-width: 78%;
   color: var(--destructive-text);
-  border: 1px solid color-mix(in oklch, var(--destructive) 35%, var(--border));
-  background: color-mix(in oklch, var(--destructive) 12%, var(--card));
+  border: 1px solid color-mix(in oklab, var(--destructive) 35%, var(--border));
+  background: color-mix(in oklab, var(--destructive) 12%, var(--card));
   border-radius: var(--radius-lg);
   padding: 11px 15px;
   font-size: 14px;
@@ -760,15 +1078,15 @@ button:not(:disabled):active {
   max-width: 78%;
   font-size: 13px;
   color: var(--warning-text);
-  border: 1px solid color-mix(in oklch, var(--warning) 30%, var(--border));
-  background: color-mix(in oklch, var(--warning) 10%, var(--card));
+  border: 1px solid color-mix(in oklab, var(--warning) 30%, var(--border));
+  background: color-mix(in oklab, var(--warning) 10%, var(--card));
   border-radius: var(--radius-lg);
   padding: 9px 14px;
 }
 /* ---- composer ---- */
 
 .composer {
-  border-top: 1px solid color-mix(in oklch, var(--border) 70%, var(--glow-brand) 12%);
+  border-top: 1px solid color-mix(in oklab, var(--border) 70%, var(--glow-brand) 12%);
   padding: 16px 24px 20px;
   background: color-mix(in oklch, var(--card) 45%, var(--background));
   /* Never give up height to the transcript. Once .main is capped to the viewport, flex
@@ -833,14 +1151,13 @@ button:not(:disabled):active {
    that substitution has to be readable, not buried in muted text. */
 .hint-model {
   color: var(--foreground);
-  font-family: var(--mono);
   font-size: 11.5px;
 }
 
 /* ---- sidebar ---- */
 
 .sidebar {
-  border-left: 1px solid color-mix(in oklch, var(--sidebar-border) 60%, var(--glow-brand) 10%);
+  border-left: 1px solid color-mix(in oklab, var(--sidebar-border) 60%, var(--glow-brand) 10%);
   padding: 20px;
   /* Same pairing as .transcript: a grid item also defaults to min-height:auto, so this pane
      would grow past the row and push the document taller. The wallet and spend panels are
@@ -876,7 +1193,7 @@ button:not(:disabled):active {
   background: linear-gradient(
     to bottom,
     var(--card),
-    color-mix(in oklch, var(--card) 94%, var(--glow-brand) 6%)
+    color-mix(in oklab, var(--card) 94%, var(--glow-brand) 6%)
   );
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
@@ -967,6 +1284,27 @@ button:not(:disabled):active {
   font-size: 11px;
 }
 
+/* How long a row's file lasts. Quiet by default; a warning when it is on a clock, because the
+   only rows worth interrupting someone for are the ones that expire. */
+.gallery-retention {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+}
+
+.gallery-retention svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.gallery-retention.is-at-risk {
+  color: var(--warning-text);
+}
+
 .gallery-actions {
   display: flex;
   gap: 12px;
@@ -999,7 +1337,6 @@ button:not(:disabled):active {
 
 .rail-count {
   margin-left: auto;
-  font-family: var(--mono);
   font-size: 10.5px;
   color: var(--muted-foreground);
 }
@@ -1047,7 +1384,7 @@ button:not(:disabled):active {
 
 .panel-btn-quiet:hover {
   color: var(--foreground);
-  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
   box-shadow: none;
 }
 
@@ -1119,7 +1456,7 @@ button:not(:disabled):active {
 
 .account-key:hover:not(:disabled) {
   background: color-mix(in oklch, var(--accent) 45%, transparent);
-  border-color: color-mix(in oklch, var(--glow-brand) 35%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 35%, var(--border));
 }
 
 .account-key:disabled {
@@ -1211,7 +1548,6 @@ button:not(:disabled):active {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   color: var(--muted-foreground);
-  font-family: var(--mono);
   font-size: 11px;
   cursor: pointer;
 }
@@ -1436,7 +1772,7 @@ button:not(:disabled):active {
 .dialog {
   background: color-mix(in oklch, var(--popover) 92%, transparent);
   backdrop-filter: blur(16px) saturate(1.2);
-  border: 1px solid color-mix(in oklch, var(--border) 60%, var(--glow-brand) 20%);
+  border: 1px solid color-mix(in oklab, var(--border) 60%, var(--glow-brand) 20%);
   border-radius: var(--radius-xl);
   padding: 24px;
   max-width: 440px;
@@ -1498,7 +1834,7 @@ button:not(:disabled):active {
 }
 
 .decline:hover {
-  border-color: color-mix(in oklch, var(--glow-brand) 40%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 40%, var(--border));
 }
 
 /* ---- left rail: navigation + conversation history ---- */
@@ -1509,23 +1845,12 @@ button:not(:disabled):active {
   gap: 2px;
   padding: 14px 10px;
   overflow: hidden;
-  border-right: 1px solid color-mix(in oklch, var(--sidebar-border) 60%, var(--glow-brand) 10%);
+  border-right: 1px solid color-mix(in oklab, var(--sidebar-border) 60%, var(--glow-brand) 10%);
   background: color-mix(in oklch, var(--sidebar) 88%, transparent);
   backdrop-filter: blur(12px);
 }
 
-.rail-brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 4px 8px 14px;
-}
-
-.rail-brand-name {
-  font-weight: 700;
-  font-size: 15px;
-  letter-spacing: -0.015em;
-}
+/* No .rail-brand rules. The brand lives in the global top bar now — see .topbar-brand. */
 
 .rail-item {
   display: flex;
@@ -1558,7 +1883,7 @@ button:not(:disabled):active {
 .rail-item-active {
   color: var(--foreground);
   background: color-mix(in oklch, var(--glow-brand) 14%, transparent);
-  border-color: color-mix(in oklch, var(--glow-brand) 35%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 35%, var(--border));
 }
 
 /* Fixed width so the labels line up whatever icon each row uses. An SVG now: font-family,
@@ -1646,7 +1971,6 @@ button:not(:disabled):active {
 .rail-row-age {
   flex: none;
   color: var(--muted-foreground);
-  font-family: var(--mono);
   font-size: 11px;
 }
 
@@ -1682,7 +2006,7 @@ button:not(:disabled):active {
 
 .rail-toggle:hover {
   color: var(--foreground);
-  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
 }
 
 /* ---- composer shell: one bordered box holding text + tools ---- */
@@ -1692,9 +2016,26 @@ button:not(:disabled):active {
   border-radius: var(--radius-xl);
   background: var(--card);
   padding: 10px 12px;
-  max-width: 860px;
+  max-width: var(--chat-measure);
   margin: 0 auto;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* The composer sat 5px left of the turns above it, and the cause took measuring to see:
+ *
+ *   .transcript  clientWidth 1970  offsetWidth 1980   (scrollbar-gutter: stable)
+ *   .composer    clientWidth 1980  offsetWidth 1980
+ *
+ * `scrollbar-gutter: stable` reserves 10px inside the transcript at all times, so its centred
+ * children centre within 1970 while the composer's centre within 1980 — half the difference each
+ * side. `scrollbar-gutter` on the composer does nothing, because it only applies to scroll
+ * containers; that was my first attempt and it changed nothing at all.
+ *
+ * The fix is to reserve the same space explicitly. Not by removing the gutter from the transcript:
+ * it exists so the first message does not shift the column sideways the moment the pane becomes
+ * scrollable, which is a worse artefact than 5px. */
+.composer {
+  padding-right: calc(24px + 10px);
 }
 
 /* Focus lives on the container, not the textarea: the box is the control as far as the
@@ -1750,7 +2091,7 @@ button:not(:disabled):active {
 .mode-btn-active {
   color: var(--foreground);
   background: color-mix(in oklch, var(--glow-brand) 16%, transparent);
-  border-color: color-mix(in oklch, var(--glow-brand) 40%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 40%, var(--border));
 }
 
 .mode-glyph {
@@ -1810,11 +2151,10 @@ button:not(:disabled):active {
 }
 
 .picker-trigger:hover {
-  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
 }
 
 .picker-name {
-  font-family: var(--mono);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1856,7 +2196,7 @@ button:not(:disabled):active {
   max-width: min(340px, calc(100vw - 40px));
   padding: 10px;
   border-radius: var(--radius-xl);
-  border: 1px solid color-mix(in oklch, var(--border) 60%, var(--glow-brand) 20%);
+  border: 1px solid color-mix(in oklab, var(--border) 60%, var(--glow-brand) 20%);
   background: color-mix(in oklch, var(--popover) 96%, transparent);
   backdrop-filter: blur(16px) saturate(1.2);
   box-shadow: 0 0 30px -8px var(--glow-brand), 0 20px 50px -18px var(--shadow-strong);
@@ -1901,7 +2241,7 @@ button:not(:disabled):active {
 .picker-tab-active {
   color: var(--foreground);
   background: color-mix(in oklch, var(--glow-brand) 16%, transparent);
-  border-color: color-mix(in oklch, var(--glow-brand) 35%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 35%, var(--border));
 }
 
 .picker-rows {
@@ -1933,7 +2273,6 @@ button:not(:disabled):active {
 }
 
 .picker-row-name {
-  font-family: var(--mono);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2017,6 +2356,156 @@ button:not(:disabled):active {
   font-size: 14px;
 }
 
+/* The tier switch: curated picks <-> the whole catalogue.
+
+   Deliberately quiet — a bordered text button rather than a primary one. The curated tier is the
+   right default for a first visit, so this is an escape hatch for someone who already knows what
+   they want, not a call to action competing with the results below it. */
+.market-tier {
+  margin-top: 10px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.market-tier:hover {
+  color: var(--foreground);
+  border-color: var(--glow-brand);
+}
+
+/* The keyboard focus ring has to be visible on its own: the hover rule above changes only the
+   border, which a keyboard user never triggers. */
+.market-tier:focus-visible {
+  outline: 2px solid var(--glow-brand);
+  outline-offset: 2px;
+}
+
+/* ---- category navigation ----
+   A wrapping row of pills rather than a sidebar: there are 18 of them, they are the first thing
+   a newcomer needs, and a sidebar would compete with the app's existing one. */
+.market-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  max-width: 900px;
+  margin: 0 auto 18px;
+}
+
+.market-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted-foreground);
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.market-cat:hover {
+  color: var(--foreground);
+  border-color: color-mix(in oklab, var(--glow-brand) 40%, var(--border));
+}
+
+/* The selected state carries a real background rather than only a border tint. With 18 pills on
+   three wrapped rows, a border-only difference is genuinely hard to find again after scrolling. */
+.market-cat.is-on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.market-cat-n {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.market-count-line {
+  max-width: 900px;
+  margin: 0 auto 12px;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  font-family: var(--mono);
+}
+
+.market-pager {
+  max-width: 900px;
+  margin: 18px auto 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.market-page-btn {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--foreground);
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.market-page-btn:disabled {
+  opacity: 0.4;
+}
+
+.market-page-btn:not(:disabled):hover {
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
+}
+
+.market-page-at {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* ---- named services, demoted below the endpoint grid ---- */
+.market-services {
+  max-width: 900px;
+  margin: 36px auto 0;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+}
+
+.market-services h2 {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0 0 5px;
+}
+
+.market-services .market-note {
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+
+.market-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.market-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--foreground);
+  padding: 5px 12px;
+  font-size: 12.5px;
+}
+
+.market-chip:hover {
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
+}
+
 .market-note-error {
   color: var(--destructive-text);
 }
@@ -2039,13 +2528,13 @@ button:not(:disabled):active {
   background: linear-gradient(
     to bottom,
     var(--card),
-    color-mix(in oklch, var(--card) 94%, var(--glow-brand) 6%)
+    color-mix(in oklab, var(--card) 94%, var(--glow-brand) 6%)
   );
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .market-card:hover {
-  border-color: color-mix(in oklch, var(--glow-brand) 40%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 40%, var(--border));
   box-shadow: 0 0 20px -8px var(--glow-brand);
   transform: translateY(-1px);
 }
@@ -2054,7 +2543,6 @@ button:not(:disabled):active {
   font-size: 15px;
   font-weight: 650;
   margin: 0;
-  font-family: var(--mono);
   overflow-wrap: anywhere;
 }
 
@@ -2071,19 +2559,9 @@ button:not(:disabled):active {
   color: var(--muted-foreground);
 }
 
-/* Long endpoint paths must scroll inside the card rather than widen the grid — a single
-   2700-endpoint service name would otherwise push the page into horizontal scroll. */
-.market-sample {
-  display: block;
-  font-family: var(--mono);
-  font-size: 11.5px;
-  color: var(--muted-foreground);
-  background: color-mix(in oklch, var(--muted) 40%, transparent);
-  border-radius: var(--radius-sm);
-  padding: 5px 8px;
-  overflow-x: auto;
-  white-space: nowrap;
-}
+/* `.market-sample` lived here and is gone with the endpoint path it styled. The cards now show a
+   price and a category instead of `/v1/marketplace/<path>`, because a path is not what someone
+   choosing between 2,720 endpoints needs to read. */
 
 .market-ask {
   align-self: flex-start;
@@ -2098,7 +2576,7 @@ button:not(:disabled):active {
 }
 
 .market-ask:hover {
-  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
   box-shadow: 0 0 12px -4px var(--glow-brand);
 }
 
@@ -2113,7 +2591,7 @@ button:not(:disabled):active {
   background: linear-gradient(
     to bottom,
     var(--card),
-    color-mix(in oklch, var(--card) 94%, var(--glow-brand) 6%)
+    color-mix(in oklab, var(--card) 94%, var(--glow-brand) 6%)
   );
 }
 
@@ -2122,7 +2600,6 @@ button:not(:disabled):active {
   align-items: baseline;
   gap: 9px;
   margin-bottom: 10px;
-  font-family: var(--mono);
   font-size: 12px;
   color: var(--muted-foreground);
 }
@@ -2349,9 +2826,15 @@ button:not(:disabled):active {
 @media (max-width: 1200px) {
   .shell,
   .shell-rail-closed {
-    grid-template-columns: 1fr 300px;
+    grid-template-columns: minmax(0, 1fr) 6px clamp(260px, var(--sidebar-w, 300px), 34vw);
   }
   .rail {
+    display: none;
+  }
+  /* The rail's handle goes with the rail. It is still in the DOM — `railOpen` is true and the pane is
+     hidden by this query, not unmounted — so without this there is a draggable 6px strip against the
+     left edge that resizes nothing visible. */
+  .pane-resizer-rail {
     display: none;
   }
 }
@@ -2359,9 +2842,15 @@ button:not(:disabled):active {
 @media (max-width: 820px) {
   .shell,
   .shell-rail-closed {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .sidebar {
+    display: none;
+  }
+  /* Both handles, for the same reason: at this width neither pane is on screen, and a resize target
+     for a hidden pane is a control that appears broken. Dragging is also the wrong interaction on the
+     touch devices this breakpoint is for. */
+  .pane-resizer {
     display: none;
   }
 }
@@ -2430,6 +2919,67 @@ button:not(:disabled):active {
   letter-spacing: 0;
 }
 
+/* The second line of a two-line intro: the caveat, not the pitch. Dimmer so the first line reads
+   first, but present — it is what stops a still from looking like a broken video. */
+.gallery-sub-quiet {
+  margin-top: 4px;
+  font-size: 12.5px;
+  opacity: 0.78;
+}
+
+/* ---- seedance prompt collection ---- */
+
+.seedance-search-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0 4px;
+}
+
+.seedance-count {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* `clip` vs `frame` on every card. Only 5 of 105 entries have a servable video, so this badge is
+   the one thing standing between a still and someone concluding the player is broken. */
+.seedance-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--glow-brand) 35%, var(--border));
+  background: color-mix(in oklch, var(--glow-brand) 10%, transparent);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-2-text);
+}
+
+.seedance-badge-quiet {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--muted-foreground);
+}
+
+.seedance-prompt-len {
+  margin-left: 8px;
+  font-family: var(--mono);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  opacity: 0.7;
+}
+
+/* Explains a still instead of leaving someone to poke at an image expecting playback. */
+.seedance-frame-note {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+}
+
 /* ---- showcase grid ---- */
 
 /* Denser than the paid gallery: these are 32 examples to browse, where that one is a handful of
@@ -2454,7 +3004,7 @@ button:not(:disabled):active {
 }
 
 .showcase-card:hover {
-  border-color: color-mix(in oklch, var(--glow-brand) 45%, var(--border));
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
   box-shadow: 0 2px 10px var(--shadow-color);
 }
 
@@ -2641,9 +3191,154 @@ button:not(:disabled):active {
 }
 
 .showcase-note code {
-  font-family: var(--mono);
   font-size: 11px;
   padding: 1px 5px;
   border-radius: 4px;
   background: var(--secondary);
+}
+
+/* ---- prompt library ----
+   Text cards, not media cards. The upstream collection ships no images, so nothing here borrows
+   .showcase-card's fixed aspect box — an empty 4:5 well above a title is what a broken image
+   looks like. These size to their content instead, with the body clamped so a row stays even. */
+
+.library-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.library-grid {
+  display: grid;
+  /* Wider than the showcase grid: a card here carries a sentence rather than a thumbnail, and at
+     200px a Chinese intent line wraps to five lines and the grid loses its rhythm. */
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: 12px;
+}
+
+.library-card {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 13px 15px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+  text-align: left;
+  color: inherit;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.library-card:hover {
+  border-color: color-mix(in oklab, var(--glow-brand) 45%, var(--border));
+  box-shadow: 0 2px 10px var(--shadow-color);
+}
+
+.library-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.library-card-title {
+  font-size: 13.5px;
+  font-weight: 550;
+  line-height: 1.35;
+}
+
+/* The kind badge. Video vs image is the one distinction a reader must see BEFORE opening: sending
+   a shot description to the image endpoint returns a poster of a scene instead of the scene. */
+.library-kind {
+  flex: none;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+  background: var(--secondary);
+  border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+}
+
+.library-kind-video {
+  color: var(--highlight);
+  border-color: color-mix(in oklab, var(--highlight) 35%, transparent);
+}
+
+/* The author's intent line, or the prompt's opening. Clamped to three lines: these run from one
+   sentence to a thousand characters, and letting them wrap freely makes every row a different
+   height — the same reason .showcase-card-title is clamped to two. */
+.library-card-body {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.library-card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.library-cat-tag {
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  color: var(--muted-foreground);
+  background: color-mix(in oklch, var(--secondary) 70%, transparent);
+}
+
+.library-param {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: color-mix(in oklch, var(--muted-foreground) 80%, transparent);
+}
+
+/* The intent line in the detail dialog, above the prompt. Not muted like the card version: here
+   it is the answer to "what is this for", which is why someone opened the entry. */
+.library-intent {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--foreground);
+}
+
+/* The author's generation parameters. A definition list because that is what they are — and a
+   grid rather than inline rows so the values line up and can be read down the column. */
+.library-params {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 6px 16px;
+  margin: 0;
+  padding: 11px 14px;
+  border: 1px dashed color-mix(in oklch, var(--border) 85%, transparent);
+  border-radius: var(--radius-lg);
+  font-size: 11.5px;
+}
+
+.library-param-row {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.library-params dt {
+  flex: none;
+  font-family: var(--mono);
+  color: var(--muted-foreground);
+}
+
+.library-params dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--foreground);
+  overflow-wrap: anywhere;
 }

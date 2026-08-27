@@ -54,6 +54,8 @@ export function ChatList({
   onOpen: (id: string) => void
   onDelete: (id: string) => void
   onView: (v: RailView) => void
+  // No onHome. The way back to the landing page is the brand in the global top bar, which is reachable
+  // whether or not this pane is open — the point of moving it there.
 }) {
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
@@ -62,11 +64,13 @@ export function ChatList({
 
   return (
     <nav className="rail">
-      <div className="rail-brand">
-        <span className="brand-mark" aria-hidden="true" />
-        <span className="rail-brand-name">JarvisClaw</span>
-      </div>
-
+      {/* The brand is the way back to the landing page, which is where a logo already leads on
+          every other site — so this needs no extra nav item competing with "New chat". Rendered as
+          a plain div when there is nowhere to go, rather than a button that does nothing. */}
+      {/* No brand here.
+          It moved to the global top bar, which is where a logo belongs once there is one: the bar spans
+          the window, so the brand at its left edge reads as the site's, while a brand inside this pane
+          read as the pane's — and it disappeared entirely when the rail was collapsed. */}
       <button className="rail-item rail-item-strong" onClick={onNew}>
         <PlusIcon className="rail-glyph" size={16} aria-hidden="true" />
         New chat

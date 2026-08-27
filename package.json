@@ -19,7 +19,6 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@fontsource-variable/jetbrains-mono": "5.1.2",
     "@fontsource-variable/public-sans": "5.1.2",
     "lucide-react": "^1.34.0",
     "react": "19.0.0",

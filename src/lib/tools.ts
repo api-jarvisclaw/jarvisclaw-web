@@ -30,6 +30,16 @@ export interface ToolContext {
    * proceed unpriced — the whole point of the gate.
    */
   confirmSpend: (req: { tool: string; description: string; usd: number }) => Promise<boolean>
+  /**
+   * True when this session has no way to pay — no wallet and no API key.
+   *
+   * A paid tool still RUNS in this state, up to the point of pricing: it looks the API up, reports
+   * the name and the exact price, and says what would unlock it. That is what the gateway itself
+   * does (402 with a price body) and what Franklin does, and it is strictly more useful than the
+   * tool being absent — the model learns the capability exists and can tell the user what it costs
+   * rather than concluding the product cannot do it.
+   */
+  anonymous?: boolean
 }
 
 export interface ToolResult {
@@ -39,6 +49,23 @@ export interface ToolResult {
   spentUsd: number
   /** Set when the user declined, so the UI can say so rather than showing an error. */
   declined?: boolean
+  /**
+   * Set when the call could not be paid for at all — no wallet, no key.
+   *
+   * Distinct from `declined`, which is a decision about this moment and may be reversed a minute
+   * later. This is a property of the session, so a second attempt cannot succeed either, and the
+   * agent loop uses it to stop retrying for the rest of the message.
+   */
+  unpayable?: boolean
+  /**
+   * What the unpayable call would have cost, for the UI to state directly.
+   *
+   * Carried as data rather than left to the model's prose because the model is the unreliable half:
+   * handed a price and an instruction to report it, a free-tier model answered with an invented
+   * timestamp and mentioned neither the price nor the wallet. A user who is never told a paid
+   * capability exists cannot choose to unlock it.
+   */
+  unpayableCall?: { name: string; id: number; priceUsd: number }
 }
 
 export interface Tool {
@@ -93,8 +120,10 @@ const searchApis: Tool = {
     function: {
       name: 'search_apis',
       description:
-        'Search the catalogue of 4000+ callable APIs by natural-language query. ' +
-        'Free — always search before assuming an API does or does not exist.',
+        'Search the catalogue of 4000+ callable APIs by natural-language query (free, no charge). ' +
+        'Returns each result with its real per-call price. Search before assuming an API does or ' +
+        'does not exist — but do not search twice for the same thing; a reworded query returns the ' +
+        'same rows.',
       parameters: {
         type: 'object',
         properties: {
@@ -149,7 +178,8 @@ const listModels: Tool = {
     type: 'function',
     function: {
       name: 'list_models',
-      description: 'List the language models this gateway serves, with their prices. Free.',
+      description:
+        'List the language models this gateway serves, with their per-token prices (free, no charge).',
       parameters: {
         type: 'object',
         properties: {
@@ -208,9 +238,15 @@ const callApi: Tool = {
     type: 'function',
     function: {
       name: 'call_api',
+      // The price is in the description, following Franklin — its tools read
+      // 'Neural web search via Exa ($0.01/call)'. A model choosing between tools should see the
+      // cost at the point of choosing, not discover it from the result.
       description:
-        'Call one of the catalogue APIs by its id. Costs real money per call — ' +
-        'search first, and prefer the cheapest API that answers the question.',
+        'Call one of the catalogue APIs by its id. PAID: the price is per call and varies by API ' +
+        '(typically $0.001–$0.05; search_apis reports each one exactly). The user is shown the ' +
+        'price and asked to approve before any charge. If this session has no wallet or key, this ' +
+        'returns the price instead of calling — report that to the user rather than concluding the ' +
+        'capability does not exist.',
       parameters: {
         type: 'object',
         properties: {
@@ -251,6 +287,64 @@ const callApi: Tool = {
           `Could not read the price for API ${id}, so it was not called. ` +
           `Charging without a confirmed price is not allowed.`,
         spentUsd: 0,
+      }
+    }
+
+    /**
+     * No way to pay: report the price instead of the capability being absent.
+     *
+     * Deliberately AFTER the price lookup, so the answer names the API and its exact cost. That is
+     * the whole difference between this and hiding the tool — the model can now say "this exists,
+     * it costs $0.006, connect a wallet" instead of "I don't have access to a clock API", which is
+     * what it said when the tool was hidden and which was false.
+     *
+     * Mirrors the gateway's own 402, which carries a price body rather than a bare refusal, and
+     * Franklin's — verified live: /v1/search answers 402 with amount, per-source cost and max
+     * results, to a request bearing no credential at all.
+     *
+     * No `confirmSpend` prompt here: asking someone to approve a charge they have no means to pay
+     * is a dialog that can only end in disappointment.
+     */
+    if (ctx.anonymous) {
+      /**
+       * The wording matters more than it looks, and the first version of it caused a worse bug than
+       * the one it fixed.
+       *
+       * It ended with "Answer whatever part of their question you can without it", and a free-tier
+       * model read that as licence to answer the whole thing from its own knowledge. Measured on
+       * "北京时间是几点": it replied "现在时间是 2024年12月30日 04:13" — invented, on a day in 2026,
+       * having received nothing but a price. It also never mentioned the price or the wallet, which
+       * was the one thing this branch exists to say.
+       *
+       * A confidently wrong number is worse than the "I don't have access to a clock API" it
+       * replaced: that answer only made the product look limited, this one hands the user false data
+       * they have no reason to doubt. So the instruction is now explicit about the specific thing it
+       * must not do — state the value it failed to fetch — rather than trusting a general hint.
+       */
+      return {
+        output:
+          `NOT CALLED — no payment method. ${name} (id ${id}) costs $${priceUsd.toFixed(6)} per ` +
+          `call. This session has no wallet and no API key, so no data was retrieved from it.\n\n` +
+          `You received NO result from this API. You must therefore:\n` +
+          `1. Tell the user that ${name} would answer this and costs $${priceUsd.toFixed(6)} per ` +
+          `call, and that connecting a wallet or signing in with a JarvisClaw account unlocks it.\n` +
+          `2. DO NOT state, guess or estimate the value you were trying to fetch — not even ` +
+          `approximately. You do not have it.\n` +
+          `3. Answer only the parts of the question that need no live data at all, and say plainly ` +
+          `which part you could not answer.\n` +
+          `4. Do not call call_api again in this session.`,
+        spentUsd: 0,
+        // Not `declined`: the user refused nothing. Marked unpayable so the agent loop can stop
+        // offering the tool for the rest of this message.
+        unpayable: true,
+        /**
+         * Structured, so the UI can state this without depending on the model repeating it.
+         *
+         * The model is the unreliable half here — it already dropped the price and the wallet from its
+         * answer once. A free-tier model that ignores an instruction leaves the user with no way to
+         * know a paid capability exists, so the fact travels as data as well as prose.
+         */
+        unpayableCall: { name, id, priceUsd },
       }
     }
 
@@ -305,23 +399,42 @@ export const MODALITY_HINT = [
 ].join(' ')
 
 /**
- * The schemas to advertise for this session.
+ * The schemas to advertise. Every tool, to every session.
  *
- * An anonymous session is offered only the free tools. Advertising call_api to a
- * caller who has no wallet invites the model to plan around a tool whose every
- * invocation must then be refused — the model reads that as its own failure and
- * retries, which spends free-tier turns going nowhere.
+ * This used to hide `call_api` from an anonymous session, on the reasoning that advertising a tool
+ * whose every invocation must be refused invites the model to plan around it. That reasoning was
+ * wrong, and the cost was measured: asked "北京时间是几点", a free session ran five `search_apis`
+ * calls, one `list_models`, and answered "I don't have access to a real-time clock API" — while the
+ * catalogue holds one at id 447 for $0.006. Hiding the tool did not stop the model planning around
+ * it; it stopped the model learning that the capability exists, so it invented a reason instead and
+ * made the product look less capable than it is.
+ *
+ * VERIFIED against Franklin, which is the reference here — requests sent to its gateway with no
+ * wallet, no key and no headers at all:
+ *
+ *   free model      → 200, answers normally
+ *   paid model      → 402 {"price":{"amount":"0.002000","currency":"USD"}}
+ *   /v1/exa/search  → 402, with the endpoint's full description in the body
+ *   /v1/search      → 402 {"amount":"0.2625","perSourceCost":0.025,"maxResults":10}
+ *
+ * So a paid API is reachable without a wallet; what it reaches is a priced 402, not an invisible
+ * door. Franklin's own 53 tools are all visible to a walletless session — its `ActivateTool` split
+ * gates on call frequency and cost (a $0.40 GPU sandbox is hidden; paid market-data tools are in the
+ * always-on core), never on whether the user can pay. Its source names our exact failure:
+ *
+ *   "earlier releases kept only file/shell/search in core, which made mid-tier models answer
+ *    stock / market questions from 2022 training data instead of calling TradingMarket. That's
+ *    anti-positioning for an agent whose whole brand is 'spends USDC for real market data.'"
+ *
+ * The `opts` parameter is kept so callers do not all have to change, and because a future
+ * frequency-based split would use it. Both are unused today, hence the underscore.
  */
-export function toolSchemas(opts: { anonymous: boolean }): ToolSchema[] {
-  return Object.values(tools)
-    .filter((t) => !opts.anonymous || t.tier === 'free')
-    .map((t) => t.schema)
+export function toolSchemas(_opts: { anonymous: boolean }): ToolSchema[] {
+  return Object.values(tools).map((t) => t.schema)
 }
 
-export function toolNames(opts: { anonymous: boolean }): string[] {
-  return Object.entries(tools)
-    .filter(([, t]) => !opts.anonymous || t.tier === 'free')
-    .map(([name]) => name)
+export function toolNames(_opts: { anonymous: boolean }): string[] {
+  return Object.keys(tools)
 }
 
 export { DEFAULT_BASE_URL }

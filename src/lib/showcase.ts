@@ -19,8 +19,18 @@
  * Media lives on our own R2 under `showcase/`, not hotlinked. Two independent reasons, both
  * measured: the page's CSP allows images only from `self`, `data:` and our CDN, and the CDN
  * Worker's copy-from allowlist refuses franklin.run outright (403, host not allowed). Uploaded
- * by cdn/upload-showcase.sh; that prefix has no expiry rule, unlike `media/` which is a cache
+ * by cdn/upload-showcase.ps1; that prefix has no expiry rule, unlike `media/` which is a cache
  * and clears daily.
+ *
+ * ## Not the only collection
+ *
+ * `seedance.ts` holds a second one — 105 published Seedance 2.0 video prompts — behind its own
+ * gallery tab. They are deliberately separate rather than one merged list, because every item here
+ * has playable media while 100 of those have a still and no servable clip. Merging them would mean
+ * threading that distinction through this type, and the first symptom of getting it wrong is a play
+ * button over a frame that never moves.
+ *
+ * Both share the `showcase/` prefix on R2; the filenames do not collide (`sd-<id>-*` there).
  */
 
 import { CDN_BASE_URL } from './gallery'

@@ -63,8 +63,13 @@ def main() -> int:
             else None,
         )
 
-        page.goto(URL, wait_until="domcontentloaded")
-        page.wait_for_timeout(2000)
+        # /gallery directly, not "/" then click. `/` is a marketing landing page now, and its
+        # header carries an anchor also labelled "Gallery" — clicking that scrolls the page
+        # instead of opening the pane, and the probe then times out looking for a tab. Written
+        # down because the failure names the tab, not the navigation, so it reads as a UI defect
+        # in the pane that was never reached.
+        page.goto(f"{URL}/gallery", wait_until="domcontentloaded")
+        page.wait_for_selector(".gallery-tabs", timeout=30000)
 
         before = [c for c in chunks if "Seedance" in c]
         if before:
@@ -73,8 +78,6 @@ def main() -> int:
                 "the code split is not actually splitting"
             )
 
-        page.get_by_role("button", name=re.compile("gallery", re.I)).first.click()
-        page.wait_for_timeout(1200)
         page.get_by_role("tab", name=re.compile("video prompts", re.I)).click()
 
         page.wait_for_selector(".showcase-card", timeout=30000)

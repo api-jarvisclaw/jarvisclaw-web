@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { SHOWCASE, showcaseMode, showcaseUrl } from './showcase'
+import { SHOWCASE_ASSET_SET } from './showcase-manifest'
 
 /**
  * The prompt gallery's data, checked as data. Thirty-two items transcribed from another site is
@@ -100,5 +101,17 @@ describe('SHOWCASE', () => {
     for (const item of SHOWCASE.filter((s) => s.kind === 'video')) {
       expect(item.poster ?? item.asset, item.slug).toBeTruthy()
     }
+  })
+
+  it('names only assets the CDN actually serves', () => {
+    // The check that was missing here entirely: every assertion above is satisfied by a filename
+    // that is well-formed and absent, which renders a blank tile with the markup intact. Read from
+    // the committed manifest (cdn/gen-showcase-manifest.py, measured against the live CDN) because
+    // cdn/showcase/ is gitignored — its home is R2.
+    expect(SHOWCASE_ASSET_SET.size).toBeGreaterThan(100)
+    const missing = SHOWCASE.flatMap((s) =>
+      [s.asset, s.poster].filter((f): f is string => !!f && !SHOWCASE_ASSET_SET.has(f)),
+    )
+    expect(missing).toEqual([])
   })
 })

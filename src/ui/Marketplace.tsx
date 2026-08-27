@@ -35,6 +35,40 @@ import {
 /** Fewer rows than this and the count line adds nothing a glance does not already give. */
 const PAGE_SIZE = 24
 
+/**
+ * The line under the heading, describing the tier that is actually on screen.
+ *
+ * Exported so it can be tested directly. It has to get three separate things right and each one
+ * was wrong at some point:
+ *
+ *   - WHICH TIER. Saying "2,720 callable endpoints" over a curated few hundred makes the raw size
+ *     the headline and the selection look like a broken filter, which is the thing the report
+ *     said not to lead with.
+ *   - THAT TIER'S SIZE. The first version summed the per-category facet. That is right for the
+ *     complete listing and wrong for the curated one, whose facet is capped per category — a
+ *     browser probe caught it reading "12 picks" for a 186-row tier.
+ *   - PLURALISATION. "1 categories" was on screen until a probe printed the header verbatim.
+ */
+export function marketHeadline(opts: {
+  curated: boolean
+  curatedTotal: number
+  completeTotal: number
+  /** Sum of the category facet, used only when the gateway reports no tier sizes. */
+  facetTotal: number
+  categoryCount: number
+}): string {
+  const size = opts.curated ? opts.curatedTotal : opts.completeTotal
+  // The facet sum is the fallback for a gateway that does not report tier sizes — an older one,
+  // or one where the fields were dropped. Zero would print "0 picks" over a full grid of results.
+  const n = size > 0 ? size : opts.facetTotal
+  if (n <= 0) return ''
+  const cats = `${opts.categoryCount} ${opts.categoryCount === 1 ? 'category' : 'categories'}`
+  const what = opts.curated
+    ? `${n.toLocaleString()} picks across ${cats}, chosen for a first look.`
+    : `${n.toLocaleString()} callable endpoints across ${cats}.`
+  return `${what} Paid per call — the agent asks before it spends.`
+}
+
 export function Marketplace({
   baseUrl,
   onAsk,
@@ -51,6 +85,21 @@ export function Marketplace({
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<string | null>(null)
   const [page, setPage] = useState(1)
+  /**
+   * Curated by default, and this is the fix for the reported problem rather than a preference.
+   *
+   * The raw listing is 2,720 rows assembled from 70 upstreams, and a first visit met it head
+   * on. Reported: duplicate entries on page one and endpoints filed under categories that make
+   * no sense — the marks of auto-generated bulk. A developer who reads the hero API's docs and
+   * then browses that is being shown the least trustworthy view we have.
+   *
+   * The complete listing stays one click away, labelled with its real size. Hiding it would be
+   * worse than showing it first: the breadth is real, and someone looking for a specific
+   * endpoint needs all of it.
+   */
+  const [curated, setCurated] = useState(true)
+  const [tiers, setTiers] = useState({ curated: 0, complete: 0 })
+  const [servedCurated, setServedCurated] = useState(true)
 
   // The services list is the small, stable half: 18 rows that do not depend on the filter, so it
   // is fetched once rather than on every category click.
@@ -84,6 +133,7 @@ export function Marketplace({
       pageSize: PAGE_SIZE,
       category: category ?? undefined,
       query: debounced || undefined,
+      curated,
     })
       .then((res) => {
         setApis(res.items)
@@ -92,6 +142,10 @@ export function Marketplace({
         // any of them. Taken from the latest rather than cached from the first, so a category
         // added upstream shows up without a reload.
         if (res.categories.length > 0) setCategories(res.categories)
+        setTiers({ curated: res.curatedTotal, complete: res.completeTotal })
+        // What the gateway SERVED, not what was requested: it falls back to the complete
+        // listing rather than present an empty marketplace, and the label has to follow.
+        setServedCurated(res.curated)
         setState('ready')
       })
       .catch((err: unknown) => {
@@ -100,25 +154,56 @@ export function Marketplace({
         setState('failed')
       })
     return () => abort.abort()
-  }, [baseUrl, page, category, debounced])
+  }, [baseUrl, page, category, debounced, curated])
 
   // Changing the filter must reset the page, or picking a 9-row category while on page 4 shows an
   // empty grid — which reads as "this category is empty" rather than "you are past the end".
+  //
+  // `curated` belongs here for a sharper version of the same reason: the curated tier is a few
+  // hundred rows and the complete one is thousands, so switching from page 6 of everything to
+  // the curated tier would land past its end and show nothing at all.
   useEffect(() => {
     setPage(1)
-  }, [category, debounced])
+  }, [category, debounced, curated])
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
   const catTotal = useMemo(() => categories.reduce((n, c) => n + c.count, 0), [categories])
+
+  /**
+   * The header line, describing the tier actually on screen.
+   *
+   * Built here rather than inline because it has to get three things right at once: which tier,
+   * that tier's real size, and singular-vs-plural. The nested ternary it replaces got the size
+   * wrong (it summed the per-category facet, which the curated tier caps) and always said
+   * "categories", so a one-category listing read "1 categories".
+   */
+  const headline = useMemo(
+    () =>
+      marketHeadline({
+        curated: servedCurated,
+        curatedTotal: tiers.curated,
+        completeTotal: tiers.complete,
+        facetTotal: catTotal,
+        categoryCount: categories.length,
+      }),
+    [servedCurated, tiers, catTotal, categories.length],
+  )
 
   return (
     <div className="market">
       <header className="market-head">
         <h1>Marketplace</h1>
+        {/* The subtitle describes the tier being shown, not the catalogue as a whole. Leading
+            with "2,720 endpoints" while displaying a curated few hundred would make the number
+            the headline and the selection look like a broken filter — and the size of the raw
+            listing is exactly what the report said not to lead with.
+
+            The count comes from the served tier's own total, not from summing the facet. They
+            agree on an unfiltered page, but the facet is capped per category in the curated
+            tier, so summing it understated the tier — a probe caught it reading "12 picks" for
+            a 186-row listing. */}
         <p>
-          {catTotal > 0
-            ? `${catTotal.toLocaleString()} callable endpoints across ${categories.length} categories. Paid per call — the agent asks before it spends.`
-            : 'Live from the gateway’s own catalogue.'}
+          {headline !== '' ? headline : 'Live from the gateway’s own catalogue.'}
         </p>
         <input
           className="market-search"
@@ -127,6 +212,22 @@ export function Marketplace({
           placeholder="search endpoints"
           onChange={(e) => setQuery(e.target.value)}
         />
+        {/* The way out of the curated tier, and into it.
+
+            Rendered only when the two tiers actually differ: on a gateway that does not curate
+            (or one old enough not to know the flag) both counts are the same number, and a
+            toggle between two identical listings is a control that appears broken. */}
+        {tiers.complete > tiers.curated && (
+          <button
+            className="market-tier"
+            onClick={() => setCurated((c) => !c)}
+            aria-pressed={!curated}
+          >
+            {servedCurated
+              ? `Show all ${tiers.complete.toLocaleString()} endpoints`
+              : `Show the ${tiers.curated.toLocaleString()} curated picks`}
+          </button>
+        )}
       </header>
 
       {/* Categories first, above the results. A newcomer's problem is not filtering a list they
@@ -179,8 +280,24 @@ export function Marketplace({
           </p>
 
           {apis.length === 0 && (
+            /**
+             * "Nothing matches" is a false statement while the curated tier is on: the endpoint
+             * probably exists and is simply not among the picks. Searching a few hundred rows and
+             * being told the platform has nothing is how a real capability gets missed, so the
+             * empty state offers the whole catalogue instead of asking the user to guess.
+             */
             <p className="market-note">
-              Nothing here matches. Try a different category, or clear the search.
+              {servedCurated && tiers.complete > tiers.curated ? (
+                <>
+                  Nothing in the curated picks matches.{' '}
+                  <button className="link-btn" onClick={() => setCurated(false)}>
+                    Search all {tiers.complete.toLocaleString()} endpoints
+                  </button>
+                  .
+                </>
+              ) : (
+                'Nothing here matches. Try a different category, or clear the search.'
+              )}
             </p>
           )}
 

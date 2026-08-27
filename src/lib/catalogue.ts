@@ -281,6 +281,15 @@ export interface ApiPage {
   /** Rows matching the filter across the WHOLE catalogue, not just this page. */
   total: number
   categories: MarketplaceCategory[]
+  /**
+   * Which tier the gateway actually served. Not the same as what was asked for: a curated
+   * request falls back to the complete listing rather than present an empty marketplace, and a
+   * UI that labelled that page "curated" would be describing something else.
+   */
+  curated: boolean
+  /** Size of each tier, so the UI can offer the other one by name without a second request. */
+  curatedTotal: number
+  completeTotal: number
 }
 
 /**
@@ -301,12 +310,20 @@ export async function listApis(
     pageSize?: number
     category?: string
     query?: string
+    /**
+     * Ask for the browsable subset instead of every callable row.
+     *
+     * Opt-in on the wire because the endpoint is unauthenticated and already read by
+     * aggregators and our own agent tooling; the browsing UI sets it, nothing else does.
+     */
+    curated?: boolean
   } = {},
 ): Promise<ApiPage> {
   const params = new URLSearchParams({
     page: String(opts.page ?? 1),
     page_size: String(opts.pageSize ?? 24),
   })
+  if (opts.curated) params.set('curated', '1')
   // Omitted rather than sent empty. `category=` with no value is not the same request as no
   // `category` at all, and relying on the gateway to treat them alike is an assumption this code
   // does not need to make.
@@ -328,6 +345,9 @@ export async function listApis(
       items?: RawApiRow[]
       total?: number
       categories?: Array<{ category?: string; count?: number }>
+      curated?: boolean
+      curated_total?: number
+      complete_total?: number
     }
   }>(`/api/marketplace/apis?${params.toString()}`, opts)
   const res = env?.data
@@ -352,5 +372,14 @@ export async function listApis(
         count: Number(c.count ?? 0),
         label: categoryLabel(c.category),
       })),
+    curated: res?.curated === true,
+    /**
+     * Falls back to `total` rather than 0 when the field is missing, which is what an older
+     * gateway returns. Zero would render "0 of 0 endpoints" against a full grid of results —
+     * a UI that contradicts itself — whereas `total` degrades to the one honest number
+     * available: the tier counts collapse and the toggle hides itself.
+     */
+    curatedTotal: Number(res?.curated_total ?? res?.total ?? 0),
+    completeTotal: Number(res?.complete_total ?? res?.total ?? 0),
   }
 }

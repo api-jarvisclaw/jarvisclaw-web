@@ -2356,6 +2356,35 @@ body.is-resizing * {
   font-size: 14px;
 }
 
+/* The tier switch: curated picks <-> the whole catalogue.
+
+   Deliberately quiet — a bordered text button rather than a primary one. The curated tier is the
+   right default for a first visit, so this is an escape hatch for someone who already knows what
+   they want, not a call to action competing with the results below it. */
+.market-tier {
+  margin-top: 10px;
+  padding: 6px 13px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.market-tier:hover {
+  color: var(--foreground);
+  border-color: var(--glow-brand);
+}
+
+/* The keyboard focus ring has to be visible on its own: the hover rule above changes only the
+   border, which a keyboard user never triggers. */
+.market-tier:focus-visible {
+  outline: 2px solid var(--glow-brand);
+  outline-offset: 2px;
+}
+
 /* ---- category navigation ----
    A wrapping row of pills rather than a sidebar: there are 18 of them, they are the first thing
    a newcomer needs, and a sidebar would compete with the app's existing one. */

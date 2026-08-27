@@ -327,3 +327,79 @@ describe('listApis', () => {
     expect(page.total).toBe(0)
   })
 })
+
+/**
+ * The curated tier: the browsable subset a newcomer meets instead of all 2,720 callable rows.
+ *
+ * Reported as a marketing liability rather than a bug — duplicates on page one, endpoints filed
+ * under categories that make no sense, the marks of auto-generated bulk. The listing is real and
+ * stays reachable; what changed is which view a first visit gets.
+ */
+describe('listApis curated tier', () => {
+  function stubApiPage(body: unknown) {
+    const urls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        urls.push(String(url))
+        return new Response(JSON.stringify({ data: body }), { status: 200 })
+      }),
+    )
+    return urls
+  }
+
+  it('does not ask for curation unless told to', async () => {
+    // The endpoint is unauthenticated and already read by aggregators and our own agent tooling.
+    // Sending the flag by default would shrink what every existing caller sees.
+    const urls = stubApiPage({ items: [], total: 2720, categories: [] })
+    await listApis()
+    expect(urls[0]).not.toContain('curated')
+  })
+
+  it('asks for the curated tier when requested', async () => {
+    const urls = stubApiPage({ items: [], total: 186, categories: [] })
+    await listApis({ curated: true })
+    expect(urls[0]).toContain('curated=1')
+  })
+
+  it('reports both tier sizes so the UI can name the other one', async () => {
+    stubApiPage({
+      items: [],
+      total: 186,
+      categories: [],
+      curated: true,
+      curated_total: 186,
+      complete_total: 2720,
+    })
+    const page = await listApis({ curated: true })
+    expect(page.curated).toBe(true)
+    expect(page.curatedTotal).toBe(186)
+    expect(page.completeTotal).toBe(2720)
+  })
+
+  it('trusts what the gateway SERVED, not what was asked for', async () => {
+    // The gateway falls back to the complete listing rather than present an empty marketplace.
+    // A UI that labelled that page "curated" would describe a listing the user is not seeing.
+    stubApiPage({
+      items: [],
+      total: 2720,
+      categories: [],
+      curated: false,
+      curated_total: 0,
+      complete_total: 2720,
+    })
+    const page = await listApis({ curated: true })
+    expect(page.curated).toBe(false)
+  })
+
+  it('collapses the tiers on a gateway that does not report them', async () => {
+    // An older gateway omits the fields. Defaulting them to 0 would render "0 of 0 endpoints"
+    // against a full grid — a UI contradicting itself — so both fall back to the one honest
+    // number available, which also hides the toggle.
+    stubApiPage({ items: [], total: 2720, categories: [] })
+    const page = await listApis()
+    expect(page.curated).toBe(false)
+    expect(page.curatedTotal).toBe(2720)
+    expect(page.completeTotal).toBe(2720)
+  })
+})

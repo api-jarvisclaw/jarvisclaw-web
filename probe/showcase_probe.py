@@ -28,6 +28,11 @@ from playwright.sync_api import sync_playwright
 # the most misleading way for a probe to fail.
 URL = os.environ.get("CHAT_URL", "https://ducat.jarvisclaw.ai/chat")
 
+# Where the assets actually live, used to refetch anything the page failed to load. Not derived
+# from URL: the site and the CDN are separate hosts, and a local dist run still pulls media from
+# the live CDN.
+CDN = os.environ.get("CDN_URL", "https://cdn.jarvisclaw.ai")
+
 
 def main() -> int:
     fails = []
@@ -233,8 +238,34 @@ def main() -> int:
             print(f"\n   CSP errors: {csp_errors[:2]}")
             fails.append(f"{len(csp_errors)} CSP violations")
         if failed_media:
+            # Refetch before blaming the CDN, and DO NOT simply exempt the error code.
+            #
+            # A live run reported 10 of these as net::ERR_QUIC_PROTOCOL_ERROR; every one of the
+            # named files answered 200 with full bytes on a direct request, and a second run of
+            # this probe passed clean. That is transport flake between this machine and the edge,
+            # not a broken asset.
+            #
+            # Exempting QUIC errors the way ERR_ABORTED is exempted would also wave through a CDN
+            # that has genuinely stopped serving, which is the failure worth catching. So the
+            # distinction is measured instead: flake succeeds on a refetch, an absent object does
+            # not. Anything that still cannot be fetched is a real failure and is reported as one.
             print(f"   failed media requests: {failed_media[:3]}")
-            fails.append(f"{len(failed_media)} showcase requests failed outright")
+            unresolved = []
+            for name, why in failed_media:
+                try:
+                    r = page.request.get(f"{CDN}/showcase/{name}", timeout=20000)
+                    if r.status != 200 or len(r.body()) == 0:
+                        unresolved.append((name, why, r.status))
+                except Exception as e:  # noqa: BLE001
+                    unresolved.append((name, why, f"refetch error: {e}"))
+            recovered = len(failed_media) - len(unresolved)
+            print(f"   refetched: {recovered} recovered (transport flake), {len(unresolved)} still failing")
+            if unresolved:
+                for name, why, status in unresolved[:5]:
+                    print(f"     UNRESOLVED {name}: {why} -> {status}")
+                fails.append(
+                    f"{len(unresolved)} showcase assets could not be fetched even directly"
+                )
 
         browser.close()
 

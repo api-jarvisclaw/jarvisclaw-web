@@ -869,15 +869,40 @@ body.is-resizing * {
   align-self: flex-start;
   max-width: 78%;
   margin-top: -2px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   font-size: 12px;
   line-height: 1.45;
   color: color-mix(in oklch, var(--muted-foreground) 72%, transparent);
+  /* The mono face is half the signal. An answer is set in the sans stack, so reasoning in mono
+     reads as machine output at a glance — which is what the "leaking into the answer" report was
+     really about: this text looked exactly like a reply. */
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Clipping moved onto the text span, since the row is now a flex container: `direction: rtl`
+   keeps the newest end visible when it overflows, `text-align: left` restores reading order for
+   the Latin and CJK inside it. */
+.reasoning-tail > span:last-child {
+  min-width: 0;
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   direction: rtl;
   text-align: left;
-  font-variant-numeric: tabular-nums;
+}
+
+/* Says what the text is. Without it the tail was unlabelled prose sitting where a reply goes. */
+.reasoning-tail-label {
+  flex: none;
+  font-family: var(--sans);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in oklch, var(--muted-foreground) 58%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -955,6 +980,47 @@ body.is-resizing * {
   50% {
     opacity: 1;
   }
+}
+
+/* The collapsed summary for finished catalogue lookups.
+
+   Shaped like a .tool-row (same pill, same mono face) because it IS the same class of thing —
+   one line standing for several. Quieter than a real row: no border, so a turn that only
+   searched the catalogue does not present a bordered pill as if it had called something. */
+.tool-plumbing {
+  align-self: flex-start;
+  max-width: 78%;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--muted-foreground);
+}
+
+.tool-plumbing > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  padding: 5px 12px;
+  border-radius: 999px;
+  /* No border and no background: this is the least important line in the turn. */
+  color: var(--muted-foreground);
+}
+
+/* Removes the default disclosure triangle in WebKit; `display` on the summary already
+   suppresses the marker in Firefox. The check icon is the affordance. */
+.tool-plumbing > summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-plumbing > summary:hover {
+  color: var(--foreground);
+}
+
+/* The expanded rows sit indented under the summary so the grouping is visible without a
+   second border. gap matches the transcript's own row rhythm. */
+.tool-plumbing[open] > .tool-row {
+  margin-left: 18px;
+  margin-top: 5px;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -223,6 +223,14 @@ export interface AgentEvent {
    * fabricated timestamp and mentioned neither. The instruction stays, and this is the backstop.
    */
   unpayableCall?: { name: string; id: number; priceUsd: number }
+  /**
+   * For tool-end: nothing was spent because the call was REFUSED for lack of payment.
+   *
+   * Separate from `spentUsd: 0`, which a genuinely free tool also reports. Without the
+   * distinction the UI labelled a refused `call_api` "free" — a green tick claiming a paid API
+   * ran at no charge, which is the opposite of what happened.
+   */
+  unpayable?: boolean
   /** For done: which concrete model answered, since auto/free resolves per request. */
   model?: string
 }
@@ -270,6 +278,51 @@ export interface AgentOptions extends ToolContext {
 }
 
 const DEFAULT_MAX_TURNS = 8
+
+/**
+ * How much deliberation is allowed before a model is abandoned mid-answer.
+ *
+ * This is the reported "front-end hang", and it was never a hang. Captured from the live
+ * console on "What's the current price of Bitcoin and its 24h change?": `auto/free` resolved
+ * to `nemotron-3-nano-omni-30b-a3b-reasoning`, which streamed **229,295 characters** of
+ * `reasoning_content` for that one question. Nothing errored and nothing timed out — frames
+ * arrived continuously the whole time — so the page sat on "Thinking" for over seven minutes
+ * with the stream perfectly healthy. The reasoning showed it inventing tool results rather
+ * than calling anything: "Let's assume the first result is an API with id 123".
+ *
+ * The other eight free models, same prompt, produced 148-191 characters and finished in
+ * 1.9-22.3s. So the cap is not a tuning knob balanced against normal behaviour; it is three
+ * orders of magnitude above it, and only a model that has genuinely come off the rails can
+ * reach it.
+ *
+ * 40,000 characters — roughly 10k tokens of thinking. Far past the 3,716-character worst case
+ * measured before the brevity rule went in, so a model that is merely verbose still finishes
+ * its own way; a model emitting a quarter of a million characters is stopped at about a sixth
+ * of the way through instead of at the end.
+ *
+ * A character budget rather than a wall-clock timeout on purpose. A slow model that is making
+ * progress should not be killed for being slow — the free pool's honest first-content times run
+ * to 20-30s — and a timeout cannot tell "thinking hard" from "looping". Volume can.
+ */
+const MAX_REASONING_CHARS = 40_000
+
+/**
+ * A model abandoned for deliberating past MAX_REASONING_CHARS.
+ *
+ * Its own class so the loop can tell it apart from the abort it performs to stop the stream.
+ * Without the distinction the guard would surface as "network error" and the model would be
+ * retired as unavailable — which is wrong, and would spend the rest of the candidate list on a
+ * problem none of them has.
+ */
+class RunawayReasoning extends Error {
+  constructor(
+    readonly model: string,
+    readonly chars: number,
+  ) {
+    super(`${model} produced ${chars} characters of reasoning without answering`)
+    this.name = 'RunawayReasoning'
+  }
+}
 
 /**
  * Shown when every free candidate has been tried and none could serve the request.
@@ -493,6 +546,23 @@ export async function* runAgent(
     ): AsyncGenerator<AgentEvent, Awaited<ReturnType<typeof streamChat>>> {
       const q = new EventQueue<AgentEvent>()
       let first = true
+      /**
+       * Characters of deliberation this attempt has produced, against MAX_REASONING_CHARS.
+       *
+       * Counted here rather than checked after the stream closes, which is the whole point: the
+       * runaway case ends normally, with a valid `[DONE]`, after several minutes. By the time the
+       * response is complete the wait has already happened, so the only place this can help is
+       * while the frames are still arriving.
+       */
+      let reasoningChars = 0
+      let runaway = false
+      const abortRunaway = new AbortController()
+      // Chained to the caller's signal so a user pressing Stop still aborts: replacing the signal
+      // rather than combining them would make the runaway guard override the user's own cancel.
+      if (opts.signal) {
+        if (opts.signal.aborted) abortRunaway.abort()
+        else opts.signal.addEventListener('abort', () => abortRunaway.abort(), { once: true })
+      }
       const request = streamChat(
         { messages: history, model, tools: schemas },
         (delta) => {
@@ -503,9 +573,22 @@ export async function* runAgent(
           }
           if (delta.content || delta.reasoning) first = false
           if (delta.content) q.push({ type: 'text', text: delta.content })
-          if (delta.reasoning) q.push({ type: 'reasoning', text: delta.reasoning })
+          if (delta.reasoning) {
+            q.push({ type: 'reasoning', text: delta.reasoning })
+            reasoningChars += delta.reasoning.length
+            /**
+             * Aborted at the threshold, and the flag is what distinguishes this from a network
+             * failure further down: an aborted fetch rejects, and without the flag the loop would
+             * report the abort as an ordinary error and retire the model as "unavailable" — which
+             * it is not. It answered; it answered at absurd length.
+             */
+            if (reasoningChars >= MAX_REASONING_CHARS && !runaway) {
+              runaway = true
+              abortRunaway.abort()
+            }
+          }
         },
-        { baseUrl: opts.baseUrl, cred, signal: opts.signal },
+        { baseUrl: opts.baseUrl, cred, signal: abortRunaway.signal },
       )
 
       /**
@@ -533,6 +616,15 @@ export async function* runAgent(
       }
 
       const outcome = await settled
+      /**
+       * The runaway case is reported here, before the error path, because the abort we just caused
+       * looks exactly like a network failure from the outside.
+       *
+       * Thrown as a tagged error rather than returned as a value so the caller's existing
+       * error handling stays in one shape; the caller checks for the tag and reports it as a
+       * notice instead of retiring the model.
+       */
+      if (runaway) throw new RunawayReasoning(model, reasoningChars)
       if (!outcome.ok) throw outcome.error
       return outcome.value
     }
@@ -540,8 +632,15 @@ export async function* runAgent(
     for (;;) {
       const model = opts.model ?? (await router!.current())
       if (model === undefined) {
-        // Reached when a previous message already exhausted the list, so no attempt is
-        // made this time.
+        /**
+         * Every candidate is currently retired. Retirements age out (see ModelRouter.RETIRE_MS),
+         * so this is "nothing available in this moment", not "nothing will ever work" — and the
+         * message says try again shortly for that reason.
+         *
+         * The screenshot that prompted the expiry work showed this error above an answer
+         * `qwen3.6-flash` went on to produce: the session had exhausted the list earlier, the set
+         * never emptied, and so a later message reported failure without making a single request.
+         */
         yield { type: 'error', text: EXHAUSTED_MESSAGE }
         return
       }
@@ -551,6 +650,45 @@ export async function* runAgent(
         result = yield* attemptStream(model, opts.cred, attempts)
         break
       } catch (err) {
+        /**
+         * A model that would not stop thinking. Handled first and separately from every failure
+         * below, because nothing failed: the request was fine, the stream was fine, and the model
+         * was still producing frames when we stopped listening.
+         *
+         * Retiring it IS right — for this session it has proven it cannot answer this kind of
+         * question in reasonable time, and `markFailed` is bypassed only because
+         * `isModelUnavailable` inspects the gateway's message and this error never reached the
+         * gateway. So the retirement is done directly and the next candidate is tried, which is
+         * the same recovery a genuine unavailability gets.
+         */
+        if (err instanceof RunawayReasoning) {
+          /**
+           * A PINNED model is reported, never swapped — the same rule the downgrade path below
+           * follows, and for the same reason: the user chose this model.
+           *
+           * This branch is a fix for my own bug, caught by driving the guard against the live
+           * gateway with the cap lowered. `router` is undefined whenever `opts.model` is set, so
+           * the shared path fell to `'exhausted'` and announced "Every free model the gateway
+           * offers is unavailable" — about a session that had pinned one model and never consulted
+           * the pool. The guard worked and the explanation was nonsense.
+           */
+          if (!router) {
+            yield {
+              type: 'error',
+              text: `${model} kept thinking without producing an answer. Try a different model, or ask something narrower.`,
+            }
+            return
+          }
+          yield {
+            type: 'notice',
+            text: `${model} was thinking for too long without answering — trying another model.`,
+          }
+          if ((await router.retire(model)) === 'exhausted') {
+            yield { type: 'error', text: EXHAUSTED_MESSAGE }
+            return
+          }
+          continue
+        }
         // A 402 is a price, not a failure. Handled before the downgrade logic because a
         // paid model answering 402 is working exactly as intended — retiring it as
         // "unavailable" and falling back to a free model would silently give the user a
@@ -623,6 +761,29 @@ export async function* runAgent(
     })
 
     if (result.toolCalls.length === 0) {
+      /**
+       * A 200 that answered nothing, which the loop used to end as a success.
+       *
+       * Measured: `nemotron-3-nano-omni-30b-a3b-reasoning` answered a direct request with HTTP
+       * 200, zero content, zero reasoning and zero tool calls, in 21.7 seconds. With no tool
+       * calls the loop emitted `done`, the UI stopped its spinner, and the turn rendered as a
+       * finished answer that was blank — indistinguishable from the app being broken.
+       *
+       * The `toolCalls.length === 0` guard above is what makes this safe: an assistant turn
+       * carrying only tool calls legitimately has no content, and that is the normal first step
+       * of every tool-using turn. Only a turn with neither text nor tool calls is empty.
+       *
+       * Reported rather than retried. A retry would be another 20+ seconds on a model that just
+       * demonstrated it has nothing to say, and the user is better served by being told so and
+       * choosing — the next message picks up whatever the pool offers then.
+       */
+      if (result.content.trim() === '') {
+        yield {
+          type: 'error',
+          text: `${result.model} returned an empty answer. Try again, or pick a different model.`,
+        }
+        return
+      }
       yield { type: 'done', model: result.model }
       return
     }
@@ -703,12 +864,45 @@ async function* runOneTool(
    * about the API being asked for, so pricing a second one reaches the same conclusion more slowly.
    */
   if (blocked.has(name)) {
-    answer(
-      `${name} still cannot be paid for — this session has no wallet and no API key, and that has ` +
-        `not changed. Do not call it again. Tell the user what it would cost and that connecting a ` +
-        `wallet or signing in unlocks it.`,
-    )
-    yield { type: 'tool-end', tool: name, spentUsd: 0 }
+    /**
+     * The ban on stating the value has to be repeated here, and leaving it out cost a fabrication.
+     *
+     * Reported from a screenshot: three `call_api` attempts in one turn, and the answer was
+     * "北京时间：晚上 10:32（UTC+8）这是刚通过 Timezone Lookup API 查到的实时数据" — a time it
+     * invented, presented as retrieved, on a turn where every call was refused.
+     *
+     * Only the FIRST refusal carried the do-not-state-it instruction; this repeat path said merely
+     * "cannot be paid for, do not call it again". The model's most recent tool result is the one it
+     * writes its answer against, so the instruction that mattered had scrolled out from under it.
+     * Every refusal now carries the ban, not just the first.
+     */
+    const blockedNotice =
+      `${name} STILL NOT CALLED — this session has no wallet and no API key, and that has not ` +
+      `changed. You received NO data from it, again. Do not call it again.\n` +
+      `1. DO NOT state, guess or estimate the value you were trying to fetch — not even ` +
+      `approximately, and do NOT present anything as having come from this API. You have ` +
+      `nothing from it.\n` +
+      `2. Tell the user what it would cost and that connecting a wallet or signing in unlocks it.`
+    answer(blockedNotice)
+    /**
+     * `unpayable` on the event, not just zero spend.
+     *
+     * Reported from a screenshot: three `call_api` steps in one turn rendered `free`,
+     * `$0.001150`, `free` — two green ticks reading as a paid API called at no charge. The first
+     * refusal carried `unpayableCall` and was labelled; this repeat path emitted a bare
+     * `spentUsd: 0`, and the UI has no way to tell "spent nothing because it was refused" from
+     * "spent nothing because it was free".
+     */
+    yield {
+      type: 'tool-end',
+      tool: name,
+      // The same text handed to the model, so a log or a debug view shows what it was told. Without
+      // it this event carried no `result` at all and the reason for the step was invisible outside
+      // the model's own context.
+      result: blockedNotice,
+      spentUsd: 0,
+      unpayable: true,
+    }
     return
   }
 
@@ -766,6 +960,7 @@ async function* runOneTool(
       result: res.output,
       spentUsd: res.spentUsd,
       declined: res.declined,
+      unpayable: res.unpayable,
       unpayableCall: res.unpayableCall,
     }
   } catch (err) {

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatWait, tailOf, TAIL_CHARS } from './Transcript'
+import {
+  formatWait,
+  isPlumbing,
+  partitionSteps,
+  tailOf,
+  TAIL_CHARS,
+  type ToolStep,
+} from './Transcript'
 
 /**
  * The one-line live tail of a reasoning stream.
@@ -67,5 +74,103 @@ describe('formatWait', () => {
     expect(formatWait(60)).toBe('1m')
     expect(formatWait(180)).toBe('3m')
     expect(formatWait(90)).toBe('1m 30s')
+  })
+})
+
+/**
+ * Which tool steps get a row of their own.
+ *
+ * Reported as "11+ consecutive search_apis calls in ~60s ... never returned", read as a
+ * runaway loop. The loop was a separate defect in one model; the READING came from here —
+ * every catalogue lookup took a full row, so a handful looked like thrashing.
+ *
+ * The rule is about money, not tidiness: a step that spends or refuses to spend the user's
+ * funds is never collapsed.
+ */
+describe('partitionSteps', () => {
+  const done = (tool: string, extra: Partial<ToolStep> = {}): ToolStep => ({
+    tool,
+    running: false,
+    ...extra,
+  })
+
+  it('collapses finished catalogue lookups into a count', () => {
+    const { shown, plumbingDone } = partitionSteps([
+      done('search_apis'),
+      done('search_apis'),
+      done('search_apis'),
+    ])
+    expect(shown).toHaveLength(0)
+    expect(plumbingDone).toBe(3)
+  })
+
+  it('never treats an outside API call as plumbing, by name alone', () => {
+    // The three tests below pass a call_api carrying a price or a refusal flag, so they are
+    // satisfied by the money guards and say nothing about the NAME. Adding call_api to the
+    // plumbing set left every one of them green. This is the assertion that catches it: a call
+    // to a third party is not plumbing even when nothing was recorded against it.
+    expect(isPlumbing(done('call_api'))).toBe(false)
+  })
+
+  it('keeps a catalogue lookup visible if it was ever refused or declined', () => {
+    // Exercises the refusal guard on a PLUMBING-named tool. Passing a refused call_api instead
+    // proves nothing, because call_api is not in the plumbing set to begin with — deleting the
+    // guard entirely left that test green.
+    expect(isPlumbing(done('search_apis', { unpayable: true }))).toBe(false)
+    expect(isPlumbing(done('list_models', { declined: true }))).toBe(false)
+  })
+
+  it('never collapses a paid call', () => {
+    // This is the product's whole claim — an agent paying an outside API mid-conversation.
+    // Hiding it would hide a charge.
+    const { shown, plumbingDone } = partitionSteps([
+      done('search_apis'),
+      done('call_api', { spentUsd: 0.00115 }),
+    ])
+    expect(shown.map((s) => s.tool)).toEqual(['call_api'])
+    expect(plumbingDone).toBe(1)
+  })
+
+  it('never collapses a refused call', () => {
+    // "not called — needs payment" is the answer to "why did nothing happen".
+    const { shown } = partitionSteps([done('call_api', { unpayable: true })])
+    expect(shown).toHaveLength(1)
+  })
+
+  it('never collapses a declined call', () => {
+    const { shown } = partitionSteps([done('call_api', { declined: true })])
+    expect(shown).toHaveLength(1)
+  })
+
+  it('keeps a RUNNING lookup visible', () => {
+    // While it is in flight the spinner is the only thing telling the user the turn is alive.
+    const { shown, plumbingDone } = partitionSteps([
+      done('search_apis'),
+      { tool: 'search_apis', running: true },
+    ])
+    expect(shown).toHaveLength(1)
+    expect(shown[0].running).toBe(true)
+    expect(plumbingDone).toBe(1)
+  })
+
+  it('keeps an unknown tool visible', () => {
+    // The plumbing list is an allowlist: a tool nobody classified must not vanish.
+    const { shown } = partitionSteps([done('some_future_tool')])
+    expect(shown.map((s) => s.tool)).toEqual(['some_future_tool'])
+  })
+
+  it('treats a catalogue lookup that somehow charged as chargeable', () => {
+    // Defensive: if search_apis ever costs money, the row showing that must not be hidden by
+    // the name-based rule.
+    expect(isPlumbing(done('search_apis', { spentUsd: 0.0001 }))).toBe(false)
+  })
+
+  it('preserves the order of the steps it shows', () => {
+    const { shown } = partitionSteps([
+      done('call_api', { spentUsd: 0.001 }),
+      done('search_apis'),
+      done('call_api', { spentUsd: 0.002 }),
+    ])
+    expect(shown.map((s) => s.spentUsd)).toEqual([0.001, 0.002])
   })
 })

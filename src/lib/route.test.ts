@@ -180,6 +180,56 @@ describe('ModelRouter', () => {
     expect(r.retired).toEqual([FREE_MODEL])
   })
 
+  it('tries a retired model again once its retirement ages out', async () => {
+    /**
+     * Reported from a screenshot: "Every free model the gateway offers is unavailable right now"
+     * rendered at the top of a turn that `qwen3.6-flash` then answered. Both came from this class.
+     *
+     * `dead` never emptied, so once a session had exhausted the list — one bad minute on a free
+     * pool is enough — every later message reported exhaustion WITHOUT making a request, while the
+     * models themselves had recovered. "Unavailable" here means capacity exhausted, which is a
+     * condition of the minute, not a property of the model.
+     */
+    stubFreeModels([{ model: 'nvidia/a', free: true }])
+    const r = new ModelRouter(OPTS)
+    const err = new GatewayError('Free model capacity exhausted', 429)
+
+    expect(await r.markFailed(FREE_MODEL, err)).toBe('try-next')
+    expect(await r.markFailed('nvidia/a', err)).toBe('exhausted')
+    // Everything retired: this is the state that produced the contradictory error.
+    expect(await r.current()).toBeUndefined()
+
+    vi.useFakeTimers()
+    try {
+      // Past RETIRE_MS (5 minutes). The window is that long because a model destined to 429
+      // takes 30-34s to say so, measured live, and an agent turn walks the list per step.
+      vi.setSystemTime(Date.now() + 301_000)
+      // Retirements have aged out, so the pool is offered again rather than declared dead for the
+      // rest of the session.
+      expect(await r.current()).toBe(FREE_MODEL)
+      expect(r.retired).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps a model retired while the retirement is still fresh', async () => {
+    // The counterweight. Expiring immediately would re-try a model that just failed, on the same
+    // message, which is the retry storm the retirement exists to prevent.
+    stubFreeModels([{ model: 'nvidia/a', free: true }])
+    const r = new ModelRouter(OPTS)
+    await r.markFailed(FREE_MODEL, new GatewayError('Free model capacity exhausted', 429))
+
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(Date.now() + 30_000)
+      expect(await r.current()).toBe('nvidia/a')
+      expect(r.retired).toEqual([FREE_MODEL])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('loads the candidate list only once', async () => {
     const fetchMock = vi.fn(
       async () => new Response(JSON.stringify({ free: [{ model: 'nvidia/a', free: true }] }), { status: 200 }),

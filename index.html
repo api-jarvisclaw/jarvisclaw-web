@@ -21,6 +21,45 @@
       content="A browser agent with its own wallet. 4000+ APIs and 80+ models, paid per call over x402."
     />
     <!--
+      Share-card metadata. The page had none at all, so every link to it — in a tweet, a Slack
+      message, a Telegram forward — rendered as a bare URL with no title, no summary and no image.
+      Verified against the live site before writing this: fetching ducat.jarvisclaw.ai returned zero
+      `og:` and zero `twitter:` tags.
+
+      This is a client-rendered SPA, so these values are the SAME for every route. A crawler runs no
+      JavaScript and reads only this file, which means per-page cards would need prerendering — worth
+      doing for the marketplace's API pages eventually, and out of scope here. What matters now is
+      that a shared link stops looking broken.
+
+      og:image is an absolute URL because crawlers do not resolve relative ones, and it is a real
+      1200x630 card rather than the 512px square favicon: a square logo in a 1.91:1 slot is
+      centre-cropped to a sliver of itself. Contrast on it was measured — 15.0:1 for the title and
+      8.3:1 for the body text.
+    -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="JarvisClaw" />
+    <meta property="og:title" content="JarvisClaw — a browser agent with its own wallet" />
+    <meta
+      property="og:description"
+      content="Ask for live data and it calls the API and pays per call over x402. 4000+ callable APIs and 80+ models, no signup to try."
+    />
+    <meta property="og:url" content="https://ducat.jarvisclaw.ai/" />
+    <meta property="og:image" content="https://ducat.jarvisclaw.ai/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="JarvisClaw — a browser agent with its own wallet. 4000+ APIs and 80+ models, paid per call over x402."
+    />
+    <!-- summary_large_image, not summary: the small card crops to a square and wastes the copy. -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="JarvisClaw — a browser agent with its own wallet" />
+    <meta
+      name="twitter:description"
+      content="Ask for live data and it calls the API and pays per call over x402. 4000+ callable APIs and 80+ models, no signup to try."
+    />
+    <meta name="twitter:image" content="https://ducat.jarvisclaw.ai/og.png" />
+    <!--
       Sets the theme class BEFORE first paint.
 
       Doing this only in React would render one frame with the default theme and then swap —

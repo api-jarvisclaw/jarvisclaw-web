@@ -146,6 +146,18 @@ async def main() -> int:
         for i, s in enumerate(tool_steps, 1):
             print(f"  {i}. {s}")
 
+        # `call_api` is never free. Reported from a screenshot: a free session's turn showed
+        # `call_api free`, `call_api $0.001150`, `call_api free` — two green ticks reading as a paid
+        # API called at no charge, when those two were refused for having no payment method. A row
+        # that spent nothing because it was REFUSED must not borrow the word used for a tool that
+        # costs nothing.
+        for s in tool_steps:
+            if "call_api" in s and "free" in s:
+                failures.append(
+                    f"a call_api step is labelled 'free' — call_api is never free, so this row "
+                    f"either hides a refusal or hides a charge: {s!r}"
+                )
+
         notices = [await n.inner_text() for n in await page.query_selector_all(".notice")]
         print(f"\nnotices: {len(notices)}")
         for n in notices:
@@ -182,9 +194,20 @@ async def main() -> int:
 
         # 2. It must refuse the part it cannot know, in so many words. Silence about the
         #    limit is how the invented values got in.
+        #
+        #    The English side was too narrow and failed a correct answer: "I'm unable to retrieve
+        #    the current Beijing time because that requires live data" matched nothing, because the
+        #    pattern wanted "cannot/can't/don't" followed directly by a verb. `unable to`, the
+        #    apostrophe in "doesn't", and "not have" all needed adding. The model answers in
+        #    whichever language it likes, so both sides have to cover the paraphrases.
         refused = re.search(
-            r"(无法|不能|没有|无从)[^。\n]{0,16}(知道|获取|得知|查询|提供|访问|实时|时钟)"
-            r"|(cannot|can't|don't|do not|no)\s+(know|access|retrieve|have)",
+            r"(无法|不能|没有|无从|不知道)[^。\n]{0,16}(知道|获取|得知|查询|提供|访问|实时|时钟|具体)"
+            # The apostrophe class covers U+2019 (’), which is what the model actually emits — my
+            # first version listed two ASCII quotes and a backtick and so missed "don’t" and
+            # "can’t" entirely, failing a correct answer twice in a row.
+            r"|(unable|not\s+able)\s+to\s+\w+"
+            r"|(cannot|can[’ʼ'`]?t|do(es)?n[’ʼ'`]?t|do\s+not|does\s+not|no)\s+"
+            r"(currently\s+)?(know|access|retrieve|have|get|fetch|tell)",
             answer,
             re.I,
         )
@@ -200,10 +223,13 @@ async def main() -> int:
                 "the fix; only the part needing live data is unanswerable"
             )
 
-        # 4. If a paid API was priced, the price must reach the user. Conditional on a tool
-        #    having run: a turn that answers from the prompt alone has nothing to price, and
-        #    demanding a price there fails a correct answer.
-        if notices or any("call_api" in s for s in tool_steps):
+        # 4. If a paid API was actually reached for, the price must reach the user.
+        #
+        #    Gated on a `call_api` STEP, not on "any notice exists". My first version used
+        #    `if notices`, which started failing correct answers the moment model-fallback notices
+        #    appeared ("auto/free is unavailable — trying another free model") — those say nothing
+        #    about pricing. A turn that only searched the catalogue has nothing to price either.
+        if any("call_api" in s for s in tool_steps):
             told = "0.00" in answer or any("per call" in n for n in notices)
             if not told:
                 failures.append(

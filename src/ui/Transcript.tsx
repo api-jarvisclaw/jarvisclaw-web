@@ -9,6 +9,15 @@ export interface ToolStep {
   running: boolean
   spentUsd?: number
   declined?: boolean
+  /**
+   * The call was not made because this session cannot pay. Distinct from `declined`, which is the
+   * user refusing a charge they COULD have made.
+   *
+   * Needed because "spent nothing" is not the same as "was free": without it a refused `call_api`
+   * rendered a green tick and the word "free", which reads as a paid API having been called at no
+   * charge. Reported from a screenshot showing exactly that, twice in one turn.
+   */
+  unpayable?: boolean
 }
 
 export type Turn =
@@ -143,6 +152,51 @@ export function tailOf(reasoning: string): string {
   return `…${flat.slice(flat.length - TAIL_CHARS)}`
 }
 
+/**
+ * The catalogue tools. Looking something up in our own directory is plumbing: it costs
+ * nothing, reaches no third party, and the user did not ask for it.
+ *
+ * `call_api` is deliberately NOT here. It is the one step that spends the user's money on an
+ * outside service, so hiding it would hide a charge, and it is also the thing the product is
+ * for — an agent paying for an API mid-conversation. Money stays visible.
+ */
+const PLUMBING_TOOLS = new Set(['search_apis', 'list_models'])
+
+export function isPlumbing(step: ToolStep): boolean {
+  // A refused call is never plumbing regardless of which tool it was: "not called — needs
+  // payment" is the answer to "why did nothing happen", and it must not be collapsed out of
+  // sight along with the catalogue lookups.
+  if (step.declined || step.unpayable) return false
+  if ((step.spentUsd ?? 0) > 0) return false
+  return PLUMBING_TOOLS.has(step.tool)
+}
+
+/**
+ * Splits a turn's steps into the ones worth a row of their own and the ones that only need a
+ * count.
+ *
+ * Reported as "11+ consecutive search_apis calls in ~60s ... never returned", read as a
+ * runaway loop. The looping was a separate defect (a single model emitting 229k characters of
+ * reasoning, fixed by the runaway cap), but the READING came from the transcript: every
+ * catalogue lookup took a full row, so three lookups looked like thrashing and eleven looked
+ * like a hang. The same turn shown as one "searched the catalogue x3" line reads as progress.
+ *
+ * While a lookup is still running it keeps its own row — a spinner is the only thing telling
+ * the user the turn is alive at that moment.
+ */
+export function partitionSteps(steps: ToolStep[]): { shown: ToolStep[]; plumbingDone: number } {
+  const shown: ToolStep[] = []
+  let plumbingDone = 0
+  for (const step of steps) {
+    if (isPlumbing(step) && !step.running) {
+      plumbingDone += 1
+      continue
+    }
+    shown.push(step)
+  }
+  return { shown, plumbingDone }
+}
+
 function TurnView({ turn }: { turn: Turn }) {
   if (turn.kind === 'user') {
     return (
@@ -166,9 +220,7 @@ function TurnView({ turn }: { turn: Turn }) {
 
   return (
     <div className="turn turn-agent">
-      {turn.steps.map((step, i) => (
-        <StepView key={i} step={step} />
-      ))}
+      <StepsView steps={turn.steps} />
 
       {/* Collapsed by default: on several free models the reasoning is most of the
           output, and showing it expanded reads as the answer.
@@ -185,9 +237,26 @@ function TurnView({ turn }: { turn: Turn }) {
           {turn.reasoning}
         </details>
       )}
+      {/* Labelled "Thinking", and that label is a fix rather than a decoration.
+
+          Reported as "chain-of-thought leaking into the answer", with the example "We can pick
+          five: Crypto Token Price (3709)… Better to ask user which token". That text is real
+          model reasoning, and it was never in the answer channel — measured across five free
+          models on an answer-writing turn, `content` carries no deliberation markers. It is THIS
+          element: the live tail, rendered as bare prose directly under the tool rows with nothing
+          saying what it was. A reader has no way to tell it from the reply, so the honest reading
+          of that report is that the tail was indistinguishable from the answer.
+
+          The tail itself stays — it is what makes a 20-90s wait legible, and removing it would
+          restore the frozen "Thinking" it was added to fix. What changes is that it now says what
+          it is, in a form the answer never takes. */}
       {turn.reasoning.trim() !== '' && turn.text.trim() === '' && (
-        <div className="reasoning-tail" aria-hidden="true">
-          {tailOf(turn.reasoning)}
+        <div className="reasoning-tail">
+          {/* aria-hidden on the text, not the label: a screen reader announcing a partial
+              half-sentence that changes several times a second is noise, while the label tells
+              someone using one that the turn is working. */}
+          <span className="reasoning-tail-label">Thinking</span>
+          <span aria-hidden="true">{tailOf(turn.reasoning)}</span>
         </div>
       )}
 
@@ -383,6 +452,40 @@ export function formatWait(seconds: number): string {
   return `${m}m ${String(s).padStart(2, '0')}s`
 }
 
+/**
+ * The tool rows for one turn: every paid or refused step in full, the finished catalogue
+ * lookups as a single summary line.
+ *
+ * The summary is a `<details>` rather than a plain line so nothing is actually withheld —
+ * "what did it search for" is a fair question and the answer is one click away.
+ */
+function StepsView({ steps }: { steps: ToolStep[] }) {
+  const { shown, plumbingDone } = partitionSteps(steps)
+  const plumbing = steps.filter((s) => isPlumbing(s) && !s.running)
+  return (
+    <>
+      {shown.map((step, i) => (
+        <StepView key={i} step={step} />
+      ))}
+      {plumbingDone > 0 && (
+        <details className="tool-plumbing">
+          <summary>
+            <CheckIcon className="tool-glyph" size={13} aria-hidden="true" />
+            <span>
+              {plumbingDone === 1
+                ? 'Searched the API catalogue'
+                : `Searched the API catalogue ${plumbingDone}x`}
+            </span>
+          </summary>
+          {plumbing.map((step, i) => (
+            <StepView key={i} step={step} />
+          ))}
+        </details>
+      )}
+    </>
+  )
+}
+
 function StepView({ step }: { step: ToolStep }) {
   return (
     <div className={step.running ? 'tool-row is-running' : 'tool-row'}>
@@ -396,6 +499,18 @@ function StepView({ step }: { step: ToolStep }) {
         <span className="declined">declined</span>
       ) : step.running ? (
         <span>running</span>
+      ) : /**
+         * Checked BEFORE the price, because an unpayable call spent nothing and so used to fall
+         * through to "free".
+         *
+         * Reported from a screenshot: a free session's turn showed `call_api free`,
+         * `call_api $0.001150`, `call_api free` — two green ticks claiming a paid API had been
+         * called at no charge, when in fact those two were refused for having no payment method.
+         * "Spent nothing" and "was free" are different facts and only `search_apis` and
+         * `list_models` are the second one.
+         */
+      step.unpayable ? (
+        <span className="declined">not called — needs payment</span>
       ) : (step.spentUsd ?? 0) > 0 ? (
         <span className="price">${step.spentUsd!.toFixed(6)}</span>
       ) : (

@@ -389,15 +389,33 @@ export async function streamChat(
 
   try {
     for (;;) {
+      if (opts.signal?.aborted) break
       const { done, value } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
       const frames = buffer.split(/\r?\n\r?\n/)
       buffer = frames.pop() ?? ''
-      for (const frame of frames) handleFrame(frame)
+      for (const frame of frames) {
+        /**
+         * Checked per FRAME, not only per chunk, and that is what makes an abort actually stop
+         * the work.
+         *
+         * A caller can abort from inside `onDelta` — the runaway-reasoning guard in the agent
+         * loop does exactly that. Aborting the fetch makes the next `reader.read()` reject, so
+         * a stream that arrives in many small chunks stops promptly. But everything already
+         * decoded is dispatched by this inner loop with no exit, so a single large chunk is
+         * processed to its end no matter what the caller decided halfway through.
+         *
+         * That is not a hypothetical: the runaway response measured on the live console was
+         * 229,295 characters, and how much of it lands in one chunk is up to the network. This
+         * check makes the guard depend on the abort rather than on chunk sizes.
+         */
+        if (opts.signal?.aborted) break
+        handleFrame(frame)
+      }
     }
     // A stream that ends without a trailing blank line leaves its last frame here.
-    if (buffer.trim() !== '') handleFrame(buffer)
+    if (!opts.signal?.aborted && buffer.trim() !== '') handleFrame(buffer)
   } finally {
     reader.releaseLock()
   }

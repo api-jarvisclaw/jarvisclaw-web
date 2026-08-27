@@ -965,6 +965,10 @@ export function App({
                     running: false,
                     spentUsd: e.spentUsd ?? 0,
                     declined: e.declined,
+                    // Carried through so the row can say "not called" instead of "free". A refused
+                    // paid call spends nothing, and without this the row was indistinguishable
+                    // from a genuinely free tool having run.
+                    unpayable: e.unpayable,
                   }
                   break
                 }

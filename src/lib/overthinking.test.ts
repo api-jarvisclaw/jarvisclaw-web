@@ -553,6 +553,98 @@ describe('a paid call with no wallet reports the price', () => {
   })
 })
 
+describe('a repeated unpayable call still forbids inventing the value', () => {
+  it('repeats the ban and marks the step unpayable', async () => {
+    /**
+     * The worst of the three bugs in one screenshot, and it got through everything already built.
+     *
+     * A free session's turn showed three `call_api` steps and answered:
+     *   "北京时间：**晚上 10:32**（UTC+8）这是刚通过 Timezone Lookup API 查到的实时数据。"
+     * A time it invented, presented as retrieved, on a turn where every call was refused.
+     *
+     * Only the FIRST refusal carried the do-not-state-it instruction. The repeat path said merely
+     * "cannot be paid for, do not call it again" — and the model writes its answer against its most
+     * recent tool result, so by the third refusal the instruction that mattered had scrolled out
+     * from under it. Every refusal now carries the ban.
+     *
+     * The step is also flagged `unpayable`, because the same screenshot showed two of those rows
+     * labelled "free" with a green tick: a paid API appearing to have run at no charge, when in
+     * fact it never ran.
+     */
+    const call = (id: string) => [
+      frame({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                { index: 0, id, function: { name: 'call_api', arguments: JSON.stringify({ id: 447 }) } },
+              ],
+            },
+          },
+        ],
+      }),
+    ]
+    // Two attempts with DIFFERENT arguments, so the dedup cache does not answer the second — this
+    // is the `blocked` path, which is the one that was missing the ban.
+    const second = [
+      frame({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'c2',
+                  function: { name: 'call_api', arguments: JSON.stringify({ id: 447, payload: { city: 'Beijing' } }) },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    ]
+    /**
+     * One stub serving BOTH the catalogue and the model turns. `stubCatalogue` in the block above
+     * replaces `fetch` wholesale, which would answer the SSE requests with a catalogue row and make
+     * this test measure nothing.
+     */
+    const turns = [call('c1'), second, [frame({ choices: [{ delta: { content: 'done' } }] })]]
+    let i = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (typeof url === 'string' && url.includes('/api/marketplace/api')) {
+          return new Response(
+            JSON.stringify({
+              data: { resource_id: 447, name: 'Timezone Lookup', display_price: 0.00575 },
+            }),
+            { status: 200 },
+          )
+        }
+        return sse(turns[Math.min(i++, turns.length - 1)])
+      }),
+    )
+
+    const events = await collect(runAgent([], '北京时间', anon))
+    const ends = events.filter((e) => e.type === 'tool-end' && e.tool === 'call_api')
+    expect(ends.length).toBeGreaterThanOrEqual(2)
+
+    // Every refusal is flagged, not just the first — that is what lets the row say "not called"
+    // instead of "free".
+    for (const e of ends) {
+      expect(e.unpayable, `a refused call was not flagged: ${JSON.stringify(e).slice(0, 120)}`).toBe(
+        true,
+      )
+      expect(e.spentUsd ?? 0).toBe(0)
+    }
+
+    // And the SECOND refusal — the one the model answers against — carries the ban.
+    const repeat = ends[ends.length - 1]
+    expect(String(repeat.result)).toMatch(/DO NOT state, guess or estimate/)
+    expect(String(repeat.result)).toMatch(/do NOT present anything as having come from this API/)
+  })
+})
+
 describe('an identical tool call is not run twice', () => {
   it('serves a repeated search from the first result', async () => {
     const { searches } = stubTurns([

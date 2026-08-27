@@ -72,9 +72,44 @@ export class ModelRouter {
     this.loaded = true
   }
 
+  /**
+   * How long a retired model stays retired.
+   *
+   * "Unavailable" on this pool means capacity exhausted, which is a condition of the minute rather
+   * than a property of the model — the same name that 429s now serves a request a short while
+   * later, measured repeatedly across the free pool.
+   *
+   * Reported from a screenshot: "Every free model the gateway offers is unavailable right now"
+   * shown at the top of a turn that `qwen3.6-flash` then answered. Both statements were produced
+   * by this class: the list had been exhausted earlier in the session, `dead` never emptied, so a
+   * later message reported exhaustion without trying anything — and the retry that followed found
+   * a working model immediately. A permanent set turns one bad minute into a dead session.
+   *
+   * Five minutes, not one, and the number comes from what a retry actually costs. Measured against
+   * the live pool while it was degraded: a model that is going to 429 takes 30-34 SECONDS to say
+   * so, and an agent turn walks the list on every step. Expiring after a minute means a long
+   * conversation keeps re-paying half a minute to rediscover the same refusal. Long enough to stop
+   * re-probing a model this session just watched fail; short enough that a recovered pool comes
+   * back well inside one sitting.
+   */
+  private static readonly RETIRE_MS = 300_000
+
+  private readonly retiredAt = new Map<string, number>()
+
+  /** Drops retirements that have aged out, so a recovered model is tried again. */
+  private expireRetirements(now = Date.now()): void {
+    for (const [model, at] of this.retiredAt) {
+      if (now - at >= ModelRouter.RETIRE_MS) {
+        this.retiredAt.delete(model)
+        this.dead.delete(model)
+      }
+    }
+  }
+
   /** The model to try now, or undefined when everything known has failed. */
   async current(): Promise<string | undefined> {
     await this.ensureLoaded()
+    this.expireRetirements()
     return this.candidates.find((m) => !this.dead.has(m))
   }
 
@@ -94,7 +129,30 @@ export class ModelRouter {
   async markFailed(model: string, err: unknown): Promise<FailureOutcome> {
     if (!isModelUnavailable(err)) return 'not-a-model-problem'
     await this.ensureLoaded()
+    this.expireRetirements()
     this.dead.add(model)
+    this.retiredAt.set(model, Date.now())
+    return this.candidates.some((m) => !this.dead.has(m)) ? 'try-next' : 'exhausted'
+  }
+
+  /**
+   * Retires a model for a reason the gateway never reported.
+   *
+   * `markFailed` decides from the error message whether the model is at fault, which is right for
+   * everything the gateway says — and useless for a failure the gateway was never told about. The
+   * runaway-reasoning guard aborts the stream from the client after the model emits tens of
+   * thousands of characters without answering; there is no gateway error to inspect, and the model
+   * has still proven it cannot serve this session.
+   *
+   * Shares the same expiry as every other retirement (see RETIRE_MS): a model that ran away on one
+   * question is not permanently broken, and the pool is small enough that a permanent exclusion
+   * would end the session early.
+   */
+  async retire(model: string): Promise<FailureOutcome> {
+    await this.ensureLoaded()
+    this.expireRetirements()
+    this.dead.add(model)
+    this.retiredAt.set(model, Date.now())
     return this.candidates.some((m) => !this.dead.has(m)) ? 'try-next' : 'exhausted'
   }
 

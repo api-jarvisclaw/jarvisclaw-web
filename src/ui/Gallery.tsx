@@ -15,6 +15,7 @@ import {
   retentionOf,
   type GalleryItem,
 } from '../lib/gallery'
+import { LIBRARY_COUNT } from '../lib/library-count'
 import { SEEDANCE_COUNT } from '../lib/seedance-count'
 import { SHOWCASE, showcaseMode, showcaseUrl, type ShowcaseItem } from '../lib/showcase'
 
@@ -35,7 +36,16 @@ const SeedancePane = lazy(() =>
   import('./SeedancePane').then((m) => ({ default: m.SeedancePane })),
 )
 
-export type GalleryTab = 'showcase' | 'seedance' | 'mine'
+/**
+ * Lazy for the same reason as the pane above: `library.ts` is 152 KB of prompt text, and most
+ * visitors never open the gallery. `LIBRARY_COUNT` comes from its own module so this tab can show
+ * a number without the import going static again and pulling the payload into the main bundle.
+ */
+const LibraryPane = lazy(() =>
+  import('./LibraryPane').then((m) => ({ default: m.LibraryPane })),
+)
+
+export type GalleryTab = 'showcase' | 'seedance' | 'library' | 'mine'
 
 /**
  * Three galleries behind three tabs, because they are three different things.
@@ -95,6 +105,15 @@ export function Gallery({
         </button>
         <button
           role="tab"
+          aria-selected={tab === 'library'}
+          className={tab === 'library' ? 'gallery-tab gallery-tab-active' : 'gallery-tab'}
+          onClick={() => onTab('library')}
+        >
+          Prompt library
+          <span className="gallery-tab-count">{LIBRARY_COUNT}</span>
+        </button>
+        <button
+          role="tab"
           aria-selected={tab === 'mine'}
           className={tab === 'mine' ? 'gallery-tab gallery-tab-active' : 'gallery-tab'}
           onClick={() => onTab('mine')}
@@ -114,6 +133,10 @@ export function Gallery({
         // hang. Saying what is loading is the difference between waiting and giving up.
         <Suspense fallback={<p className="gallery-sub">Loading {SEEDANCE_COUNT} video prompts…</p>}>
           <SeedancePane onUsePrompt={onUsePrompt} />
+        </Suspense>
+      ) : tab === 'library' ? (
+        <Suspense fallback={<p className="gallery-sub">Loading {LIBRARY_COUNT} prompts…</p>}>
+          <LibraryPane onUsePrompt={onUsePrompt} />
         </Suspense>
       ) : (
         <MinePane items={items} onRemove={onRemove} />

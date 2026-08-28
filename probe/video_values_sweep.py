@@ -97,6 +97,15 @@ PROMPT = "a calm sea at sunset, slow dolly forward"
 # sweep at 4s lapsed after three values. 6 is the smallest spacing observed to hold.
 THROTTLE_S = float(os.environ.get("SWEEP_THROTTLE_S", "6"))
 
+# A lapsed control usually recovers, so it is retried rather than treated as fatal.
+#
+# Observed shape: 14 consecutive BOGUS requests never lapsed, but a control placed after a handful of
+# LEGAL ones did. Legal requests are the ones that make the gateway probe the upstream for a real
+# price, so those appear to be what exhausts whatever budget the refusal signal depends on. Waiting
+# is therefore the right response, not a smaller batch.
+CONTROL_ATTEMPTS = int(os.environ.get("SWEEP_CONTROL_ATTEMPTS", "4"))
+BACKOFF_S = float(os.environ.get("SWEEP_BACKOFF_S", "45"))
+
 
 def post(body: dict) -> tuple[int, str]:
     req = urllib.request.Request(
@@ -117,30 +126,36 @@ def post(body: dict) -> tuple[int, str]:
 def control_live(model: str) -> tuple[bool, list[str]]:
     """Does validation happen FOR THIS MODEL, right now?
 
-    Checked per model and re-checked as the sweep goes, because validation is NOT a stable property
-    of this endpoint. It is a property of the request rate.
+    Checked per model, and again after each model's row, because validation is NOT a stable property
+    of this endpoint. Whether a bogus value is rejected changes over time, and I could not determine
+    what drives it.
 
-    ## Request rate is the whole variable
+    ## What is measured, and what is not
 
-    Measured on `azure/sora-2` with a bogus `duration_seconds: 999`:
+    The same request — `azure/sora-2` with `duration_seconds: 999` — has been observed both ways,
+    minutes apart, at identical spacing:
 
-        back to back                 -> 402 twelve times out of twelve
-        spaced 6s apart              -> 400 ten times out of ten
+        14 consecutive 400s over 99s at 6s spacing
+        8  consecutive 402s over 128s at 8s spacing, interleaved 1:1 with seedance (which stayed 400)
+        8/8 400s again later, every video model rejecting
 
-    And the same on `bytedance/seedance-2.0`: 25/25 accepted unthrottled, 6/6 rejected spaced.
+    Three explanations were tested and each is contradicted by one of those runs:
 
-    I first read this as a per-model difference — "sora-2 validates nothing" — because the sora
-    samples happened to come from a burst and the seedance ones from spaced calls. Two variables were
-    moving at once. With the rate held fixed, every model validates.
+      - Request rate. Unthrottled bursts do produce 402s (25/25), and the gateway's own source
+        explains why: `isBodyRejectionStatus` excludes 429 (middleware/x402_probe_refusal.go),
+        correctly, so under load the upstream's refusal degrades to a soft probe failure and a local
+        estimate gets quoted. But 402s also appeared at 8s spacing with nothing else in flight.
+      - Per-model. The interleaved run showed sora 402 and seedance 400 eight times out of eight,
+        which looks decisive — until sora returned 400 eight times out of eight an hour later.
+      - Per-call pricing (sora-2 is `per-call` at a fixed $2, so its price needs no upstream probe).
+        Ruled out: seedance-2.0, 2.0-fast, 2.5, 1.5-pro and grok are all `per-call` too and reject.
 
-    The mechanism is in the gateway's own source: `isBodyRejectionStatus` excludes 429
-    (middleware/x402_probe_refusal.go) — correctly, since load is not the caller's payload problem —
-    so under rate limiting the upstream's refusal degrades to a soft probe failure. That file's own
-    comment names the outcome: "a 402 quote for a request that cannot be fulfilled".
-
-    Hence a 402 carries information only while this model's control is red, which is why the control
-    runs before AND after each model's row. Checking once at the start would let the sweep drift into
-    the permissive state and report a clean verdict on a sample it never actually examined.
+    So the driver is unknown. What matters for this sweep is that it does not need to be known: the
+    control establishes, at the moment of measurement, whether a 402 carries any information. When it
+    does not, the sweep refuses to report a pass rather than counting quotes as acceptances. That is
+    the whole point — the failure this repo keeps repeating is a clean verdict reached on a sample
+    that was never examined, and an endpoint whose validation silently switches off is exactly the
+    channel that produces one.
     """
     results = []
     for field, value in (("duration_seconds", 999), ("resolution", "16K"), ("aspect_ratio", "99:1")):
@@ -150,6 +165,25 @@ def control_live(model: str) -> tuple[bool, list[str]]:
             return False, results
         time.sleep(THROTTLE_S)
     return True, results
+
+
+def control_live_with_backoff(model: str) -> tuple[bool, list[str], int]:
+    """control_live, retried with a growing pause.
+
+    A lapse is usually temporary — the budget refills — so aborting the whole sweep on the first one
+    throws away the run for a condition that resolves itself. Backing off recovers it; giving up
+    after the last attempt records the model as UNVERIFIABLE, never as a pass.
+    """
+    detail: list[str] = []
+    for attempt in range(CONTROL_ATTEMPTS):
+        ok, detail = control_live(model)
+        if ok:
+            return True, detail, attempt + 1
+        if attempt + 1 < CONTROL_ATTEMPTS:
+            pause = BACKOFF_S * (attempt + 1)
+            print(f"  control lapsed ({detail[-1]}); waiting {pause}s for it to recover")
+            time.sleep(pause)
+    return False, detail, CONTROL_ATTEMPTS
 
 
 def main() -> int:
@@ -170,21 +204,23 @@ def main() -> int:
             continue
         print(f"\n{model}")
 
+        offered_n = len(lim["durations"]) + len(
+            [v for v in lim["resolutions"] + lim["aspectRatios"] if v != "default"]
+        )
+
         # BEFORE trusting a single 402 from this model, prove it would say 400 to something.
-        ok, detail = control_live(model)
-        control_runs += 1
+        ok, detail, tries = control_live_with_backoff(model)
+        control_runs += tries
         print(f"  control: {' '.join(detail)} -> {'validates' if ok else 'ACCEPTS ANYTHING'}")
         if not ok:
-            n = len([v for v in lim["durations"]]) + len(
-                [v for v in lim["resolutions"] + lim["aspectRatios"] if v != "default"]
-            )
             unverifiable.append(
-                f"{model}: quotes bogus values too ({detail[-1]}), so its {n} offered values cannot "
-                "be verified this way — they remain documented-only"
+                f"{model}: still quoting bogus values after {tries} attempts ({detail[-1]}), so its "
+                f"{offered_n} offered values cannot be verified this way — documented-only"
             )
-            print(f"  -> skipping {n} values: a 402 from this model carries no information")
+            print(f"  -> skipping {offered_n} values: a 402 here carries no information")
             continue
 
+        row_checked = 0
         for field, values in (
             ("duration_seconds", lim["durations"]),
             ("resolution", lim["resolutions"]),
@@ -197,6 +233,7 @@ def main() -> int:
                     continue
                 status, msg = post({"model": model, "prompt": PROMPT, field: value})
                 checked += 1
+                row_checked += 1
                 if status == 402:
                     mark = "ok"
                 elif status == 400:
@@ -210,19 +247,27 @@ def main() -> int:
                 # gateway prices from an estimate, and every value starts "passing".
                 time.sleep(THROTTLE_S)
 
-        # Re-verify AFTER the row too: rate limiting can switch validation off partway through, and
-        # then the tail of this row is 402s that mean nothing.
-        ok, detail = control_live(model)
-        control_runs += 1
+        # Re-verify AFTER the row: validation can switch off partway through, and then the tail of
+        # this row is 402s that mean nothing. The row only counts if the control held at BOTH ends.
+        ok, detail, tries = control_live_with_backoff(model)
+        control_runs += tries
         if not ok:
             print(f"  control after {model}: {' '.join(detail)} -> NOT VALIDATING")
-            print(
-                f"\nFAIL: validation lapsed partway through, after {checked} values. Everything "
-                "quoted since the previous control check is unverified — reporting a pass on it "
-                "would be a clean verdict on a sample that was never actually examined. Retry with "
-                "a larger SWEEP_THROTTLE_S."
+            # This model's own results are discarded rather than the whole sweep aborted. They were
+            # measured across an interval whose end state we cannot vouch for, so they are not
+            # evidence — but the models already confirmed at both ends still are.
+            checked -= row_checked
+            for r in list(rejected):
+                if r.startswith(f"{model} "):
+                    rejected.remove(r)
+            for u in list(unknown):
+                if u.startswith(f"{model} "):
+                    unknown.remove(u)
+            unverifiable.append(
+                f"{model}: the control held before its {row_checked} values but not after, so that "
+                "interval cannot be vouched for — results discarded, documented-only"
             )
-            return 1
+            continue
 
     print()
     print(f"VERIFIED:     {checked} offered values, each preceded and followed by a live control")

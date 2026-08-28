@@ -304,11 +304,32 @@ export const VIDEO_LIMITS: Record<
  *
  * ## Two families, mutually exclusive
  *
- *   - ElevenLabs models take aliases (`sarah`, `george`) or a raw `voice_id`. Their roster comes from
- *     GET /api/v1/audio/voices on the upstream — 22 voices, of which only 8 have an alias; the rest
- *     are reachable by id only. Our gateway does not proxy that endpoint (404), so the list is
- *     transcribed here rather than fetched.
+ *   - ElevenLabs models take aliases (`sarah`, `george`) or a raw `voice_id`. All 22 are listed here,
+ *     of which only 8 have an alias; the rest are reachable by id only.
  *   - OpenAI models take their own 37 names (`alloy`, `coral`, …), measured from the upstream's 400.
+ *
+ * ## The roster IS served, and this list was 8 short
+ *
+ * I claimed our gateway does not proxy the voices endpoint, having probed `/v1/audio/voices` (404)
+ * and concluded the capability was absent. It is served, at
+ *
+ *     GET /v1/marketplace/audio/voices     -> 200, 22 voices with voice_id/name/labels/preview_url
+ *
+ * confirmed by paying $0.001 for it. A 402 there proves nothing on its own — the marketplace `audio`
+ * service registers a wildcard `GET / -> $0.001`, so a path that was never registered quotes exactly
+ * the same. The control settles it: the bogus sibling answers 404 with an HTML error page while
+ * `/voices` returns the roster.
+ *
+ * Fourteen of the 22 were listed here; the other 8 (Liam, Matilda, Will, Bella, Chris, Adam, Bill,
+ * and one clone) were unreachable from this UI. None of the 14 was invalid, so nothing was
+ * mispriced — the cost was reach, not money.
+ *
+ * ## Why it is still a table rather than a fetch
+ *
+ * Because reading it costs $0.001 per call and an anonymous visitor has no wallet. Fetching it to
+ * fill a dropdown would charge for opening a menu and would leave the picker empty for exactly the
+ * users who have not connected one. `probe/marketplace_voices_paid_probe.py` pays for it once and
+ * fails when this table and the live roster disagree, which is the cheap half of the same guarantee.
  *
  * Cross-family names are not merely invalid, they are the expensive case above.
  *
@@ -321,21 +342,33 @@ export const VIDEO_LIMITS: Record<
 export const SPEECH_VOICES: Record<string, readonly { id: string; label: string }[]> = {
   // ElevenLabs: the 8 aliased voices, then the id-only ones. Labels carry the upstream's own
   // one-line character description, which is the only way to choose without listening to all 22.
+  // All 22, from the gateway's own roster at GET /v1/marketplace/audio/voices (paid $0.001 to
+  // read). Aliased ones first as the upstream orders them, then the id-only ones. Labels carry
+  // the upstream's own character description, which is the only way to choose without
+  // listening to all 22.
   elevenlabs: [
-    { id: 'sarah', label: 'Sarah — mature, reassuring' },
-    { id: 'george', label: 'George — warm storyteller' },
-    { id: 'roger', label: 'Roger — laid-back, resonant' },
-    { id: 'laura', label: 'Laura — quirky, enthusiast' },
-    { id: 'charlie', label: 'Charlie — deep, energetic' },
+    { id: 'roger', label: 'Roger — laid-back, casual, resonant' },
+    { id: 'sarah', label: 'Sarah — mature, reassuring, confident' },
+    { id: 'laura', label: 'Laura — enthusiast, quirky attitude' },
+    { id: 'charlie', label: 'Charlie — deep, confident, energetic' },
+    { id: 'george', label: 'George — warm, captivating storyteller' },
     { id: 'callum', label: 'Callum — husky trickster' },
-    { id: 'river', label: 'River — relaxed, neutral' },
-    { id: 'harry', label: 'Harry — fierce' },
-    { id: 'nPczCjzI2devNBz1zQrb', label: 'Brian — deep, comforting' },
-    { id: 'onwK4e9ZLuTAKqWW03F9', label: 'Daniel — steady broadcaster' },
-    { id: 'Xb7hH8MSUJpSbSDYk0k2', label: 'Alice — clear educator' },
-    { id: 'cgSgspJ2msm6clMCkdW9', label: 'Jessica — playful, warm' },
-    { id: 'pFZP5JQG7iQjIQuC4Bku', label: 'Lily — velvety' },
+    { id: 'river', label: 'River — relaxed, neutral, informative' },
+    { id: 'harry', label: 'Harry — fierce warrior' },
+    { id: 'TX3LPaxmHKxFdv7VOQHJ', label: 'Liam — energetic, social media creator' },
+    { id: 'Xb7hH8MSUJpSbSDYk0k2', label: 'Alice — clear, engaging educator' },
+    { id: 'XrExE9yKIg1WjnnlVkGX', label: 'Matilda — knowledgable, professional' },
+    { id: 'bIHbv24MWmeRgasZH58o', label: 'Will — relaxed optimist' },
+    { id: 'cgSgspJ2msm6clMCkdW9', label: 'Jessica — playful, bright, warm' },
     { id: 'cjVigY5qzO86Huf0OWal', label: 'Eric — smooth, trustworthy' },
+    { id: 'hpp4J3VqNfWAUOO0d1Us', label: 'Bella — professional, bright, warm' },
+    { id: 'iP95p4xoKVk53GoZ742B', label: 'Chris — charming, down-to-earth' },
+    { id: 'nPczCjzI2devNBz1zQrb', label: 'Brian — deep, resonant and comforting' },
+    { id: 'onwK4e9ZLuTAKqWW03F9', label: 'Daniel — steady broadcaster' },
+    { id: 'pFZP5JQG7iQjIQuC4Bku', label: 'Lily — velvety actress' },
+    { id: 'pNInz6obpgDQGcFmaJgB', label: 'Adam — dominant, firm' },
+    { id: 'pqHfZKP75CvOlQylNhV4', label: 'Bill — wise, mature, balanced' },
+    { id: 'hILdTfuUq4LRBMrxHERr', label: 'Lamin Clone' },
   ],
   // OpenAI: measured from the upstream's own 400. The full 37 include dated snapshots that duplicate
   // an undated name; these are the distinct ones.

@@ -99,12 +99,25 @@ THROTTLE_S = float(os.environ.get("SWEEP_THROTTLE_S", "6"))
 
 # A lapsed control usually recovers, so it is retried rather than treated as fatal.
 #
-# Observed shape: 14 consecutive BOGUS requests never lapsed, but a control placed after a handful of
-# LEGAL ones did. Legal requests are the ones that make the gateway probe the upstream for a real
-# price, so those appear to be what exhausts whatever budget the refusal signal depends on. Waiting
-# is therefore the right response, not a smaller batch.
+# Measured mechanism: BOGUS requests are free — 14 consecutively never lapsed the control. LEGAL
+# requests are what cost, because those are the ones that make the gateway probe the upstream for a
+# real price. The allowance is small and per-model, and on azure/sora-2 it is ONE:
+#
+#     4s:  control_before=400  value=402  control_after=402   <- a single legal request did it
+#     8s:  control_before=402  ...                             <- and it never came back within the row
+#
+# Recovery was timed at 250s. I first assumed the earlier models in the table had drained a shared
+# budget, but sweeping sora alone — full allowance, control 3/3 before the row — lapsed identically,
+# which rules that out.
 CONTROL_ATTEMPTS = int(os.environ.get("SWEEP_CONTROL_ATTEMPTS", "4"))
 BACKOFF_S = float(os.environ.get("SWEEP_BACKOFF_S", "45"))
+
+# Models whose allowance is one legal request, so the batch loop cannot verify them: waiting for the
+# control between EVERY value is the only cadence that works. Kept as a list rather than applied to
+# everything because it costs ~5 minutes per value, and the other seven models sweep fine in a row.
+PER_VALUE_COOLDOWN = {m for m in os.environ.get("SWEEP_SLOW_MODELS", "azure/sora-2").split(",") if m}
+# Ceiling on how long to wait for the control to come back. 250s measured; 420 leaves headroom.
+RECOVER_LIMIT_S = float(os.environ.get("SWEEP_RECOVER_LIMIT_S", "420"))
 
 
 def post(body: dict) -> tuple[int, str]:
@@ -186,8 +199,86 @@ def control_live_with_backoff(model: str) -> tuple[bool, list[str], int]:
     return False, detail, CONTROL_ATTEMPTS
 
 
+def wait_for_control(model: str) -> bool:
+    """Block until a bogus value is rejected again, or give up.
+
+    Only the first of the three bogus fields is used here: this runs before every single value, and
+    each check is itself a request, so a three-field control would triple the wall time for no extra
+    information — the question is binary, "is the refusal signal alive".
+    """
+    started = time.time()
+    while time.time() - started < RECOVER_LIMIT_S:
+        status, _ = post({"model": model, "prompt": PROMPT, "duration_seconds": 999})
+        if status == 400:
+            return True
+        time.sleep(25)
+    return False
+
+
+def sweep_one_at_a_time(model: str, lim: dict) -> tuple[int, list[str]]:
+    """Verify a model whose allowance is one legal request per cooldown.
+
+    The batch loop cannot do these: the first legal value spends the allowance, so every value after
+    it is quoted by a gateway that would quote anything. Here each value gets its own freshly
+    confirmed control, which is what makes its 402 mean "accepted".
+
+    On sora-2 this is worth the ~5 minutes per value because the result is unusually strong. The row
+    ends with `duration_seconds: 5` — not a nonsense number but the length EVERY OTHER video model
+    accepts — and sora rejects it while taking 4, 8 and 12. That is positive evidence for a discrete
+    set, rather than the absence of evidence against one.
+    """
+    print("  (one value per cooldown: the allowance here is a single legal request)")
+    checked = 0
+    rejected: list[str] = []
+
+    # The NEIGHBOUR control, and it is the strongest single measurement in this file.
+    #
+    # `duration_seconds: 5` is not a nonsense value like 999 — it is the length every OTHER video
+    # model accepts, and the number this code used to hard-code as its fallback. If sora rejects 5
+    # while taking 4, 8 and 12, the discrete set is real; if it accepts 5, then our table is wrong
+    # and the three "ok"s below say nothing about a set at all. So it is asserted, not just logged.
+    if model == "azure/sora-2" and 5 not in lim["durations"]:
+        if wait_for_control(model):
+            status, _ = post({"model": model, "prompt": PROMPT, "duration_seconds": 5})
+            verdict = "rejected — the discrete set is real" if status == 400 else f"ACCEPTED ({status})"
+            print(f"  neighbour control  5s        -> {status} {verdict}")
+            if status != 400:
+                rejected.append(
+                    f"{model} duration_seconds=5 -> {status}: accepted a duration our table says it "
+                    "rejects, so 4/8/12 is not a discrete set and VIDEO_LIMITS is wrong here"
+                )
+        else:
+            print("  neighbour control  5s        -> SKIPPED, control never recovered")
+
+    for field, values in (
+        ("duration_seconds", lim["durations"]),
+        ("resolution", lim["resolutions"]),
+        ("aspect_ratio", lim["aspectRatios"]),
+    ):
+        for value in values:
+            if value == "default":
+                continue
+            if not wait_for_control(model):
+                print(f"  {field:17} {str(value):9} -> SKIPPED, control never recovered")
+                continue
+            status, msg = post({"model": model, "prompt": PROMPT, field: value})
+            checked += 1
+            if status == 402:
+                mark = "ok"
+            elif status == 400:
+                mark = "REJECTED"
+                rejected.append(f"{model} {field}={value!r} -> 400 {msg[:70]}")
+            else:
+                mark = f"?{status}"
+            print(f"  {field:17} {str(value):9} -> {status} {mark}  (control was 400 immediately before)")
+    return checked, rejected
+
+
 def main() -> int:
     checked = 0
+    # Split so the verdict can report each path's own strength rather than one blurred number.
+    batch_checked = 0
+    slow_checked = 0
     rejected: list[str] = []
     unknown: list[str] = []
     control_runs = 0
@@ -195,8 +286,20 @@ def main() -> int:
     unverifiable: list[str] = []
 
     # ---- every offered value ----
+    #
+    # ONLY is for finishing a model the full run could not vouch for. It matters because the budget
+    # behind the refusal signal is consumed by LEGAL requests (measured: 14 consecutive bogus
+    # requests never lapsed the control, but one placed after a handful of real ones did), and the
+    # models are swept in table order — so whoever is first absorbs it. azure/sora-2 is first, and
+    # it was the one model the full sweep had to discard.
+    only = [m for m in (os.environ.get("SWEEP_ONLY", "").split(",")) if m]
+    if only:
+        print(f"\n== restricted to: {', '.join(only)} ==")
+
     print("\n== every value the UI offers ==")
     for model, lim in LIMITS.items():
+        if only and model not in only:
+            continue
         if model == "auto/video":
             # A virtual: the gateway resolves it per request, so a rejection here would not name a
             # model and the intersection is already covered by its members.
@@ -220,6 +323,14 @@ def main() -> int:
             print(f"  -> skipping {offered_n} values: a 402 here carries no information")
             continue
 
+        if model in PER_VALUE_COOLDOWN:
+            n, bad = sweep_one_at_a_time(model, lim)
+            checked += n
+            slow_checked += n
+            rejected.extend(bad)
+            control_runs += n
+            continue
+
         row_checked = 0
         for field, values in (
             ("duration_seconds", lim["durations"]),
@@ -233,6 +344,7 @@ def main() -> int:
                     continue
                 status, msg = post({"model": model, "prompt": PROMPT, field: value})
                 checked += 1
+                batch_checked += 1
                 row_checked += 1
                 if status == 402:
                     mark = "ok"
@@ -257,6 +369,7 @@ def main() -> int:
             # measured across an interval whose end state we cannot vouch for, so they are not
             # evidence — but the models already confirmed at both ends still are.
             checked -= row_checked
+            batch_checked -= row_checked
             for r in list(rejected):
                 if r.startswith(f"{model} "):
                     rejected.remove(r)
@@ -270,8 +383,17 @@ def main() -> int:
             continue
 
     print()
-    print(f"VERIFIED:     {checked} offered values, each preceded and followed by a live control")
-    print(f"controls run: {control_runs} (2 per model — before and after its row)")
+    # Stated separately, because the two paths carry DIFFERENT strength and saying "preceded and
+    # followed" of both would overclaim. The batch path brackets a whole row with a control at each
+    # end; the per-value path can only precede each value, since one legal request spends the
+    # allowance and a trailing control would necessarily fail. Both are sound — a control confirmed
+    # 400 immediately before the value is what makes that value's 402 mean "accepted" — but only the
+    # batch path also proves the signal survived the row.
+    if batch_checked:
+        print(f"VERIFIED (bracketed): {batch_checked} values, a live control before AND after the row")
+    if slow_checked:
+        print(f"VERIFIED (per value): {slow_checked} values, each with a live control immediately before")
+    print(f"controls run: {control_runs}")
     if unverifiable:
         # Reported prominently, NOT as a pass. These are values the UI offers whose acceptance this
         # method cannot establish, because the model quotes bogus values too.

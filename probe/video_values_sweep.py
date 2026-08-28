@@ -99,25 +99,59 @@ THROTTLE_S = float(os.environ.get("SWEEP_THROTTLE_S", "6"))
 
 # A lapsed control usually recovers, so it is retried rather than treated as fatal.
 #
-# Measured mechanism: BOGUS requests are free — 14 consecutively never lapsed the control. LEGAL
-# requests are what cost, because those are the ones that make the gateway probe the upstream for a
-# real price. The allowance is small and per-model, and on azure/sora-2 it is ONE:
+# ## What is OBSERVED — no mechanism claimed
 #
-#     4s:  control_before=400  value=402  control_after=402   <- a single legal request did it
-#     8s:  control_before=402  ...                             <- and it never came back within the row
+# Bogus requests do not disturb the control: 14 consecutively, all rejected. A legal request does,
+# and on azure/sora-2 a single one is enough:
 #
-# Recovery was timed at 250s. I first assumed the earlier models in the table had drained a shared
-# budget, but sweeping sora alone — full allowance, control 3/3 before the row — lapsed identically,
-# which rules that out.
+#     4s:  bogus=400  legal=402  bogus=402   <- rejection stopped happening right here
+#     8s:  bogus=402  ...                    <- and did not come back within the row
+#
+# Recovery timed at 250s.
+#
+# ## The mechanism: the gateway's probe cache, and the parameters are not in its key
+#
+# middleware/x402_price_probe.go keys cached upstream prices on
+#
+#     method : baseURL/path : model : max_tokens : inputScale
+#
+# with a 5 minute TTL — which matches the 250s recovery. `duration_seconds`, `resolution` and
+# `aspect_ratio` appear NOWHERE in that key. So a legal request and a bogus one with the same model
+# and the same prompt land in the SAME slot: the first fills it, the second is answered from cache
+# and the upstream is never asked, so its rejection cannot come back.
+#
+# Confirmed by varying only the part of the key that does exist:
+#
+#     legal 8s,   prompt A                 -> 402   (fills the slot)
+#     bogus 999,  prompt A  (same slot)    -> 402   <- upstream never consulted
+#     bogus 999,  prompt B  (diff length)  -> 400   <- different slot, upstream asked, refusal returns
+#
+# I first called this "an allowance being spent", which reads as though a counter had been found;
+# none had. That framing also produced a wrong claim — "the earlier models drained a shared budget
+# and sora is first" — disproved by sweeping sora alone. The honest position at that point was "I do
+# not know why", and the answer turned out to be in our own source rather than upstream behaviour.
+#
+# ## The same defect overcharges real users, and is NOT this probe's problem to fix
+#
+# Two callers wanting different videos share one slot for 5 minutes, so whoever probes first sets the
+# other's price — and video price DOES vary with these fields (measured: `resolution: 480p` settles
+# at exactly half, 284,370 against 568,240). The identical bug was already found and fixed for TTS
+# by adding `inputScale` to the key; see that file's own note about 10/150/1000/1680 chars all
+# quoting 89201, "the 10-char caller overpaid 45x". Video's fields have not been added. Worse, a
+# bogus value can be handed a valid 402 from cache, which is the "quote for a request that cannot be
+# fulfilled" that file opens by warning about.
+#
+# That belongs in the gateway. Here it only means a 402 is trustworthy exactly when a bogus value in
+# the SAME cache slot was just rejected — which is what the control establishes, and why it must run
+# immediately before the measurement rather than once per session.
 CONTROL_ATTEMPTS = int(os.environ.get("SWEEP_CONTROL_ATTEMPTS", "4"))
 BACKOFF_S = float(os.environ.get("SWEEP_BACKOFF_S", "45"))
 
-# Models whose allowance is one legal request, so the batch loop cannot verify them: waiting for the
+# Models where a single legal request stops the control from rejecting, so the batch loop cannot
+# verify them at all: waiting for the
 # control between EVERY value is the only cadence that works. Kept as a list rather than applied to
 # everything because it costs ~5 minutes per value, and the other seven models sweep fine in a row.
 PER_VALUE_COOLDOWN = {m for m in os.environ.get("SWEEP_SLOW_MODELS", "azure/sora-2").split(",") if m}
-# Ceiling on how long to wait for the control to come back. 250s measured; 420 leaves headroom.
-RECOVER_LIMIT_S = float(os.environ.get("SWEEP_RECOVER_LIMIT_S", "420"))
 
 
 def post(body: dict) -> tuple[int, str]:
@@ -183,7 +217,7 @@ def control_live(model: str) -> tuple[bool, list[str]]:
 def control_live_with_backoff(model: str) -> tuple[bool, list[str], int]:
     """control_live, retried with a growing pause.
 
-    A lapse is usually temporary — the budget refills — so aborting the whole sweep on the first one
+    A lapse is usually temporary — rejection starts happening again — so aborting the whole sweep on it
     throws away the run for a condition that resolves itself. Backing off recovers it; giving up
     after the last attempt records the model as UNVERIFIABLE, never as a pass.
     """
@@ -199,56 +233,98 @@ def control_live_with_backoff(model: str) -> tuple[bool, list[str], int]:
     return False, detail, CONTROL_ATTEMPTS
 
 
-def wait_for_control(model: str) -> bool:
-    """Block until a bogus value is rejected again, or give up.
+# Distinguishes this RUN's prompt lengths from any other run's within the cache TTL.
+#
+# The lengths have to be unique across runs, not just within one. Slot numbers restart per model, and
+# the cache key holds the model, so a second run within 5 minutes reuses the same (model, length)
+# pairs the first one filled — which is exactly what happened: 5 values were SKIPPED because a sweep
+# of sora minutes earlier had already filled the slots that run wanted. Retested in fresh lengths,
+# all five passed with their controls at 400.
+#
+# Correctly reported rather than silently passed, which is the point: the probe said "this slot quotes
+# bogus values too" instead of counting 402s it could not vouch for.
+RUN_SALT = int(time.time()) % 2000
 
-    Only the first of the three bogus fields is used here: this runs before every single value, and
-    each check is itself a request, so a three-field control would triple the wall time for no extra
-    information — the question is binary, "is the refusal signal alive".
+
+def slotted_prompt(n: int) -> str:
+    """A prompt whose LENGTH is unique to this value, in this run.
+
+    `inputScale` is part of the gateway's probe cache key, so a distinct prompt length means a
+    distinct cache slot — and an unfilled slot is probed against the upstream for real. That is what
+    removes the wait: instead of ~250s for a shared slot to expire, each value gets its own.
+
+    The padding is trailing filler on a genuine prompt so the request stays one the upstream would
+    serve. Only its length is load-bearing.
     """
-    started = time.time()
-    while time.time() - started < RECOVER_LIMIT_S:
-        status, _ = post({"model": model, "prompt": PROMPT, "duration_seconds": 999})
-        if status == 400:
-            return True
-        time.sleep(25)
-    return False
+    return f"{PROMPT} {'x' * (3 + RUN_SALT + n * 7)}"
+
+
+def control_in_slot(model: str, prompt: str) -> bool:
+    """Is a bogus value rejected IN THIS SLOT, right now?
+
+    Same prompt as the value about to be measured, so the control and the measurement share a cache
+    slot. That is the whole point: a control taken in a different slot says nothing about whether the
+    answer to THIS request came from the upstream or from cache.
+
+    Only `duration_seconds: 999` is used. The question is binary — is the refusal signal reaching us
+    — and each extra field is another request.
+    """
+    status, _ = post({"model": model, "prompt": prompt, "duration_seconds": 999})
+    return status == 400
 
 
 def sweep_one_at_a_time(model: str, lim: dict) -> tuple[int, list[str]]:
-    """Verify a model whose allowance is one legal request per cooldown.
+    """Verify a model one value at a time, each in its own probe-cache slot.
 
-    The batch loop cannot do these: the first legal value spends the allowance, so every value after
-    it is quoted by a gateway that would quote anything. Here each value gets its own freshly
-    confirmed control, which is what makes its 402 mean "accepted".
+    The batch loop cannot do these: after the first legal value, everything else with the same model
+    and prompt is answered from that one cache entry, so bogus values get quoted too and no 402 in
+    the row means anything.
 
-    On sora-2 this is worth the ~5 minutes per value because the result is unusually strong. The row
-    ends with `duration_seconds: 5` — not a nonsense number but the length EVERY OTHER video model
-    accepts — and sora rejects it while taking 4, 8 and 12. That is positive evidence for a discrete
-    set, rather than the absence of evidence against one.
+    The fix is not patience, it is a fresh slot per value. `inputScale` is part of the cache key, so
+    a distinct prompt LENGTH puts each value in a slot of its own, gets it probed upstream for real,
+    and lets its own control be taken in the same slot. That turned a ~20 minute run of ~250s waits
+    into about 20 seconds, with STRONGER evidence: the control now shares the measurement's slot
+    instead of merely preceding it in time.
+
+    On sora-2 the row ends with `duration_seconds: 5` — not a nonsense number like 999 but the length
+    every OTHER video model accepts, and the value this code hard-coded as its fallback until it was
+    fixed. Sora rejecting 5 while taking 4, 8 and 12 is positive evidence that the set is discrete.
     """
-    print("  (one value per cooldown: the allowance here is a single legal request)")
+    print("  (one slot per value: distinct prompt lengths, so no value inherits another's price)")
     checked = 0
     rejected: list[str] = []
+    slot = 0
 
-    # The NEIGHBOUR control, and it is the strongest single measurement in this file.
-    #
-    # `duration_seconds: 5` is not a nonsense value like 999 — it is the length every OTHER video
-    # model accepts, and the number this code used to hard-code as its fallback. If sora rejects 5
-    # while taking 4, 8 and 12, the discrete set is real; if it accepts 5, then our table is wrong
-    # and the three "ok"s below say nothing about a set at all. So it is asserted, not just logged.
-    if model == "azure/sora-2" and 5 not in lim["durations"]:
-        if wait_for_control(model):
-            status, _ = post({"model": model, "prompt": PROMPT, "duration_seconds": 5})
+    def measure(field: str, value, *, expect_reject: bool = False) -> None:
+        nonlocal checked, slot
+        slot += 1
+        prompt = slotted_prompt(slot)
+        if not control_in_slot(model, prompt):
+            print(f"  {field:17} {str(value):9} -> SKIPPED: this slot quotes bogus values too")
+            return
+        status, msg = post({"model": model, "prompt": prompt, field: value})
+        if expect_reject:
             verdict = "rejected — the discrete set is real" if status == 400 else f"ACCEPTED ({status})"
-            print(f"  neighbour control  5s        -> {status} {verdict}")
+            print(f"  neighbour control  {str(value):9} -> {status} {verdict}")
             if status != 400:
                 rejected.append(
-                    f"{model} duration_seconds=5 -> {status}: accepted a duration our table says it "
-                    "rejects, so 4/8/12 is not a discrete set and VIDEO_LIMITS is wrong here"
+                    f"{model} {field}={value!r} -> {status}: accepted a value our table says it "
+                    "rejects, so the set is not discrete and VIDEO_LIMITS is wrong here"
                 )
+            return
+        checked += 1
+        if status == 402:
+            mark = "ok"
+        elif status == 400:
+            mark = "REJECTED"
+            rejected.append(f"{model} {field}={value!r} -> 400 {msg[:70]}")
         else:
-            print("  neighbour control  5s        -> SKIPPED, control never recovered")
+            mark = f"?{status}"
+        print(f"  {field:17} {str(value):9} -> {status} {mark}  (bogus rejected in this same slot)")
+
+    # The neighbour control first: if the table's central claim is wrong, say so before the details.
+    if model == "azure/sora-2" and 5 not in lim["durations"]:
+        measure("duration_seconds", 5, expect_reject=True)
 
     for field, values in (
         ("duration_seconds", lim["durations"]),
@@ -258,19 +334,8 @@ def sweep_one_at_a_time(model: str, lim: dict) -> tuple[int, list[str]]:
         for value in values:
             if value == "default":
                 continue
-            if not wait_for_control(model):
-                print(f"  {field:17} {str(value):9} -> SKIPPED, control never recovered")
-                continue
-            status, msg = post({"model": model, "prompt": PROMPT, field: value})
-            checked += 1
-            if status == 402:
-                mark = "ok"
-            elif status == 400:
-                mark = "REJECTED"
-                rejected.append(f"{model} {field}={value!r} -> 400 {msg[:70]}")
-            else:
-                mark = f"?{status}"
-            print(f"  {field:17} {str(value):9} -> {status} {mark}  (control was 400 immediately before)")
+            measure(field, value)
+
     return checked, rejected
 
 
@@ -287,11 +352,9 @@ def main() -> int:
 
     # ---- every offered value ----
     #
-    # ONLY is for finishing a model the full run could not vouch for. It matters because the budget
-    # behind the refusal signal is consumed by LEGAL requests (measured: 14 consecutive bogus
-    # requests never lapsed the control, but one placed after a handful of real ones did), and the
-    # models are swept in table order — so whoever is first absorbs it. azure/sora-2 is first, and
-    # it was the one model the full sweep had to discard.
+    # ONLY is for finishing a model the full run could not vouch for, without re-running the other
+    # seven. azure/sora-2 needed it: the full sweep had to discard its row, and a single legal request
+    # is enough to stop its control from rejecting (see the note above — the reason is not known).
     only = [m for m in (os.environ.get("SWEEP_ONLY", "").split(",")) if m]
     if only:
         print(f"\n== restricted to: {', '.join(only)} ==")
@@ -323,13 +386,19 @@ def main() -> int:
             print(f"  -> skipping {offered_n} values: a 402 here carries no information")
             continue
 
-        if model in PER_VALUE_COOLDOWN:
-            n, bad = sweep_one_at_a_time(model, lim)
-            checked += n
-            slow_checked += n
-            rejected.extend(bad)
-            control_runs += n
-            continue
+        # EVERY model goes through the own-slot path now.
+        #
+        # The batch loop shared one prompt across a whole row, which means it shared cache slots: the
+        # first value of the row filled them and the rest could be answered without the upstream ever
+        # being asked. That is why it needed 6s throttling, brackets at both ends, and still had to
+        # discard a model. Measuring each value in a slot of its own removes the shared state the
+        # brackets were compensating for — stronger evidence, and seconds instead of ~16 minutes.
+        n, bad = sweep_one_at_a_time(model, lim)
+        checked += n
+        slow_checked += n
+        rejected.extend(bad)
+        control_runs += n
+        continue
 
         row_checked = 0
         for field, values in (
@@ -385,14 +454,15 @@ def main() -> int:
     print()
     # Stated separately, because the two paths carry DIFFERENT strength and saying "preceded and
     # followed" of both would overclaim. The batch path brackets a whole row with a control at each
-    # end; the per-value path can only precede each value, since one legal request spends the
-    # allowance and a trailing control would necessarily fail. Both are sound — a control confirmed
+    # end; the own-slot path pairs each value with a control in ITS OWN cache slot, which is
+    # actually the stronger of the two — a control in a different slot cannot tell you whether this
+    # request was answered by the upstream or from cache. Both are sound — a control confirmed
     # 400 immediately before the value is what makes that value's 402 mean "accepted" — but only the
     # batch path also proves the signal survived the row.
     if batch_checked:
         print(f"VERIFIED (bracketed): {batch_checked} values, a live control before AND after the row")
     if slow_checked:
-        print(f"VERIFIED (per value): {slow_checked} values, each with a live control immediately before")
+        print(f"VERIFIED (own slot):  {slow_checked} values, each with a bogus value rejected IN THE SAME cache slot")
     print(f"controls run: {control_runs}")
     if unverifiable:
         # Reported prominently, NOT as a pass. These are values the UI offers whose acceptance this

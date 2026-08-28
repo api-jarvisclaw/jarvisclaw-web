@@ -26,6 +26,8 @@ for stream in (sys.stdout, sys.stderr):
 
 from playwright.async_api import async_playwright
 
+from _probe_locale import localised
+
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://localhost:4173").rstrip("/")
 RUNAWAY_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
 PROMPT = "What's the current price of Bitcoin and its 24h change?"
@@ -49,7 +51,7 @@ async def main() -> int:
             reasoning_chars += body.count("reasoning_content")
 
         page.on("response", lambda r: asyncio.create_task(on_response(r)))
-        await page.goto(f"{BASE}/chat", wait_until="domcontentloaded", timeout=60_000)
+        await page.goto(localised(BASE, "/chat"), wait_until="domcontentloaded", timeout=60_000)
         await page.wait_for_selector("textarea", timeout=30_000)
 
         # Pick the model through the UI, so this exercises the same path a user takes.

@@ -50,24 +50,44 @@ const PAGE_SIZE = 24
  *     browser probe caught it reading "12 picks" for a 186-row tier.
  *   - PLURALISATION. "1 categories" was on screen until a probe printed the header verbatim.
  */
-export function marketHeadline(opts: {
-  curated: boolean
-  curatedTotal: number
-  completeTotal: number
-  /** Sum of the category facet, used only when the gateway reports no tier sizes. */
-  facetTotal: number
-  categoryCount: number
-}): string {
+export function marketHeadline(
+  opts: {
+    curated: boolean
+    curatedTotal: number
+    completeTotal: number
+    /** Sum of the category facet, used only when the gateway reports no tier sizes. */
+    facetTotal: number
+    categoryCount: number
+  },
+  /**
+   * The lookup, optional so the existing tests can call this without a provider.
+   *
+   * Defaulting to identity is not a shortcut here: this function's whole job is assembling a
+   * sentence, and the assembly rules differ by language. English needs category/categories;
+   * Chinese needs neither, which is precisely why the plural choice happens on the ENGLISH side of
+   * the interpolation and the whole clause is one key.
+   */
+  t: (key: string, vars?: Record<string, string | number>) => string = (k, v) => {
+    let out = k
+    for (const [key, val] of Object.entries(v ?? {})) out = out.split(`{${key}}`).join(String(val))
+    return out
+  },
+): string {
   const size = opts.curated ? opts.curatedTotal : opts.completeTotal
   // The facet sum is the fallback for a gateway that does not report tier sizes — an older one,
   // or one where the fields were dropped. Zero would print "0 picks" over a full grid of results.
   const n = size > 0 ? size : opts.facetTotal
   if (n <= 0) return ''
-  const cats = `${opts.categoryCount} ${opts.categoryCount === 1 ? 'category' : 'categories'}`
+  // Pluralised in English, then interpolated. Chinese has no plural form, so a translation of
+  // "category"/"categories" separately would produce the same word twice and read as a bug in the
+  // catalogue rather than a property of the language.
+  const cats = t(opts.categoryCount === 1 ? '{n} category' : '{n} categories', {
+    n: opts.categoryCount,
+  })
   const what = opts.curated
-    ? `${n.toLocaleString()} picks across ${cats}, chosen for a first look.`
-    : `${n.toLocaleString()} callable endpoints across ${cats}.`
-  return `${what} Paid per call — the agent asks before it spends.`
+    ? t('{n} picks across {cats}, chosen for a first look.', { n: n.toLocaleString(), cats })
+    : t('{n} callable endpoints across {cats}.', { n: n.toLocaleString(), cats })
+  return `${what} ${t('Paid per call — the agent asks before it spends.')}`
 }
 
 export function Marketplace({
@@ -181,20 +201,25 @@ export function Marketplace({
    */
   const headline = useMemo(
     () =>
-      marketHeadline({
-        curated: servedCurated,
-        curatedTotal: tiers.curated,
-        completeTotal: tiers.complete,
-        facetTotal: catTotal,
-        categoryCount: categories.length,
-      }),
-    [servedCurated, tiers, catTotal, categories.length],
+      marketHeadline(
+        {
+          curated: servedCurated,
+          curatedTotal: tiers.curated,
+          completeTotal: tiers.complete,
+          facetTotal: catTotal,
+          categoryCount: categories.length,
+        },
+        t,
+      ),
+    // `t` in the deps: it changes identity when the locale changes, and without it the headline
+    // would stay in the previous language until one of the counts happened to move.
+    [servedCurated, tiers, catTotal, categories.length, t],
   )
 
   return (
     <div className="market">
       <header className="market-head">
-        <h1>Marketplace</h1>
+        <h1>{t('Marketplace')}</h1>
         {/* The subtitle describes the tier being shown, not the catalogue as a whole. Leading
             with "2,720 endpoints" while displaying a curated few hundred would make the number
             the headline and the selection look like a broken filter — and the size of the raw
@@ -236,12 +261,12 @@ export function Marketplace({
           can already see — it is not knowing what is on offer, so the choices have to be visible
           before the results are. */}
       {categories.length > 0 && (
-        <nav className="market-cats" aria-label="Categories">
+        <nav className="market-cats" aria-label={t('Categories')}>
           <button
             className={category === null ? 'market-cat is-on' : 'market-cat'}
             onClick={() => setCategory(null)}
           >
-            All
+            {t('All')}
             <span className="market-cat-n">{catTotal.toLocaleString()}</span>
           </button>
           {categories.map((c) => (
@@ -261,7 +286,7 @@ export function Marketplace({
         </nav>
       )}
 
-      {state === 'loading' && <p className="market-note">Loading the catalogue…</p>}
+      {state === 'loading' && <p className="market-note">{t('Loading the catalogue…')}</p>}
 
       {state === 'failed' && (
         // Named as a gateway failure rather than an empty marketplace: "no services"
@@ -327,7 +352,7 @@ export function Marketplace({
                     )
                   }
                 >
-                  Ask the agent
+                  {t('Ask the agent')}
                 </button>
               </article>
             ))}
@@ -340,7 +365,7 @@ export function Marketplace({
                 disabled={page <= 1}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
               >
-                Previous
+                {t('Previous')}
               </button>
               <span className="market-page-at">
                 {page} / {pages}
@@ -350,7 +375,7 @@ export function Marketplace({
                 disabled={page >= pages}
                 onClick={() => setPage((p) => Math.min(pages, p + 1))}
               >
-                Next
+                {t('Next')}
               </button>
             </div>
           )}
@@ -362,7 +387,7 @@ export function Marketplace({
           used to be, where "api / 2721 endpoints" sat beside seventeen one-endpoint cards. */}
       {services.length > 0 && (
         <section className="market-services">
-          <h2>Named services</h2>
+          <h2>{t('Named services')}</h2>
           <p className="market-note">
             Whole provider surfaces, callable directly under <code>/v1/marketplace/</code>.
           </p>

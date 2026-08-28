@@ -18,6 +18,8 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
+from _probe_locale import localised
+
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 DUCAT = os.environ.get("CHAT_URL", "http://localhost:4173")
@@ -71,7 +73,7 @@ def main() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1440, "height": 950}, color_scheme="light")
-        page.goto(DUCAT, wait_until="domcontentloaded")
+        page.goto(localised(DUCAT), wait_until="domcontentloaded")
         page.wait_for_timeout(2000)
         page.get_by_role("button", name="Marketplace").first.click()
         page.wait_for_selector(".market-card", timeout=25000)

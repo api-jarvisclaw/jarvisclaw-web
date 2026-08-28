@@ -21,6 +21,8 @@ for stream in (sys.stdout, sys.stderr):
 
 from playwright.async_api import async_playwright
 
+from _probe_locale import localised
+
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "https://ducat.jarvisclaw.ai").rstrip("/")
 PROMPT = sys.argv[2] if len(sys.argv) > 2 else "What's the current price of Bitcoin?"
 WAIT_S = 90
@@ -52,7 +54,7 @@ async def main() -> int:
             else None,
         )
 
-        await page.goto(f"{BASE}/chat", wait_until="domcontentloaded", timeout=60_000)
+        await page.goto(localised(BASE, "/chat"), wait_until="domcontentloaded", timeout=60_000)
         await page.wait_for_selector("textarea", timeout=30_000)
         await page.fill("textarea", PROMPT)
         await page.click(".send-btn")

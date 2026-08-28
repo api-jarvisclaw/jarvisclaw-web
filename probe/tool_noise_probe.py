@@ -31,6 +31,8 @@ for stream in (sys.stdout, sys.stderr):
 
 from playwright.async_api import async_playwright
 
+from _probe_locale import localised
+
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:4173").rstrip("/")
 
 # Eleven lookups then one paid call: the reported shape, plus the paid step the report never
@@ -226,7 +228,7 @@ async def main() -> int:
         # null without a request and no key can be selected. Fulfilled from the LOCAL bundle so
         # what runs is the build under test.
         await page.route("https://ducat.jarvisclaw.ai/**", route_local)
-        await page.goto("https://ducat.jarvisclaw.ai/chat", wait_until="domcontentloaded")
+        await page.goto(localised("https://ducat.jarvisclaw.ai", "/chat"), wait_until="domcontentloaded")
 
         # Select the key through the real UI rather than reaching into React state: the paid
         # path reads `apiKey`, and setting it any other way would test a state shape instead

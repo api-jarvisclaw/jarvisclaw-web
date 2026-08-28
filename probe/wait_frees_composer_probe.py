@@ -18,6 +18,8 @@ import time
 
 from playwright.sync_api import sync_playwright
 
+from _probe_locale import localised
+
 URL = os.environ.get("CHAT_URL", "https://ducat.jarvisclaw.ai/")
 
 CHALLENGE = {
@@ -87,7 +89,7 @@ def main() -> int:
         errs = []
         page.on("pageerror", lambda e: errs.append(str(e)))
 
-        page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+        page.goto(localised(URL), wait_until="domcontentloaded", timeout=60000)
         page.wait_for_selector(".composer-shell textarea", timeout=30000)
         page.wait_for_timeout(2500)
 

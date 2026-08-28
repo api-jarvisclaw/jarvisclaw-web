@@ -35,6 +35,8 @@ for stream in (sys.stdout, sys.stderr):
 
 from playwright.async_api import async_playwright
 
+from _probe_locale import localised
+
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:4188"
 ADDRESS = "0xAbC0000000000000000000000000000000000001"
 
@@ -102,7 +104,7 @@ async def main() -> int:
         await page.route("**/v1/audio/speech", record)
         await page.route("**/v1/chat/completions", record)
 
-        await page.goto(URL, wait_until="networkidle")
+        await page.goto(localised(URL), wait_until="networkidle")
         await page.wait_for_timeout(2000)
 
         print("== 1. connect the wallet ==")

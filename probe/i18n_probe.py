@@ -159,6 +159,36 @@ def main() -> int:
         if not pg.url.endswith("/en/gallery"):
             fails.append(f"Back landed on {pg.url}, not /en/gallery")
 
+        # NOTE: this Back check must stay directly after the switch. Step 6 below navigates, and a
+        # go_back() placed after it walks into step 6's entry instead — which reported "Back landed
+        # on /zh/gallery" and reads as a routing bug rather than a probe ordering one.
+        # ---- 6. the console's own panes, which the checks above never reach ----
+        #
+        # /zh alone renders the LANDING page, so a fully English console would have passed everything
+        # above. These are the panes a paying user actually spends time in — the wallet panel, the
+        # spend summary, the composer — and each one is a separate component that had to be wired by
+        # hand, which is exactly the kind of work that gets 90% done.
+        pg.goto(f"{URL}/zh/chat", wait_until="domcontentloaded")
+        pg.wait_for_selector(".composer-shell textarea", timeout=30000)
+        pg.wait_for_timeout(1200)
+        panels = {}
+        for name, sel in [
+            ("side panel headings", "h2"),
+            ("side panel copy", ".panel-note"),
+            ("rail", ".rail-item"),
+            ("mode buttons", ".mode-btn"),
+        ]:
+            texts = pg.eval_on_selector_all(sel, "es => es.map((e) => e.textContent)")
+            joined = " ".join(t for t in texts if t)
+            panels[name] = (cjk_ratio(joined), joined[:60])
+            print(f"  {name}: {panels[name][0]:.2f} — {panels[name][1]}")
+        for name, (ratio, sample) in panels.items():
+            if ratio < 0.5:
+                fails.append(
+                    f"the console's {name} is only {ratio:.0%} Chinese ({sample!r}) — those "
+                    "components were never wired to t()"
+                )
+
         # ---- 5. a bare path redirects once ----
         pg2 = page_for(["en-US"])
         pg2.goto(f"{URL}/chat", wait_until="domcontentloaded")

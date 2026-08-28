@@ -35,6 +35,8 @@ for stream in (sys.stdout, sys.stderr):
 
 from playwright.async_api import async_playwright
 
+from _probe_locale import localised
+
 # Defaults to PRODUCTION, and that is not laziness. Reading a platform session is a credentialed
 # request, and the gateway whitelists exactly one origin for those — measured: localhost and
 # 127.0.0.1 are both rejected with no allow-origin header at all. So the account half of this
@@ -127,7 +129,7 @@ async def main() -> int:
             ),
         )
 
-        await page.goto(URL, wait_until="networkidle")
+        await page.goto(localised(URL), wait_until="networkidle")
         await page.wait_for_timeout(1800)
 
         print("== 1. the mode buttons render real icons, not text glyphs ==")

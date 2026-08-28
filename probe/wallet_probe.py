@@ -24,6 +24,8 @@ for stream in (sys.stdout, sys.stderr):
 
 from playwright.async_api import async_playwright
 
+from _probe_locale import localised
+
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:4188"
 ADDRESS = "0xAbC0000000000000000000000000000000000001"
 
@@ -59,7 +61,7 @@ async def main() -> int:
         ctx = await browser.new_context(viewport={"width": 1500, "height": 950})
         await ctx.add_init_script(PROVIDER)
         page = await ctx.new_page()
-        await page.goto(URL, wait_until="networkidle")
+        await page.goto(localised(URL), wait_until="networkidle")
         await page.wait_for_timeout(2000)
 
         print("== 1. there is no API key input any more ==")
@@ -162,7 +164,7 @@ async def main() -> int:
         print("== 7. no wallet installed is explained, not broken ==")
         ctx2 = await browser.new_context(viewport={"width": 1500, "height": 950})
         page2 = await ctx2.new_page()
-        await page2.goto(URL, wait_until="networkidle")
+        await page2.goto(localised(URL), wait_until="networkidle")
         await page2.wait_for_timeout(1500)
         text = await page2.locator(".sidebar").inner_text()
         has_get = await page2.locator("a:has-text('Get a wallet')").count()

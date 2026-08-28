@@ -100,7 +100,7 @@ export function LibraryPane({
 
       {/* Categories above the results. With no thumbnails to scan, this strip is the only thing
           telling a reader what the collection contains. */}
-      <nav className="library-cats" aria-label="Prompt categories">
+      <nav className="library-cats" aria-label={t('Prompt categories')}>
         <button
           className={category === null ? 'market-cat is-on' : 'market-cat'}
           onClick={() => setCategory(null)}

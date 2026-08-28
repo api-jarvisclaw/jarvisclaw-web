@@ -31,6 +31,8 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
+from _probe_locale import localised
+
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 BASE = os.environ.get("CHAT_URL", "http://localhost:4173").rstrip("/")
@@ -44,7 +46,7 @@ def main() -> int:
         page = browser.new_page(viewport={"width": 1440, "height": 900}, color_scheme="light")
 
         # --- 1. the landing page is its own page ---
-        page.goto(f"{BASE}/", wait_until="domcontentloaded")
+        page.goto(localised(BASE, "/"), wait_until="domcontentloaded")
         page.wait_for_selector(".page-hero", timeout=20000)
         page.wait_for_timeout(3500)
 
@@ -215,14 +217,14 @@ def main() -> int:
             fails.append(f"the hero is not centred in the viewport ({round(centre_gap)}px off)")
 
         # --- 2. /chat is a real route, and Back works ---
-        page.goto(f"{BASE}/chat", wait_until="domcontentloaded")
+        page.goto(localised(BASE, "/chat"), wait_until="domcontentloaded")
         page.wait_for_selector(".shell", timeout=20000)
         page.wait_for_timeout(1500)
         print(f"/chat  consoleShell={page.locator('.shell').count() > 0} page={page.locator('.page').count() > 0}")
         if page.locator(".page").count() > 0:
             fails.append("/chat renders the landing page too")
 
-        page.goto(f"{BASE}/", wait_until="domcontentloaded")
+        page.goto(localised(BASE, "/"), wait_until="domcontentloaded")
         page.wait_for_selector(".page-cta-sm", timeout=20000)
         page.wait_for_timeout(2000)
         page.locator(".page-cta-sm").click()
@@ -235,11 +237,13 @@ def main() -> int:
         print(f"       back    -> {url_back}")
         if not url_after.endswith("/chat"):
             fails.append(f"the CTA did not change the URL: {url_after}")
-        if not url_back.rstrip("/").endswith(BASE.rstrip("/")):
+        # The landing page is /en (or /zh), not / — the locale prefix is part of every URL now, and
+        # comparing against BASE alone reports a working Back button as broken.
+        if not url_back.rstrip("/").endswith(localised(BASE, "/").rstrip("/")):
             fails.append(f"Back did not return to the landing page: {url_back}")
 
         # --- 3. the hero prompt runs once ---
-        page.goto(f"{BASE}/", wait_until="domcontentloaded")
+        page.goto(localised(BASE, "/"), wait_until="domcontentloaded")
         page.wait_for_selector(".page-prompt input", timeout=20000)
         page.wait_for_timeout(2000)
         page.fill(".page-prompt input", "Which models are free right now?")

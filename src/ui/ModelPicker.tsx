@@ -8,6 +8,7 @@ import {
   UNSERVABLE_VIRTUALS,
   type GenerationKind,
 } from '../lib/modality'
+import { useT } from './LocaleContext'
 
 /**
  * The model a mode will actually run, given what the user picked.
@@ -70,6 +71,7 @@ export function ModelPicker({
   mode: GenerationKind | 'chat'
   onSelect: (model: string) => void
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [modality, setModality] = useState<Modality | 'all'>('all')
@@ -154,11 +156,11 @@ export function ModelPicker({
         aria-haspopup="listbox"
       >
         <span className="picker-name">{effective}</span>
-        {current?.free && <span className="picker-free">free</span>}
+        {current?.free && <span className="picker-free">{t('free')}</span>}
         {/* Says the choice was automatic. Without a marker the swapped-in default looks
             like the user's own selection, so a later "why is it using that model?" has no
             answer on screen. */}
-        {overridden && <span className="picker-auto">auto</span>}
+        {overridden && <span className="picker-auto">{t('auto')}</span>}
         <ChevronDownIcon className="picker-caret" size={13} aria-hidden="true" />
       </button>
 
@@ -218,7 +220,7 @@ export function ModelPicker({
                     // Labelled rather than hidden. Hiding it would leave someone searching for
                     // a name the catalogue advertises and concluding the picker is broken;
                     // this says the catalogue is the thing that is wrong.
-                    <span className="picker-row-price is-broken">not servable</span>
+                    <span className="picker-row-price is-broken">{t('not servable')}</span>
                   ) : (
                     <span className={m.free ? 'picker-row-price is-free' : 'picker-row-price'}>
                       {displayPrice(m)}

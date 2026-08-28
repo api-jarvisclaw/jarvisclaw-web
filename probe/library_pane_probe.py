@@ -27,6 +27,8 @@ for stream in (sys.stdout, sys.stderr):
 
 from playwright.async_api import async_playwright
 
+from _probe_locale import localised
+
 MIME = {
     ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
     ".json": "application/json", ".woff2": "font/woff2", ".svg": "image/svg+xml",
@@ -72,7 +74,7 @@ async def main() -> int:
         # /en/gallery, not /gallery. A bare path resolves to whatever the RUNNING MACHINE's browser
         # asks for, so this probe read Chinese tabs on my laptop and failed on tab names that were
         # correct — a probe whose result depends on the tester's locale tests the tester.
-        await page.goto("https://ducat.jarvisclaw.ai/en/gallery", wait_until="domcontentloaded")
+        await page.goto(localised("https://ducat.jarvisclaw.ai", "/gallery"), wait_until="domcontentloaded")
 
         # 1. The library chunk must NOT be in the initial load. That split is what keeps a
         #    152 KB prompt library out of the path to the chat box.

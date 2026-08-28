@@ -26,6 +26,8 @@ import asyncio
 
 from playwright.async_api import async_playwright
 
+from _probe_locale import localised
+
 URL = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("CHAT_URL", "https://ducat.jarvisclaw.ai")
 
 # Pairs of (label, foreground token or literal, background token). Chosen for what a user has to
@@ -220,7 +222,7 @@ async def main() -> int:
         browser = await p.chromium.launch()
         ctx = await browser.new_context(viewport={"width": 1500, "height": 950})
         page = await ctx.new_page()
-        await page.goto(URL, wait_until="networkidle")
+        await page.goto(localised(URL), wait_until="networkidle")
         await page.wait_for_timeout(1500)
         for theme in ("light", "dark"):
             failures += await check(page, theme)

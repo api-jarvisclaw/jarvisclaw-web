@@ -21,12 +21,14 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
+from _probe_locale import localised
+
 # Defaults to /chat, not /.
 #
 # `/` is the landing page now — a marketing page with no composer on it. This probe waits for the
 # composer, so with the old default it timed out after 30s and reported a broken console, which is
 # the most misleading way for a probe to fail.
-URL = os.environ.get("CHAT_URL", "https://ducat.jarvisclaw.ai/chat")
+URL = os.environ.get("CHAT_URL", "https://ducat.jarvisclaw.ai")
 
 # Where the assets actually live, used to refetch anything the page failed to load. Not derived
 # from URL: the site and the CDN are separate hosts, and a local dist run still pulls media from
@@ -77,7 +79,7 @@ def main() -> int:
             else None,
         )
 
-        page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+        page.goto(localised(URL, "/chat"), wait_until="domcontentloaded", timeout=60000)
         page.wait_for_selector(".composer-shell textarea", timeout=30000)
         page.wait_for_timeout(2000)
 

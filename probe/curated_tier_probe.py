@@ -30,6 +30,8 @@ for stream in (sys.stdout, sys.stderr):
 
 from playwright.async_api import async_playwright
 
+from _probe_locale import localised
+
 # The measured live figures, so the probe asserts against the real shape of the problem.
 CURATED_TOTAL = 186
 COMPLETE_TOTAL = 2720
@@ -117,7 +119,7 @@ async def main() -> int:
         await page.route("**/api/discovery/models**", lambda r: r.fulfill(
             status=200, json={"free": []}))
         await page.route("https://ducat.jarvisclaw.ai/**", route_local)
-        await page.goto("https://ducat.jarvisclaw.ai/marketplace", wait_until="domcontentloaded")
+        await page.goto(localised("https://ducat.jarvisclaw.ai", "/marketplace"), wait_until="domcontentloaded")
 
         failures: list[str] = []
 

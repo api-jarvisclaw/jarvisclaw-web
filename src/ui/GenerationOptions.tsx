@@ -6,6 +6,7 @@ import {
   type GenerationKind,
   type GenerationOptions as Options,
 } from '../lib/modality'
+import { useT } from './LocaleContext'
 
 /**
  * The knobs for a generation: image size and quality, video length, speech voice and speed.
@@ -30,6 +31,7 @@ export function GenerationOptions({
   options: Options
   onChange: (next: Options) => void
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
 
@@ -60,7 +62,7 @@ export function GenerationOptions({
         className={open ? 'mode-btn mode-btn-active' : 'mode-btn'}
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        aria-label="Generation options"
+        aria-label={t('Generation options')}
       >
         <SlidersHorizontalIcon className="mode-glyph" size={15} aria-hidden="true" />
         {summary}

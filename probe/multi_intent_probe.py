@@ -31,6 +31,8 @@ for stream in (sys.stdout, sys.stderr):
 
 from playwright.async_api import async_playwright
 
+from _probe_locale import localised
+
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "https://ducat.jarvisclaw.ai").rstrip("/")
 
 # Deliberately longer than the report's 60s manual stop. The report says "never returned",
@@ -81,7 +83,7 @@ async def run_case(browser, case: dict) -> dict:
     # 60s, not the default 30s. Measured: the page reaches DOMContentLoaded in ~1.9s
     # normally, but a cold edge cache has exceeded 30s — and a navigation timeout would
     # otherwise be misread as the hang this probe is looking for.
-    await page.goto(f"{BASE}/chat", wait_until="domcontentloaded", timeout=60_000)
+    await page.goto(localised(BASE, "/chat"), wait_until="domcontentloaded", timeout=60_000)
     await page.wait_for_selector("textarea", timeout=30_000)
     await page.fill("textarea", case["prompt"])
 

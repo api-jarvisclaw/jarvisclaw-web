@@ -38,6 +38,8 @@ for stream in (sys.stdout, sys.stderr):
 
 from playwright.sync_api import sync_playwright
 
+from _probe_locale import localised
+
 CHAT = os.environ.get("CHAT_URL", "https://ducat.jarvisclaw.ai").rstrip("/")
 API = os.environ.get("API_URL", "https://api.jarvisclaw.ai").rstrip("/")
 ANSWER_TIMEOUT = 240_000
@@ -128,7 +130,7 @@ def main() -> int:
         api.close()
 
         page = ctx.new_page()
-        page.goto(f"{CHAT}/chat", wait_until="domcontentloaded")
+        page.goto(localised(CHAT, "/chat"), wait_until="domcontentloaded")
         page.wait_for_selector("textarea", timeout=30_000)
 
         # ── 1. anonymous first, to plant the refusal the way a real user does ──

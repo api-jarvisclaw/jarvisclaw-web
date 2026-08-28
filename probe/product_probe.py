@@ -22,6 +22,8 @@ for stream in (sys.stdout, sys.stderr):
 
 from playwright.async_api import async_playwright
 
+from _probe_locale import localised
+
 URL = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:4188"
 
 # Cloudflare injects an analytics beacon that our own CSP refuses. That refusal is the
@@ -51,7 +53,7 @@ async def main() -> int:
         console_errors: list[str] = []
         page.on("console", lambda m: m.type == "error" and console_errors.append(m.text[:170]))
 
-        await page.goto(URL, wait_until="networkidle")
+        await page.goto(localised(URL), wait_until="networkidle")
         await page.wait_for_timeout(2500)
 
         print("== 1. the rail lists navigation and history ==")

@@ -1,4 +1,5 @@
 import { type CatalogueModel } from '../lib/catalogue'
+import { useT } from './LocaleContext'
 
 /**
  * The console's empty state: a hero and six starters, nothing more.
@@ -21,14 +22,15 @@ export function Landing({
   marketplaceTotal: number | null
   onSuggestion: (text: string) => void
 }) {
+  const t = useT()
   // A dash, never 0. "0 callable APIs" on a screen still fetching reads as an empty product.
   const num = (n: number | null) => (n === null || n === 0 ? '—' : n.toLocaleString())
 
   return (
     <div className="empty">
-      <span className="eyebrow">The agent with a wallet</span>
+      <span className="eyebrow">{t('The agent with a wallet')}</span>
       <h1>
-        What should <em>JarvisClaw</em> do?
+        {t('What should')} <em>JarvisClaw</em> {t('do?')}
       </h1>
       <p>
         {num(models.length)} models and {num(marketplaceTotal)} callable APIs, paid per call. Start

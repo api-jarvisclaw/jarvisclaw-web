@@ -29,6 +29,8 @@ for stream in (sys.stdout, sys.stderr):
 
 from playwright.async_api import async_playwright
 
+from _probe_locale import localised
+
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "https://ducat.jarvisclaw.ai").rstrip("/")
 ANSWER_TIMEOUT_MS = 240_000
 
@@ -120,7 +122,7 @@ async def wait_until_idle(page) -> None:
 async def run_case(browser, case: dict) -> tuple[dict, list[str]]:
     fails: list[str] = []
     page = await browser.new_page()
-    await page.goto(f"{BASE}/chat", wait_until="domcontentloaded")
+    await page.goto(localised(BASE, "/chat"), wait_until="domcontentloaded")
     await page.wait_for_selector("textarea", timeout=30_000)
 
     await page.fill("textarea", case["prompt"])

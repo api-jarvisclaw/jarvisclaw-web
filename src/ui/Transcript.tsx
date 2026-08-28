@@ -3,6 +3,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { getMediaUrl } from '../lib/blobstore'
 import { mediaMimeType } from '../lib/modality'
+import { translateError } from '../lib/errors'
+import { useLocale } from './LocaleContext'
+import { useT } from './LocaleContext'
 
 export interface ToolStep {
   tool: string
@@ -198,6 +201,7 @@ export function partitionSteps(steps: ToolStep[]): { shown: ToolStep[]; plumbing
 }
 
 function TurnView({ turn }: { turn: Turn }) {
+  const { locale, t } = useLocale()
   if (turn.kind === 'user') {
     return (
       <div className="turn turn-user">
@@ -207,7 +211,10 @@ function TurnView({ turn }: { turn: Turn }) {
   }
 
   if (turn.kind === 'error') {
-    return <div className="error">{turn.text}</div>
+    // Translated HERE rather than at each throw site: these come from plain lib/ modules with no
+    // React, and threading a `t` into the payment path is not worth the argument list. This is the
+    // only place an error reaches the screen.
+    return <div className="error">{translateError(locale, turn.text)}</div>
   }
 
   if (turn.kind === 'notice') {
@@ -233,7 +240,7 @@ function TurnView({ turn }: { turn: Turn }) {
           last thing in the turn: once text arrives the tail would compete with the answer. */}
       {turn.reasoning.trim() !== '' && (
         <details className="reasoning">
-          <summary>Thinking</summary>
+          <summary>{t('Thinking')}</summary>
           {turn.reasoning}
         </details>
       )}
@@ -255,7 +262,7 @@ function TurnView({ turn }: { turn: Turn }) {
           {/* aria-hidden on the text, not the label: a screen reader announcing a partial
               half-sentence that changes several times a second is noise, while the label tells
               someone using one that the turn is working. */}
-          <span className="reasoning-tail-label">Thinking</span>
+          <span className="reasoning-tail-label">{t('Thinking')}</span>
           <span aria-hidden="true">{tailOf(turn.reasoning)}</span>
         </div>
       )}
@@ -266,7 +273,7 @@ function TurnView({ turn }: { turn: Turn }) {
         <div className="answered-by">
           {/* auto/free resolves per request, so naming the concrete model is the only
               way the user learns which one answered. */}
-          <span>answered by</span>
+          <span>{t('answered by')}</span>
           <span className="tool-name">{turn.model}</span>
         </div>
       )}
@@ -275,6 +282,7 @@ function TurnView({ turn }: { turn: Turn }) {
 }
 
 function MediaView({ turn }: { turn: Extract<Turn, { kind: 'media' }> }) {
+  const t = useT()
   /**
    * Bytes recovered from IndexedDB after a reload.
    *
@@ -356,7 +364,7 @@ function MediaView({ turn }: { turn: Extract<Turn, { kind: 'media' }> }) {
             blocks page-initiated downloads, so a download link would look broken. */}
         {turn.url && (
           <a className="media-open" href={turn.url} target="_blank" rel="noopener noreferrer">
-            Open original
+            {t('Open original')}
           </a>
         )}
       </div>
@@ -487,6 +495,7 @@ function StepsView({ steps }: { steps: ToolStep[] }) {
 }
 
 function StepView({ step }: { step: ToolStep }) {
+  const t = useT()
   return (
     <div className={step.running ? 'tool-row is-running' : 'tool-row'}>
       {step.running ? (
@@ -496,9 +505,9 @@ function StepView({ step }: { step: ToolStep }) {
       )}
       <span className="tool-name">{step.tool}</span>
       {step.declined ? (
-        <span className="declined">declined</span>
+        <span className="declined">{t('declined')}</span>
       ) : step.running ? (
-        <span>running</span>
+        <span>{t('running')}</span>
       ) : /**
          * Checked BEFORE the price, because an unpayable call spent nothing and so used to fall
          * through to "free".
@@ -510,11 +519,11 @@ function StepView({ step }: { step: ToolStep }) {
          * `list_models` are the second one.
          */
       step.unpayable ? (
-        <span className="declined">not called — needs payment</span>
+        <span className="declined">{t('not called — needs payment')}</span>
       ) : (step.spentUsd ?? 0) > 0 ? (
         <span className="price">${step.spentUsd!.toFixed(6)}</span>
       ) : (
-        <span className="price-free">free</span>
+        <span className="price-free">{t('free')}</span>
       )}
     </div>
   )

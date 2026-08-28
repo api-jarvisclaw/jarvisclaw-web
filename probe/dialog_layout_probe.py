@@ -28,6 +28,8 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
+from _probe_locale import localised
+
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 URL = os.environ.get("CHAT_URL", "https://ducat.jarvisclaw.ai")
@@ -56,7 +58,7 @@ def main() -> int:
         # /en/gallery, not /gallery. A bare path resolves to whatever the RUNNING MACHINE's browser
         # asks for, so this probe read Chinese tabs on my laptop and failed on tab names that were
         # correct — a probe whose result depends on the tester's locale tests the tester.
-        page.goto(f"{URL}/en/gallery", wait_until="domcontentloaded")
+        page.goto(localised(URL, "/gallery"), wait_until="domcontentloaded")
         page.wait_for_selector(".gallery-tabs", timeout=30000)
 
         # ---- 1. alignment, on both panes that carry the search row ----

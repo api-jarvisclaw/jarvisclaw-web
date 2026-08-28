@@ -78,8 +78,7 @@ export function LimitsPanel({
             confirmation before money moves.
           */}
           <p className="panel-note">
-            Your wallet still asks you to sign every payment. These limits control this page's
-            own prompts and its spending ceiling.
+            {t("Your wallet still asks you to sign every payment. These limits control this page's own prompts and its spending ceiling.")}
           </p>
         </div>
       )}

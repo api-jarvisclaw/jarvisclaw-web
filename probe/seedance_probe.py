@@ -23,6 +23,8 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
+from _probe_locale import localised
+
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 URL = os.environ.get("CHAT_URL", "http://localhost:4173")
@@ -68,7 +70,7 @@ def main() -> int:
         # instead of opening the pane, and the probe then times out looking for a tab. Written
         # down because the failure names the tab, not the navigation, so it reads as a UI defect
         # in the pane that was never reached.
-        page.goto(f"{URL}/gallery", wait_until="domcontentloaded")
+        page.goto(localised(URL, "/gallery"), wait_until="domcontentloaded")
         page.wait_for_selector(".gallery-tabs", timeout=30000)
 
         before = [c for c in chunks if "Seedance" in c]

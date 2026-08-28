@@ -100,7 +100,7 @@ export function AccountPanel({
       <section>
         <h2>{t('Account')}</h2>
         <div className="panel">
-          <p className="panel-note">Checking for a signed-in session…</p>
+          <p className="panel-note">{t('Checking for a signed-in session…')}</p>
         </div>
       </section>
     )
@@ -113,8 +113,7 @@ export function AccountPanel({
         <h2>{t('Account')}</h2>
         <div className="panel">
           <p className="account-blurb">
-            Sign in to use quota you already have on JarvisClaw. Your key works here exactly as it
-            does on the platform.
+            {t('Sign in to use quota you already have on JarvisClaw. Your key works here exactly as it does on the platform.')}
           </p>
           {/* "Sign in to JarvisClaw", not "Sign in on api.jarvisclaw.ai".
               The host used to be in the label because the button pointed at a DIFFERENT host than
@@ -125,7 +124,7 @@ export function AccountPanel({
               product, and the destination is visible in the browser once the tab opens. */}
           <a className="panel-btn" href={SIGN_IN_URL} target="_blank" rel="noopener noreferrer">
             <UserIcon size={14} aria-hidden="true" />
-            Sign in to JarvisClaw
+            {t('Sign in to JarvisClaw')}
             <ExternalLinkIcon size={12} aria-hidden="true" />
           </a>
           {/* The missing half. Sign-in is useless to someone who has no account, and this panel
@@ -141,7 +140,7 @@ export function AccountPanel({
             rel="noopener noreferrer"
           >
             <UserPlusIcon size={14} aria-hidden="true" />
-            New here? Create an account
+            {t('New here? Create an account')}
             <ExternalLinkIcon size={12} aria-hidden="true" />
           </a>
           {available ? (
@@ -150,19 +149,18 @@ export function AccountPanel({
             // registering too — a new account is signed in by the time the tab closes.
             <button className="panel-btn panel-btn-quiet" onClick={() => void check()}>
               <RefreshCwIcon size={14} aria-hidden="true" />
-              I've signed in
+              {t("I've signed in")}
             </button>
           ) : (
             // Said plainly instead of offering a button that cannot work. Reading the session is
             // a credentialed request, and the gateway only accepts those from whitelisted
             // origins — so on any other origin the check is not slow or flaky, it is impossible.
             <p className="panel-note">
-              Reading your session only works from {CANONICAL_HOST}. On this origin, paste-free
-              sign-in is unavailable — use a wallet, or the free models.
+              {t('Reading your session only works from {host}. On this origin, paste-free sign-in is unavailable — use a wallet, or the free models.', { host: CANONICAL_HOST })}
             </p>
           )}
           <p className="panel-note">
-            No account needed for free models, or to pay per call with a wallet.
+            {t('No account needed for free models, or to pay per call with a wallet.')}
           </p>
         </div>
       </section>
@@ -186,10 +184,10 @@ export function AccountPanel({
 
         <div className="account-keys">
           <div className="account-keys-head">
-            <span>API key</span>
+            <span>{t('API key')}</span>
             {keyName !== null && (
               <button className="link-btn" onClick={() => onKey(null)}>
-                use wallet instead
+                {t('use wallet instead')}
               </button>
             )}
           </div>
@@ -200,15 +198,15 @@ export function AccountPanel({
               <span className="tool-name">{keyName}</span>
               {/* The secret itself is never rendered. It is a bearer credential; showing it
                   invites a screenshot, and the user already has it on the platform. */}
-              <span className="account-hint">in use for paid calls</span>
+              <span className="account-hint">{t('in use for paid calls')}</span>
             </p>
           ) : loadingKeys ? (
-            <p className="panel-note">Loading your keys…</p>
+            <p className="panel-note">{t('Loading your keys…')}</p>
           ) : keys.length === 0 ? (
             <p className="panel-note">
               This account has no API keys yet.{' '}
               <a href={KEYS_URL} target="_blank" rel="noopener noreferrer">
-                Make one
+                {t('Make one')}
               </a>
               .
             </p>
@@ -258,10 +256,10 @@ export function AccountPanel({
             onAccount(null)
           }}
         >
-          Sign out
+          {t('Sign out')}
         </button>
         <p className="panel-note">
-          The key is held for this tab only and never saved. Signing out drops it.
+          {t('The key is held for this tab only and never saved. Signing out drops it.')}
         </p>
       </div>
     </section>

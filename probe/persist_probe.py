@@ -20,6 +20,8 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
+from _probe_locale import localised
+
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 URL = os.environ.get("CHAT_URL", "http://localhost:4173")
@@ -34,7 +36,7 @@ def main() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1400, "height": 950})
-        page.goto(URL, wait_until="domcontentloaded")
+        page.goto(localised(URL), wait_until="domcontentloaded")
         page.wait_for_timeout(1500)
 
         # How much can this origin actually hold? Measured rather than assumed — the 5 MB figure

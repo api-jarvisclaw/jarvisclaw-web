@@ -78,8 +78,7 @@ export function WalletPanel({
       {!installed ? (
         <>
           <p>
-            Paid models and callable APIs are paid per call in USDC on Base. Install a browser
-            wallet to use them — free models work without one.
+            {t('Paid models and callable APIs are paid per call in USDC on Base. Install a browser wallet to use them — free models work without one.')}
           </p>
           <a
             className="wallet-btn"
@@ -87,14 +86,13 @@ export function WalletPanel({
             target="_blank"
             rel="noopener noreferrer"
           >
-            Get a wallet
+            {t('Get a wallet')}
           </a>
         </>
       ) : account === null ? (
         <>
           <p>
-            Connect a wallet to reach paid models and callable APIs. Every charge is signed by
-            you, in your wallet, showing the exact amount before it happens.
+            {t('Connect a wallet to reach paid models and callable APIs. Every charge is signed by you, in your wallet, showing the exact amount before it happens.')}
           </p>
           <button className="wallet-btn" onClick={connect} disabled={busy}>
             {busy ? t('Waiting for your wallet…') : t('Connect wallet')}
@@ -104,7 +102,7 @@ export function WalletPanel({
         <>
           <div className="panel">
             <div className="kv">
-              <span>Address</span>
+              <span>{t('Address')}</span>
               {/* Middle-truncated, not cut off: the last four characters are how a person
                   recognises their own address. */}
               <span title={account.address}>
@@ -112,13 +110,13 @@ export function WalletPanel({
               </span>
             </div>
             <div className="kv">
-              <span>Network</span>
+              <span>{t('Network')}</span>
               <span className={wrongChain ? 'wallet-warn' : undefined}>
                 {account.chainId === BASE_CHAIN_ID ? 'Base' : `chain ${account.chainId}`}
               </span>
             </div>
             <div className="kv">
-              <span>Max per signature</span>
+              <span>{t('Max per signature')}</span>
               <span>${PER_SIGNATURE_CAP_USDC.toFixed(2)}</span>
             </div>
           </div>
@@ -126,7 +124,7 @@ export function WalletPanel({
           {wrongChain && (
             <>
               <p className="wallet-warn">
-                Payments settle on Base. Switch network to pay.
+                {t('Payments settle on Base. Switch network to pay.')}
               </p>
               <button className="wallet-btn" onClick={switchChain} disabled={busy}>
                 {busy ? 'Waiting…' : 'Switch to Base'}
@@ -144,8 +142,7 @@ export function WalletPanel({
 
       <p className="wallet-note">
         {/* Said plainly because it is the whole difference from the old key box. */}
-        Your keys stay in your wallet. This page never sees them, and nothing is stored — a
-        reload asks again.
+        {t('Your keys stay in your wallet. This page never sees them, and nothing is stored — a reload asks again.')}
       </p>
     </section>
   )

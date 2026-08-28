@@ -24,6 +24,8 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
+from _probe_locale import localised
+
 # Defaults to /chat, not /.
 #
 # `/` is the landing page now — a marketing page with no composer on it. This probe waits for the
@@ -159,7 +161,7 @@ def main() -> int:
         browser = p.chromium.launch()
         for name, w, h in VIEWPORTS:
             page = browser.new_page(viewport={"width": w, "height": h})
-            page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+            page.goto(localised(URL), wait_until="domcontentloaded", timeout=60000)
             # Waits for the control under test, not a timer. A fixed delay that fires before
             # hydration reports a missing composer, which is indistinguishable from the bug.
             page.wait_for_selector(".composer textarea, .composer-shell textarea", timeout=30000)

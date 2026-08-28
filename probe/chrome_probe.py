@@ -24,6 +24,8 @@ import urllib.request
 
 from playwright.sync_api import sync_playwright
 
+from _probe_locale import localised
+
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 BASE = os.environ.get("CHAT_URL", "http://localhost:4173").rstrip("/")
@@ -117,7 +119,7 @@ def main() -> int:
         # `wait_until='load'` for the same class of reason: with `domcontentloaded` the page's own load
         # event is still pending, so a later listener catches it and blames whatever was clicked in
         # between for a reload that never happened. It cost me one false failure here already.
-        page.goto(f"{BASE}/", wait_until="load")
+        page.goto(localised(BASE, "/"), wait_until="load")
         page.wait_for_selector(".page-hero", timeout=20000)
         page.wait_for_timeout(2500)
         page.click(".page-cta-sm")
@@ -303,7 +305,7 @@ def main() -> int:
         # hero; and below 720px a pre-existing `display: none` on the whole nav — correct when every
         # item was an in-page anchor — hid Marketplace, Gallery and Docs as well, leaving a phone
         # visitor no route to any of them.
-        page.goto(f"{BASE}/", wait_until="load")
+        page.goto(localised(BASE, "/"), wait_until="load")
         page.wait_for_selector(".page-hero", timeout=20000)
         page.wait_for_timeout(2500)
         for vw in (390, 560, 720, 768, 1280, 2560):
@@ -340,7 +342,7 @@ def main() -> int:
         page.wait_for_timeout(400)
 
         # --- 3. both panes drag, and the width sticks ---
-        page.goto(f"{BASE}/chat", wait_until="load")
+        page.goto(localised(BASE, "/chat"), wait_until="load")
         page.wait_for_selector(".pane-resizer-rail", timeout=20000)
         page.wait_for_timeout(2000)
 

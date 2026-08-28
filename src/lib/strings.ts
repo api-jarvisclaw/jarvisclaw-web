@@ -192,6 +192,28 @@ const zh: Record<string, string> = {
   'Signed in': '已登录',
   Balance: '余额',
 
+  // ---- sign-in. The first thing a paying user touches ----
+  //
+  // 'API key' and 'key' stay in English: that is what the platform's own UI calls them and what the
+  // docs call them, and inventing a Chinese term for a credential the user has to go and find under
+  // an English label is how someone concludes they are looking for a different thing.
+  'Checking for a signed-in session…': '正在检查登录状态…',
+  'Sign in to use quota you already have on JarvisClaw. Your key works here exactly as it does on the platform.':
+    '登录后即可使用你在 JarvisClaw 上已有的额度。你的 key 在这里和在平台上用法完全一样。',
+  'Sign in to JarvisClaw': '登录 JarvisClaw',
+  'New here? Create an account': '第一次来？注册一个账号',
+  "I've signed in": '我已经登录了',
+  'No account needed for free models, or to pay per call with a wallet.':
+    '用免费模型、或者用钱包按次付费，都不需要账号。',
+  'API key': 'API key',
+  'use wallet instead': '改用钱包',
+  'in use for paid calls': '正用于付费调用',
+  'Loading your keys…': '正在加载你的 key…',
+  'Make one': '新建一个',
+  'Sign out': '退出登录',
+  'The key is held for this tab only and never saved. Signing out drops it.':
+    'key 只保存在这个标签页里，绝不写入存储。退出登录即丢弃。',
+
   // ---- composer and chat ----
   'Connect wallet': '连接钱包',
   'Waiting for your wallet…': '等待你的钱包确认…',
@@ -219,6 +241,152 @@ const zh: Record<string, string> = {
   All: '全部',
 
   // ---- marketplace ----
+  //
+  // The headline is assembled from parts, and the plural pair is why: English needs
+  // category/categories, Chinese needs neither. Both English forms map to the SAME Chinese string,
+  // which is correct rather than a duplicate — the distinction does not exist in the target.
+  Categories: '分类',
+  'Loading the catalogue…': '正在加载目录…',
+  'Named services': '具名服务',
+  'Ask the agent': '让 agent 去调',
+  Previous: '上一页',
+  Next: '下一页',
+  '{n} category': '{n} 个分类',
+  '{n} categories': '{n} 个分类',
+  '{n} picks across {cats}, chosen for a first look.': '{cats}，共 {n} 个精选，供你先看一眼。',
+  '{n} callable endpoints across {cats}.': '{cats}，共 {n} 个可调用接口。',
+  'Paid per call — the agent asks before it spends.': '按次付费 —— agent 花钱前会先问你。',
+
+  // ---- composer, model picker, options ----
+  //
+  // `auto` and `free` are the literal model-name prefixes the gateway serves (auto/free, auto/tts),
+  // so they stay in English on the badge: a Chinese label over a name the user must type as `auto/`
+  // is a mismatch between the UI and the API.
+  Send: '发送',
+  'Generation options': '生成选项',
+  // GENERATIONS[kind].label from lib/modality.ts, rendered as t(...) so the scan cannot see them —
+  // gated by their own test, which reads modality.ts directly.
+  Image: '图片',
+  Video: '视频',
+  Music: '音乐',
+  Speech: '语音',
+  'Prompt categories': '提示词分类',
+  auto: 'auto',
+  'not servable': '当前无法服务',
+
+  // ---- the console's empty state ----
+  //
+  // Split around the product name, which is never translated. The two halves are separate keys
+  // because Chinese puts the verb after the object — 「JarvisClaw 来做什么？」 needs the second half
+  // to carry the whole question, and a single key with the name interpolated would force English
+  // word order onto it.
+  'The agent with a wallet': '带钱包的 agent',
+  'What should': '想让',
+  'do?': '做什么？',
+
+  // ---- the wallet panel's blurbs ----
+  'Paid models and callable APIs are paid per call in USDC on Base. Install a browser wallet to use them — free models work without one.':
+    '付费模型和可调用 API 按次用 Base 上的 USDC 付款。装一个浏览器钱包就能用 —— 免费模型不需要钱包。',
+  'Connect a wallet to reach paid models and callable APIs. Every charge is signed by you, in your wallet, showing the exact amount before it happens.':
+    '连接钱包即可使用付费模型和可调用 API。每一笔都由你在自己的钱包里签名，扣款前先显示确切金额。',
+  'Payments settle on Base. Switch network to pay.': '支付在 Base 上结算。请切换网络后付款。',
+  'Your keys stay in your wallet. This page never sees them, and nothing is stored — a reload asks again.':
+    '你的密钥始终留在钱包里。本页面从不接触它们，也不做任何存储 —— 刷新后会再次询问。',
+  // The host is interpolated rather than written into the sentence: it is a real domain that must
+  // match the deployment, and a translated copy of it would be a dead link.
+  'Reading your session only works from {host}. On this origin, paste-free sign-in is unavailable — use a wallet, or the free models.':
+    '读取登录状态只能在 {host} 上进行。在当前域名下无法免粘贴登录 —— 请用钱包，或者用免费模型。',
+  "Your wallet still asks you to sign every payment. These limits control this page's own prompts and its spending ceiling.":
+    '钱包仍然会要求你为每一笔支付签名。这里的限额控制的是本页面自己的提示和消费上限。',
+
+  // ---- the conversation rail ----
+  'Search chats': '搜索对话',
+  'search your chats': '搜索你的对话',
+  'No conversations yet.': '还没有对话。',
+  'Install CLI': '安装 CLI',
+  'A generation is still running in this chat': '这个对话里还有生成任务在跑',
+  // Interpolated so the title stays out of the translation — a conversation title is user content
+  // and must not be reworded by anything here.
+  'Delete {title}': '删除 {title}',
+
+  // ---- the wallet panel ----
+  //
+  // Base and USDC stay in English (proper names), and `Max per signature` is the safety limit the
+  // error message about refusing to sign refers back to — the two must use the same words or the
+  // refusal will not point anywhere the reader can find.
+  'Get a wallet': '获取一个钱包',
+  Address: '地址',
+  Network: '网络',
+  'Max per signature': '单笔签名上限',
+
+  // ---- the transcript ----
+  //
+  // These are the words on a tool row, and two of them carry money: `free` says a call cost nothing
+  // and `not called — needs payment` says why an answer is missing. A vague translation of either
+  // one makes the spend record unreadable, which is the one thing this product cannot afford.
+  Thinking: '思考中',
+  'answered by': '回答者',
+  'Open original': '打开原文件',
+  declined: '已拒绝',
+  running: '进行中',
+  'not called — needs payment': '未调用 —— 需要付费',
+  free: '免费',
+
+  // ---- the seedance pane ----
+  //
+  // `clip` vs `frame` is the distinction the whole pane is built on: only 5 of 105 have a playable
+  // video. 可播片段 / 静帧 keeps that difference visible — collapsing them would put a play control
+  // over an image that cannot move.
+  'Video prompts that worked': '真正跑通过的视频提示词',
+  clip: '可播片段',
+  frame: '静帧',
+  'original post': '原帖',
+  'watch it there': '去那里看',
+  Close: '关闭',
+
+  // ---- error messages ----
+  //
+  // Translated where they are DISPLAYED (see lib/errors.ts), because they are thrown from plain
+  // modules with no React. These are the sentences that explain why money did not move, so each one
+  // has to say what the reader can DO — a vague translation here turns a fixable refusal into an
+  // apparent malfunction.
+  //
+  // Chain ids, USDC, Base, MetaMask, Rabby, IndexedDB stay in English: they are proper names, and a
+  // Chinese rendering of "Base" would send someone looking for a network that does not exist.
+  'No wallet found. Install a browser wallet such as MetaMask or Rabby.':
+    '没有检测到钱包。请安装一个浏览器钱包，比如 MetaMask 或 Rabby。',
+  'No wallet found.': '没有检测到钱包。',
+  'The wallet returned no account.': '钱包没有返回账户。',
+  'The wallet returned an unreadable chain id.': '钱包返回的 chain id 无法识别。',
+  'The wallet returned no signature.': '钱包没有返回签名。',
+  'The gateway quoted no EVM payment option, so a browser wallet cannot pay it.':
+    '网关没有给出 EVM 付款方式，浏览器钱包无法支付。',
+  'The gateway quoted no recipient address.': '网关没有给出收款地址。',
+  'The gateway quoted an asset other than USDC, which this page will not sign for.':
+    '网关报价用的不是 USDC，本页面不会为此签名。',
+  'The gateway quoted an invalid amount ({amount}).': '网关给出的金额无效（{amount}）。',
+  'Refusing to sign ${usd} — above your ${cap} per-signature cap. Raise it in Limits if you meant to.':
+    '拒绝签名 ${usd} —— 超过你设定的单笔上限 ${cap}。如果确实要签，请到「限额」里调高。',
+  'Unrecognised network {network}.': '无法识别的网络 {network}。',
+  'Your wallet is on chain {have} but this payment is on {want}. Switch network and try again.':
+    '你的钱包在 chain {have}，而这笔支付在 {want}。请切换网络后重试。',
+  'the gateway quoted no usable price for this call': '网关没有为这次调用给出可用价格',
+  // Not thrown — yielded as an agent event's `text`, so the new-Error scan cannot see it. Copied
+  // verbatim from agent.ts; my first attempt at this key was a paraphrase and matched nothing, which
+  // is silently the same as having no translation.
+  'The gateway did not accept the payment. Check the wallet has USDC on Base.':
+    '网关没有接受这笔支付。请检查钱包在 Base 上是否持有 USDC。',
+  '{model} is listed but not currently servable — pick another model':
+    '{model} 已上架但当前无法服务 —— 请换一个模型',
+  'the gateway answered {status} when asked to price this {unit}':
+    '请求 {unit} 报价时，网关返回了 {status}',
+  '{what} generation failed ({status})': '{what} 生成失败（{status}）',
+  'the platform returned no data': '平台没有返回数据',
+  'the platform returned no key': '平台没有返回 key',
+  'IndexedDB is unavailable': 'IndexedDB 不可用',
+  'could not open the media store': '无法打开媒体存储',
+  'the media store is blocked by another tab': '媒体存储被另一个标签页占用',
+  'media store request failed': '媒体存储请求失败',
 }
 
 const CATALOGUE: Record<Locale, Record<string, string>> = { en: {}, zh }

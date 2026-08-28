@@ -84,7 +84,7 @@ export function ChatList({
         aria-expanded={searching}
       >
         <SearchIcon className="rail-glyph" size={16} aria-hidden="true" />
-        Search chats
+        {t('Search chats')}
       </button>
 
       {searching && (
@@ -92,7 +92,7 @@ export function ChatList({
           className="rail-search"
           type="search"
           value={query}
-          placeholder="search your chats"
+          placeholder={t('search your chats')}
           autoFocus
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -103,7 +103,7 @@ export function ChatList({
         onClick={() => onView('marketplace')}
       >
         <StoreIcon className="rail-glyph" size={16} aria-hidden="true" />
-        Marketplace
+        {t('Marketplace')}
       </button>
 
       <button
@@ -111,7 +111,7 @@ export function ChatList({
         onClick={() => onView('gallery')}
       >
         <LayoutGridIcon className="rail-glyph" size={16} aria-hidden="true" />
-        Gallery
+        {t('Gallery')}
         {/* Counted in the rail because the gallery is the only view whose contents cost money
             to produce — knowing something is in there is worth a glance. */}
         {galleryCount > 0 && <span className="rail-count">{galleryCount}</span>}
@@ -126,7 +126,7 @@ export function ChatList({
         rel="noopener noreferrer"
       >
         <TerminalIcon className="rail-glyph" size={16} aria-hidden="true" />
-        Install CLI
+        {t('Install CLI')}
       </a>
 
       <a
@@ -136,12 +136,12 @@ export function ChatList({
         rel="noopener noreferrer"
       >
         <BookOpenIcon className="rail-glyph" size={16} aria-hidden="true" />
-        Docs
+        {t('Docs')}
       </a>
 
       <div className="rail-list">
         {conversations.length === 0 ? (
-          <p className="rail-empty">No conversations yet.</p>
+          <p className="rail-empty">{t('No conversations yet.')}</p>
         ) : shown.length === 0 ? (
           <p className="rail-empty">Nothing matches “{query}”.</p>
         ) : (
@@ -159,7 +159,7 @@ export function ChatList({
                 {hasPendingMedia(c) && (
                   <span
                     className="rail-row-pending"
-                    title="A generation is still running in this chat"
+                    title={t('A generation is still running in this chat')}
                     aria-label="generating"
                   />
                 )}
@@ -170,7 +170,7 @@ export function ChatList({
               <button
                 className="rail-row-del"
                 onClick={() => onDelete(c.id)}
-                aria-label={`Delete ${c.title}`}
+                aria-label={t('Delete {title}', { title: c.title })}
                 title="Delete"
               >
                 <XIcon size={14} aria-hidden="true" />

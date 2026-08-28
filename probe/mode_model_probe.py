@@ -20,6 +20,8 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
+from _probe_locale import localised
+
 URL = os.environ.get("CHAT_URL", "https://ducat.jarvisclaw.ai/")
 
 # The mode, the model to pick first, and the default that must take over. Each default was
@@ -67,7 +69,7 @@ def main() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1280, "height": 860})
-        page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+        page.goto(localised(URL), wait_until="domcontentloaded", timeout=60000)
         page.wait_for_selector(".composer-shell textarea", timeout=30000)
         # The catalogue loads over the network; picking before it arrives finds no rows.
         page.wait_for_function(

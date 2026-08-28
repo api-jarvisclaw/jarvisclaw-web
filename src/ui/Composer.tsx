@@ -10,6 +10,7 @@ import {
 } from '../lib/modality'
 import { GenerationOptions } from './GenerationOptions'
 import { effectiveModel, ModelPicker } from './ModelPicker'
+import { useT } from './LocaleContext'
 
 /**
  * Mode icons, from lucide-react — the same library the main site uses in 340 files.
@@ -67,6 +68,7 @@ export function Composer({
    */
   draft?: { text: string; n: number } | null
 }) {
+  const t = useT()
   const [text, setText] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
 
@@ -164,7 +166,7 @@ export function Composer({
                 {/* aria-hidden because the label right beside it already names the mode; a
                     screen reader announcing "image image" is worse than silence. */}
                 <Icon className="mode-glyph" size={15} aria-hidden="true" />
-                {GENERATIONS[kind].label}
+                {t(GENERATIONS[kind].label)}
               </button>
             )
           })}
@@ -181,7 +183,7 @@ export function Composer({
             className="send-btn"
             onClick={submit}
             disabled={busy || text.trim() === ''}
-            aria-label="Send"
+            aria-label={t('Send')}
           >
             {busy ? <span className="send-busy" aria-hidden="true" /> : <SendIcon size={15} aria-hidden="true" />}
           </button>

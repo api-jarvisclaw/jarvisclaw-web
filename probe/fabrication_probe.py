@@ -34,6 +34,8 @@ for stream in (sys.stdout, sys.stderr):
 
 from playwright.async_api import async_playwright
 
+from _probe_locale import localised
+
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "https://ducat.jarvisclaw.ai").rstrip("/")
 
 # Generous. auto/free withholds its first SSE frame for 11-35s (measured), and a
@@ -121,7 +123,7 @@ async def main() -> int:
         # so anything injected here would put the session on a different code path.
         page = await browser.new_page()
 
-        await page.goto(f"{BASE}/chat", wait_until="domcontentloaded")
+        await page.goto(localised(BASE, "/chat"), wait_until="domcontentloaded")
         await page.wait_for_selector("textarea", timeout=30_000)
 
         tag = (await page.inner_text(".tag")).strip()

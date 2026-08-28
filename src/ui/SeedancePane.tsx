@@ -8,6 +8,7 @@ import {
   type SeedancePrompt,
 } from '../lib/seedance'
 import { Scrim } from './Scrim'
+import { useT } from './LocaleContext'
 
 /**
  * The Seedance 2.0 prompt collection.
@@ -31,6 +32,7 @@ export function SeedancePane({
 }: {
   onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
 }) {
+  const t = useT()
   const [open, setOpen] = useState<number | null>(null)
   const [query, setQuery] = useState('')
   const selected = useMemo(() => SEEDANCE.find((p) => p.id === open) ?? null, [open])
@@ -57,7 +59,7 @@ export function SeedancePane({
     <>
       <div className="gallery-head">
         <div>
-          <h2>Video prompts that worked</h2>
+          <h2>{t('Video prompts that worked')}</h2>
           <p className="gallery-sub">
             {SEEDANCE.length} published Seedance 2.0 prompts with the frame each one produced, from{' '}
             {/* The collection's own credit, shown once. Per-item credits name the prompt's author;
@@ -84,7 +86,7 @@ export function SeedancePane({
           className="market-search"
           type="search"
           value={query}
-          placeholder="search prompts"
+          placeholder={t('search prompts')}
           onChange={(e) => setQuery(e.target.value)}
         />
         {query.trim() !== '' && (
@@ -124,10 +126,10 @@ export function SeedancePane({
                 {p.playable ? (
                   <span className="seedance-badge">
                     <PlayIcon size={9} aria-hidden="true" />
-                    clip
+                    {t('clip')}
                   </span>
                 ) : (
-                  <span className="seedance-badge seedance-badge-quiet">frame</span>
+                  <span className="seedance-badge seedance-badge-quiet">{t('frame')}</span>
                 )}
                 {p.author && <span className="showcase-author">{p.author}</span>}
               </span>
@@ -152,6 +154,7 @@ function SeedanceDetail({
   onClose: () => void
   onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
 }) {
+  const t = useT()
   const [copied, setCopied] = useState(false)
 
   const copy = async () => {
@@ -195,7 +198,7 @@ function SeedanceDetail({
                 ))}
               {item.source && (
                 <a href={item.source} target="_blank" rel="noopener noreferrer">
-                  original post
+                  {t('original post')}
                   <ExternalLinkIcon size={11} aria-hidden="true" />
                 </a>
               )}
@@ -203,7 +206,7 @@ function SeedanceDetail({
             </p>
           </div>
           <button className="ghost-btn" onClick={onClose}>
-            Close
+            {t('Close')}
           </button>
         </div>
 
@@ -231,7 +234,7 @@ function SeedanceDetail({
               <>
                 {' — '}
                 <a href={item.source} target="_blank" rel="noopener noreferrer">
-                  watch it there
+                  {t('watch it there')}
                   <ExternalLinkIcon size={11} aria-hidden="true" />
                 </a>
               </>
@@ -271,7 +274,7 @@ function SeedanceDetail({
               }}
             >
               <SparklesIcon size={13} aria-hidden="true" />
-              Make your own
+              {t('Make your own')}
             </button>
           </div>
         </div>

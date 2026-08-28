@@ -136,7 +136,17 @@ export const GENERATION_CHOICES = {
     outputCompression: [40, 60, 80, 100],
   },
   video: {
-    duration: [5, 10],
+    /**
+     * Fallback only. The real limits are PER MODEL — see VIDEO_LIMITS.
+     *
+     * `[5, 10]` was here and it was a guess. I then replaced it with `[4, 5, 6, 8, 10, 12]`, inferred
+     * from what the prompt library's authors write, which was a better guess and still a guess: the
+     * documented ceiling for seedance-2.0 is 15, not 12, and Sora 2 accepts only 4/8/12 — a set no
+     * single list can express.
+     */
+    duration: [4, 5, 8, 10, 12],
+    resolution: ['default', '480p', '720p', '1080p'],
+    aspectRatio: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
   },
   // NOTE: image.quality above is the upstream's OWN value list, not DALL·E's.
   speech: {
@@ -177,6 +187,105 @@ export const GENERATION_CHOICES = {
 } as const
 
 /** Defaults, chosen to match what the endpoints do when the field is omitted. */
+/**
+ * What each video model actually accepts, from BlockRun's own API reference.
+ *
+ * ## Why this is per-model and not one list
+ *
+ * Because the limits genuinely differ, and offering the union means offering values that 400 —
+ * after the user has approved the charge, which is the defect this whole pass exists to remove:
+ *
+ *   - Sora 2 takes ONLY 4, 8 or 12 seconds, and ignores resolution entirely
+ *   - Grok takes 1–15 and 480p/720p (1080p on 1.5 only), and has no `adaptive` aspect ratio
+ *   - Seedance's ceiling is 12s (1.5-pro), 15s (2.0 / 2.0-fast / 2.0-mini) or 30s (2.5)
+ *   - Seedance 2.0 alone reaches 4K; 2.0-fast and 2.5 stop at 720p
+ *
+ * ## Documented, and partly measured
+ *
+ * The ranges are the vendor's. Two points are confirmed against real paid calls, which is worth
+ * separating because the docs and the running service have disagreed before:
+ *
+ *   - `duration_seconds: 10` -> a 10.05s file (mp4 mvhd atom)
+ *   - `resolution: 480p` -> settles at exactly half the default's price (284,370 vs 568,240)
+ *
+ * The rest of the values here are read from the reference and NOT individually exercised — the UAT
+ * upstream balance ran out partway through. A 400 on one of them would be a docs/service
+ * disagreement rather than a bug in this table, and `videoLimitsFor` is where to fix it.
+ */
+export const VIDEO_LIMITS: Record<
+  string,
+  { durations: readonly number[]; resolutions: readonly string[]; aspectRatios: readonly string[] }
+> = {
+  // Sora ignores resolution and the reference-media params entirely, and its duration set is
+  // three exact values rather than a range.
+  'azure/sora-2': {
+    durations: [4, 8, 12],
+    resolutions: ['default'],
+    aspectRatios: ['default'],
+  },
+  'bytedance/seedance-1.5-pro': {
+    durations: [4, 5, 6, 8, 10, 12],
+    resolutions: ['default', '480p', '720p', '1080p'],
+    aspectRatios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+  },
+  'bytedance/seedance-2.0': {
+    durations: [4, 5, 6, 8, 10, 12, 15],
+    // 2.0 is the only tier that reaches 4K.
+    resolutions: ['default', '480p', '720p', '1080p', '4K'],
+    aspectRatios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+  },
+  'bytedance/seedance-2.0-fast': {
+    durations: [4, 5, 6, 8, 10, 12, 15],
+    resolutions: ['default', '480p', '720p'],
+    aspectRatios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+  },
+  'bytedance/seedance-2.0-mini': {
+    durations: [4, 5, 6, 8, 10, 12, 15],
+    resolutions: ['default', '480p', '720p', '1080p'],
+    aspectRatios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+  },
+  'bytedance/seedance-2.5': {
+    durations: [4, 5, 6, 8, 10, 12, 15, 20, 30],
+    resolutions: ['default', '480p', '720p'],
+    aspectRatios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+  },
+  'xai/grok-imagine-video': {
+    durations: [1, 2, 4, 6, 8, 10, 12, 15],
+    // Grok renders and bills 480p when resolution is omitted, so `default` is not a distinct option.
+    resolutions: ['480p', '720p'],
+    // No `adaptive`, no 21:9.
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  },
+  'xai/grok-imagine-video-1.5': {
+    durations: [1, 2, 4, 6, 8, 10, 12, 15],
+    resolutions: ['480p', '720p', '1080p'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  },
+}
+
+/**
+ * The limits for one model, falling back to the widest SAFE set rather than the union.
+ *
+ * `auto/video` resolves upstream to whichever model the gateway picks, so its options have to be
+ * ones every candidate accepts — an intersection, not a union. Offering 30s under `auto/video` would
+ * 400 whenever it resolved to anything but 2.5.
+ */
+export function videoLimitsFor(model: string): {
+  durations: readonly number[]
+  resolutions: readonly string[]
+  aspectRatios: readonly string[]
+} {
+  const exact = VIDEO_LIMITS[model]
+  if (exact) return exact
+  // Unknown or virtual (`auto/video`): the conservative intersection. 4/8/12 are the only durations
+  // every model above accepts, and Sora takes no resolution at all.
+  return {
+    durations: [4, 8, 12],
+    resolutions: ['default', '480p', '720p'],
+    aspectRatios: ['default', '16:9', '9:16', '1:1'],
+  }
+}
+
 export const DEFAULT_OPTIONS: Record<GenerationKind, GenerationOptions> = {
   image: { size: '1024x1024', quality: 'auto', n: 1 },
   video: { duration: 5 },
@@ -266,6 +375,24 @@ export interface GenerationOptions {
   outputCompression?: number
   /** Video: seconds. Sent as `duration_seconds` — see buildBody. */
   duration?: number
+  /**
+   * Video: `480p` … `4K`, or `default` to let the upstream choose (it defaults to 720p on Seedance).
+   *
+   * Measured to halve the price at 480p, which is how we know it lands. `default` sends nothing
+   * rather than sending the string "default".
+   */
+  resolution?: string
+  /** Video: `adaptive` | `16:9` | `9:16` | `1:1` | `4:3` | `3:4` | `21:9`. Per-model — see VIDEO_LIMITS. */
+  aspectRatio?: string
+  /**
+   * Video: whether the model generates a soundtrack.
+   *
+   * Seedance only, and it defaults to true for text-to-video. Offered because a silent clip and a
+   * scored one are different products, and the default is not obvious from the UI.
+   */
+  generateAudio?: boolean
+  /** Video: reproducibility seed. Seedance only. */
+  seed?: number
   /** Speech: a named voice. The upstream offers 37; see GENERATION_CHOICES. */
   voice?: string
   /** Speech: playback rate, 0.25–4.0. */
@@ -333,6 +460,30 @@ function buildBody(
      */
     body.duration_seconds =
       Number.isFinite(options.duration) && (options.duration as number) > 0 ? options.duration : 5
+    /**
+     * `default` means "send nothing", not the literal string.
+     *
+     * The upstream validates this field and 400s on a value it does not recognise, so passing
+     * "default" through would fail the call — after the charge was approved, which is the shape of
+     * defect this whole pass is about.
+     */
+    if (options.resolution && options.resolution !== 'default') {
+      body.resolution = options.resolution
+    }
+    if (options.aspectRatio && options.aspectRatio !== 'default') {
+      body.aspect_ratio = options.aspectRatio
+    }
+    /**
+     * Sent only when the user turned it OFF.
+     *
+     * `generate_audio` defaults to true for text-to-video and false for image-conditioned, so
+     * sending `true` unconditionally would silently switch on audio for an image-seeded clip that
+     * the upstream had decided should be silent. Omitting it keeps the upstream's own rule.
+     */
+    if (options.generateAudio === false) body.generate_audio = false
+    // An integer, and 0 is a legitimate seed — hence the explicit Number.isInteger rather than a
+    // truthiness check, which would drop it.
+    if (Number.isInteger(options.seed)) body.seed = options.seed
   }
 
   if (kind === 'speech') {

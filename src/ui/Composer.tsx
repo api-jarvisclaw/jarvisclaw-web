@@ -174,7 +174,14 @@ export function Composer({
           {/* Only in a generation mode. In chat these fields mean nothing, and a disabled
               knob is a worse explanation of that than no knob. */}
           {mode !== 'chat' && (
-            <GenerationOptions mode={mode} options={options} onChange={onOptions} />
+            <GenerationOptions
+              mode={mode}
+              // The RESOLVED model, not the picker's raw value: `auto/video` has no limits of its
+              // own, and the options a user sees have to match what will actually be called.
+              model={effective}
+              options={options}
+              onChange={onOptions}
+            />
           )}
 
           <span className="spacer" />

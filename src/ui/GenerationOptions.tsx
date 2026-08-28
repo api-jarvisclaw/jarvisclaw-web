@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import {
   GENERATION_CHOICES,
+  videoLimitsFor,
   type GenerationKind,
   type GenerationOptions as Options,
 } from '../lib/modality'
@@ -33,14 +34,22 @@ import { useT } from './LocaleContext'
  */
 export function GenerationOptions({
   mode,
+  model,
   options,
   onChange,
 }: {
   mode: GenerationKind
+  /**
+   * The resolved model, because the video limits differ per model and offering the union means
+   * offering values that 400 after the charge is approved. Sora takes only 4/8/12 seconds and no
+   * resolution at all; seedance-2.5 reaches 30s; only 2.0 reaches 4K.
+   */
+  model?: string
   options: Options
   onChange: (next: Options) => void
 }) {
   const t = useT()
+  const limits = videoLimitsFor(model ?? '')
   const [open, setOpen] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
 
@@ -149,13 +158,45 @@ export function GenerationOptions({
           )}
 
           {mode === 'video' && (
-            <Choices
-              label={t('Length')}
-              values={GENERATION_CHOICES.video.duration}
-              current={options.duration ?? 5}
-              format={(v) => `${v}s`}
-              onPick={(duration) => onChange({ ...options, duration: Number(duration) })}
-            />
+            <>
+              <Choices
+                label={t('Length')}
+                values={limits.durations}
+                current={options.duration ?? 5}
+                format={(v) => `${v}s`}
+                onPick={(duration) => onChange({ ...options, duration: Number(duration) })}
+              />
+              {/* 480p settles at exactly half the default's price — measured, 284,370 against
+                  568,240 — so unlike the other controls this one DOES change what you pay. Said
+                  plainly in the footnote below rather than left for someone to notice on a receipt. */}
+              <Choices
+                label={t('Resolution')}
+                values={limits.resolutions}
+                current={options.resolution ?? 'default'}
+                onPick={(r) => onChange({ ...options, resolution: String(r) })}
+              />
+              {/* Seven documented values, and the single most useful control here for anyone posting
+                  to a phone-shaped feed. 9:16 was unreachable before. */}
+              <Choices
+                label={t('Shape')}
+                values={limits.aspectRatios}
+                current={options.aspectRatio ?? 'default'}
+                onPick={(a) => onChange({ ...options, aspectRatio: String(a) })}
+              />
+              {/* Seedance scores text-to-video by default, and there was no way to ask for silence.
+                  Only sent when switched OFF — see buildBody: forcing `true` would turn on audio for
+                  an image-seeded clip the upstream had decided should be silent. */}
+              <Choices
+                label={t('Audio')}
+                values={['on', 'off'] as const}
+                current={options.generateAudio === false ? 'off' : 'on'}
+                // The chip labels go through t() too. Without `format` they render as literal
+                // "on"/"off" — English words on a Chinese panel, and the guard flagged them as keys
+                // nothing asks for, which is the same signal from the other side.
+                format={(v) => t(v)}
+                onPick={(v) => onChange({ ...options, generateAudio: v !== 'off' })}
+              />
+            </>
           )}
 
           {mode === 'speech' && (
@@ -188,7 +229,11 @@ export function GenerationOptions({
           <p className="genopts-note">
             {mode === 'speech'
               ? t('Speech is priced by how much text you send, not by these settings. The exact price is quoted before anything is spent.')
-              : t('These do not change the price — the quote is the same either way. You always see it before anything is spent.')}
+              : mode === 'video'
+                ? // Measured: 480p settles at half. Saying "these do not change the price" here
+                  // would be false, and the one place it matters is the one place it is checked.
+                  t('Length does not change the price, but 480p costs about half. The exact amount is quoted before anything is spent.')
+                : t('These do not change the price — the quote is the same either way. You always see it before anything is spent.')}
           </p>
         </div>
       )}

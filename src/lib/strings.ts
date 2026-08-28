@@ -273,6 +273,15 @@ const zh: Record<string, string> = {
   Background: '背景',
   Compression: '压缩',
   Length: '时长',
+  Resolution: '分辨率',
+  // 画面比例, not 长宽比: the former is what a video tool's Chinese UI calls it, and 9:16 is the
+  // value people are reaching for.
+  Shape: '画面比例',
+  Audio: '声音',
+  on: '开',
+  off: '关',
+  'Length does not change the price, but 480p costs about half. The exact amount is quoted before anything is spent.':
+    '时长不影响价格，但 480p 大约只要一半。扣款前会显示确切金额。',
   Voice: '音色',
   Speed: '速度',
   'Speech is priced by how much text you send, not by these settings. The exact price is quoted before anything is spent.':

@@ -147,6 +147,29 @@ def main() -> int:
                         f"expected {want!r} — the pick stopped at component state"
                     )
 
+        # ---- video: the options must be scoped to the chosen model ----
+        #
+        # `[5, 10]` was one list for every model. Sora takes only 4/8/12 and no resolution at all;
+        # seedance-2.5 reaches 30s; only 2.0 reaches 4K. Offering the union means offering values
+        # that 400 AFTER the charge is approved.
+        page.route("**/v1/videos/generations", quote)
+        open_panel("Video")
+        vid = rows()
+        print(f"video rows: {list(vid)}")
+        for k, v in vid.items():
+            print(f"  {k}: {v}")
+        for need in ("length", "resolution", "shape", "audio"):
+            if need not in vid:
+                fails.append(f"the video panel has no {need} control: {list(vid)}")
+        # Whatever model is selected, its duration list must be a real one rather than the union.
+        if "length" in vid:
+            lens = [int(x.rstrip("s")) for x in vid["length"] if x.rstrip("s").isdigit()]
+            print(f"  durations offered: {lens}")
+            if not lens:
+                fails.append(f"no durations parsed from {vid['length']}")
+            elif max(lens) > 30:
+                fails.append(f"a duration above every documented ceiling is offered: {lens}")
+
         browser.close()
 
     print()

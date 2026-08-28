@@ -5,6 +5,8 @@ import {
   challengeGeneration,
   DEFAULT_OPTIONS,
   GENERATION_CHOICES,
+  videoLimitsFor,
+  VIDEO_LIMITS,
   extractJob,
   extractMedia,
   generate,
@@ -396,6 +398,102 @@ describe('generation options', () => {
       options: { voice: 'coral', speed: 1.25, responseFormat: 'wav' },
     })
     expect(sentBody(spy)).toMatchObject({ voice: 'coral', speed: 1.25, response_format: 'wav' })
+  })
+
+  it('sends every video field under the name the upstream reads', async () => {
+    const spy = stubResponse(402, { accepts: [{ amount: '909384' }] })
+    await challengeGeneration('video', 'a cube', {
+      model: 'bytedance/seedance-2.0',
+      options: {
+        duration: 12,
+        resolution: '1080p',
+        aspectRatio: '9:16',
+        generateAudio: false,
+        seed: 42,
+      },
+    })
+    expect(sentBody(spy)).toMatchObject({
+      duration_seconds: 12,
+      resolution: '1080p',
+      aspect_ratio: '9:16',
+      generate_audio: false,
+      seed: 42,
+    })
+  })
+
+  it('omits generate_audio unless it was switched off', async () => {
+    /**
+     * `generate_audio` defaults to TRUE for text-to-video and FALSE for image-conditioned, so
+     * sending `true` unconditionally would switch audio on for a clip the upstream had decided
+     * should be silent. Absence preserves the upstream's own rule; only the user's explicit "off"
+     * is worth stating.
+     */
+    const spy = stubResponse(402, { accepts: [{ amount: '909384' }] })
+    await challengeGeneration('video', 'x', { options: { generateAudio: true } })
+    expect(sentBody(spy)).not.toHaveProperty('generate_audio')
+  })
+
+  it('sends seed 0, which a truthiness check would drop', async () => {
+    // 0 is a legitimate seed. `if (options.seed)` would silently discard it and quietly break
+    // reproducibility for exactly the value someone types first when testing.
+    const spy = stubResponse(402, { accepts: [{ amount: '909384' }] })
+    await challengeGeneration('video', 'x', { options: { seed: 0 } })
+    expect(sentBody(spy)).toMatchObject({ seed: 0 })
+  })
+
+  it('never sends "default" as a literal value', async () => {
+    // The upstream VALIDATES resolution and aspect_ratio — a bogus value answers 400 "unsupported
+    // resolution". "default" is a UI affordance meaning "say nothing", so passing it through would
+    // fail the call after the charge was approved.
+    const spy = stubResponse(402, { accepts: [{ amount: '909384' }] })
+    await challengeGeneration('video', 'x', {
+      options: { resolution: 'default', aspectRatio: 'default' },
+    })
+    const body = sentBody(spy)
+    expect(body).not.toHaveProperty('resolution')
+    expect(body).not.toHaveProperty('aspect_ratio')
+  })
+
+  it('scopes the video limits per model, never offering the union', () => {
+    /**
+     * From BlockRun's API reference. The union would offer values that 400 on most models, and a
+     * 400 here lands after the user approved the charge.
+     *
+     * Sora is the sharp case: three exact durations and no resolution at all. seedance-2.5 is the
+     * other end at 30s. `[5, 10]` — one list for everything — could not express either.
+     */
+    expect(videoLimitsFor('azure/sora-2').durations).toEqual([4, 8, 12])
+    expect(videoLimitsFor('azure/sora-2').resolutions).toEqual(['default'])
+
+    // Only 2.0 reaches 4K; 2.0-fast and 2.5 stop at 720p.
+    expect(videoLimitsFor('bytedance/seedance-2.0').resolutions).toContain('4K')
+    expect(videoLimitsFor('bytedance/seedance-2.0-fast').resolutions).not.toContain('1080p')
+    expect(videoLimitsFor('bytedance/seedance-2.5').resolutions).not.toContain('1080p')
+
+    // Documented ceilings: 12s for 1.5-pro, 15s for the 2.0 family, 30s for 2.5.
+    const maxOf = (m: string) => Math.max(...videoLimitsFor(m).durations)
+    expect(maxOf('bytedance/seedance-1.5-pro')).toBe(12)
+    expect(maxOf('bytedance/seedance-2.0')).toBe(15)
+    expect(maxOf('bytedance/seedance-2.5')).toBe(30)
+
+    // Grok has no `adaptive` and no 21:9.
+    const grok = videoLimitsFor('xai/grok-imagine-video').aspectRatios
+    expect(grok).not.toContain('adaptive')
+    expect(grok).not.toContain('21:9')
+
+    /**
+     * `auto/video` resolves upstream to whichever model the gateway picks, so its options must be an
+     * INTERSECTION. Offering 30s under auto/video would 400 whenever it resolved to anything but
+     * 2.5 — a failure the user could not attribute to their own choice.
+     */
+    const auto = videoLimitsFor('auto/video')
+    expect(auto.durations).toEqual([4, 8, 12])
+    for (const model of Object.keys(VIDEO_LIMITS)) {
+      const allowed = VIDEO_LIMITS[model].durations
+      for (const d of auto.durations) {
+        expect(allowed, `${model} must accept auto/video's ${d}s`).toContain(d)
+      }
+    }
   })
 
   it('offers the voices and formats the upstream actually serves', () => {

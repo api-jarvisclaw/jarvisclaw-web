@@ -84,6 +84,9 @@ const DYNAMIC_KEYS = [
   // distinction does not exist in the target; the pair is checked by its own test below.
   '{n} category',
   '{n} categories',
+  // The audio toggle's chip labels, rendered as t(v) from a values array.
+  'on',
+  'off',
   // GENERATIONS[kind].label from lib/modality.ts, rendered as t(GENERATIONS[kind].label).
   'Image',
   'Video',
@@ -209,6 +212,15 @@ describe('the translation catalogue', () => {
     expect(labels.length, 'no mode labels found — the matcher stopped working').toBeGreaterThan(3)
     const known = new Set(knownKeys())
     expect(labels.filter((l) => !known.has(l))).toEqual([])
+  })
+
+  it('translates the audio toggle labels', () => {
+    // Gate for the on/off exemption. They are rendered as t(v) from a `values` array, so the static
+    // scan cannot see them and an exemption without a gate is where a key goes to be forgotten —
+    // leaving English words on a Chinese panel.
+    for (const k of ['on', 'off']) {
+      expect(translate('zh', k), k).not.toBe(k)
+    }
   })
 
   it('translates both plural forms of the category count', () => {

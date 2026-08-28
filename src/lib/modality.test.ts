@@ -65,10 +65,10 @@ describe('generate', () => {
     await generate('video', 'ignored prompt', {
       cred: { payment: 'P' },
       url: 'https://api.example/v1/videos/generations',
-      body: { model: 'bytedance/seedance-2.0-mini', prompt: 'the quoted prompt', duration: 5 },
+      body: { model: 'bytedance/seedance-2.0-mini', prompt: 'the quoted prompt', duration_seconds: 5 },
     })
     expect(spy.mock.calls[0]?.[0]).toBe('https://api.example/v1/videos/generations')
-    expect(sentBody(spy)).toMatchObject({ prompt: 'the quoted prompt', duration: 5 })
+    expect(sentBody(spy)).toMatchObject({ prompt: 'the quoted prompt', duration_seconds: 5 })
   })
 
   it('reports a failure status rather than returning an empty result', async () => {
@@ -117,17 +117,22 @@ describe('challengeGeneration', () => {
     })
   })
 
-  it('sends duration for video, because the price depends on it', async () => {
-    // Quoting without duration prices a different call than the one the signature pays for.
+  it('sends duration_seconds for video — the name the upstream actually reads', async () => {
+    // `duration` was the name here, and it was ignored end to end: every video came back 5 seconds
+    // however long the UI said. Measured on UAT with paid calls, reading the mp4's own mvhd atom —
+    // duration: 10 -> 5.06s, duration_seconds: 10 -> 10.05s.
+    //
+    // The old test name said "because the price depends on it". It does not: the 402 is identical at
+    // 5s and 10s, which is exactly why nothing upstream of the artifact could catch this.
     const spy = stubResponse(402, { accepts: [{ amount: '1' }] })
     await challengeGeneration('video', 'a cat', { model: 'bytedance/seedance-2.0-mini' })
-    expect(sentBody(spy)).toMatchObject({ duration: 5, model: 'bytedance/seedance-2.0-mini' })
+    expect(sentBody(spy)).toMatchObject({ duration_seconds: 5, model: 'bytedance/seedance-2.0-mini' })
   })
 
   it('does not send duration for an image', async () => {
     const spy = stubResponse(402, { accepts: [{ amount: '1' }] })
     await challengeGeneration('image', 'a red cube')
-    expect(sentBody(spy)).not.toHaveProperty('duration')
+    expect(sentBody(spy)).not.toHaveProperty('duration_seconds')
   })
 
   it('names the unservable model on a 400 instead of repeating a cause-free message', async () => {
@@ -307,17 +312,17 @@ describe('generation options', () => {
     // leaves the length to whatever the channel defaults to, which is not what the UI says.
     const spy = stubResponse(402, { accepts: [{ amount: '1' }] })
     await challengeGeneration('video', 'a cat', {})
-    expect(sentBody(spy).duration).toBe(5)
+    expect(sentBody(spy).duration_seconds).toBe(5)
 
     const spy2 = stubResponse(402, { accepts: [{ amount: '1' }] })
     await challengeGeneration('video', 'a cat', { options: { duration: 10 } })
-    expect(sentBody(spy2).duration).toBe(10)
+    expect(sentBody(spy2).duration_seconds).toBe(10)
   })
 
   it('ignores a non-positive duration rather than sending it', async () => {
     const spy = stubResponse(402, { accepts: [{ amount: '1' }] })
     await challengeGeneration('video', 'x', { options: { duration: 0 } })
-    expect(sentBody(spy).duration).toBe(5)
+    expect(sentBody(spy).duration_seconds).toBe(5)
   })
 
   it('offers only choices the request body can carry', () => {
@@ -338,7 +343,29 @@ describe('generation options', () => {
     // A default that the body drops is a UI that shows a setting nothing honours.
     const spy = stubResponse(402, { accepts: [{ amount: '64000' }] })
     await challengeGeneration('image', 'x', { options: DEFAULT_OPTIONS.image })
-    expect(sentBody(spy)).toMatchObject({ size: '1024x1024', quality: 'standard', n: 1 })
+    expect(sentBody(spy)).toMatchObject({ size: '1024x1024', quality: 'auto', n: 1 })
+  })
+
+  it('offers only quality values the upstream accepts', () => {
+    /**
+     * The check this file was missing, and the reason it could not catch the real defect: every
+     * assertion here is about what the CLIENT sends, and a client that sends a well-formed value the
+     * upstream rejects passes all of them.
+     *
+     * `hd` was offered and answers 400 — "Invalid value: 'hd'. Supported values are: 'low',
+     * 'medium', 'high', and 'auto'" — which fails a call AFTER the user approved the charge.
+     * Pinned to that measured list so a value invented from another provider's docs fails here.
+     */
+    expect([...GENERATION_CHOICES.image.quality].sort()).toEqual([
+      'auto',
+      'high',
+      'low',
+      'medium',
+    ])
+    // The two DALL·E names specifically, since they are what a familiar-looking guess reaches for.
+    for (const bad of ['standard', 'hd']) {
+      expect(GENERATION_CHOICES.image.quality as readonly string[]).not.toContain(bad)
+    }
   })
 })
 

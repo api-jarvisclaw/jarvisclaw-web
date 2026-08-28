@@ -8,7 +8,7 @@ import {
   type SeedancePrompt,
 } from '../lib/seedance'
 import { Scrim } from './Scrim'
-import { useT } from './LocaleContext'
+import { useLocale, useT } from './LocaleContext'
 
 /**
  * The Seedance 2.0 prompt collection.
@@ -154,7 +154,7 @@ function SeedanceDetail({
   onClose: () => void
   onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
 }) {
-  const t = useT()
+  const { locale, t } = useLocale()
   const [copied, setCopied] = useState(false)
 
   const copy = async () => {
@@ -250,8 +250,13 @@ function SeedanceDetail({
           <span>
             Prompt
             <span className="seedance-prompt-len">
-              {item.prompt.length.toLocaleString()} chars
-              {item.lang === 'zh' && ' · written in Chinese'}
+              {t('{n} chars', { n: item.prompt.length.toLocaleString() })}
+              {/* The cue has to work in BOTH directions. It only said "written in Chinese", which
+                  helps an English reader and leaves a Chinese one to discover from the text itself
+                  that 73 of the 105 are English. Whichever language the prompt is in, say so when it
+                  differs from the interface. */}
+              {item.lang === 'zh' && locale !== 'zh' && ` · ${t('written in Chinese')}`}
+              {item.lang === 'en' && locale !== 'en' && ` · ${t('written in English')}`}
             </span>
           </span>
           <div className="showcase-prompt-actions">

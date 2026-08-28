@@ -11,16 +11,25 @@ import { useT } from './LocaleContext'
 /**
  * The knobs for a generation: image size and quality, video length, speech voice and speed.
  *
- * Every control here maps to a field the gateway's DTO actually reads, and every value was
- * checked against a live 402 quote. That check is the difference between an option and a
- * decoration: a control the gateway silently drops is worse than no control, because the user
- * believes they changed something.
+ * ## "Checked against a live 402 quote" was not a check
  *
- * One thing this panel deliberately does NOT do is imply that a bigger choice costs more.
- * Measured on the live gateway: the quote is identical at 1024 and 1792, at standard and hd, at
- * n=1 and n=4, and even at 5s versus 10s of video. Speech is the exception and it is not a knob —
- * its price scales with how much text you type. The footnote says so, because "why did my 10
- * second video cost the same" is a fair question and the honest answer is "it does".
+ * That is what this comment used to claim, and TWO of these controls did nothing:
+ *
+ *   - video duration was sent as `duration`. The upstream reads `duration_seconds` and silently
+ *     ignored the rest, so every video was 5 seconds whatever the button said;
+ *   - image quality offered `standard` and `hd`. The upstream answers 400 to `hd` — that half of
+ *     the control made a paid call FAIL after the charge was approved.
+ *
+ * A 402 quote cannot see either, because the payment gate sits in front of the upstream and the
+ * price does not vary with these fields anyway. The quote is identical at 1024 and 1792, at every
+ * quality, at n=1 and n=4, and at 5s versus 10s of video — so it is the same 402 whether the
+ * parameter is honoured, ignored, or about to be rejected. Verified now by real paid calls on UAT,
+ * reading the artifact itself: the mp4's mvhd atom for duration, the PNG's IHDR for size, the
+ * response's echoed `quality`, and the length of `data` for n.
+ *
+ * Speech price is the exception and it is not a knob — it scales with how much text you type. The
+ * footnote says so, because "why did my 10 second video cost the same" is a fair question and the
+ * honest answer is "it does"
  */
 export function GenerationOptions({
   mode,
@@ -83,7 +92,7 @@ export function GenerationOptions({
               <Choices
                 label="Quality"
                 values={GENERATION_CHOICES.image.quality}
-                current={options.quality ?? 'standard'}
+                current={options.quality ?? 'auto'}
                 onPick={(quality) => onChange({ ...options, quality: String(quality) })}
               />
               <Choices
@@ -175,7 +184,7 @@ function Choices<T extends string | number>({
 export function describe(mode: GenerationKind, o: Options): string {
   if (mode === 'image') {
     const parts = [o.size ?? '1024x1024']
-    if (o.quality && o.quality !== 'standard') parts.push(o.quality)
+    if (o.quality && o.quality !== 'auto') parts.push(o.quality)
     if (o.n && o.n > 1) parts.push(`×${o.n}`)
     return parts.join(' · ')
   }

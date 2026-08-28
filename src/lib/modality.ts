@@ -113,12 +113,26 @@ export const GENERATIONS: Record<GenerationKind, GenerationSpec> = {
 export const GENERATION_CHOICES = {
   image: {
     size: ['1024x1024', '1792x1024', '1024x1792'],
-    quality: ['standard', 'hd'],
+    /**
+     * The upstream's own value list, and NOT DALL·E's `standard`/`hd`.
+     *
+     * `hd` was offered here and is rejected outright — the upstream answers 400 with
+     * "Invalid value: 'hd'. Supported values are: 'low', 'medium', 'high', and 'auto'." So half
+     * this control was not a decoration but a way to make a paid call fail after the user had
+     * already approved the charge.
+     *
+     * Measured on UAT: low -> 206,502 bytes, medium -> 183,433, auto -> 185,433 (and the response
+     * echoes `quality`, so the effect is confirmed rather than inferred). `auto` reports back as
+     * `low`, which is the upstream's own choice and why it is offered as a distinct option rather
+     * than presented as a quality level.
+     */
+    quality: ['auto', 'low', 'medium', 'high'],
     n: [1, 2, 4],
   },
   video: {
     duration: [5, 10],
   },
+  // NOTE: image.quality above is the upstream's OWN value list, not DALL·E's.
   speech: {
     voice: ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'],
     speed: [0.75, 1, 1.25, 1.5],
@@ -127,7 +141,7 @@ export const GENERATION_CHOICES = {
 
 /** Defaults, chosen to match what the endpoints do when the field is omitted. */
 export const DEFAULT_OPTIONS: Record<GenerationKind, GenerationOptions> = {
-  image: { size: '1024x1024', quality: 'standard', n: 1 },
+  image: { size: '1024x1024', quality: 'auto', n: 1 },
   video: { duration: 5 },
   music: {},
   speech: { speed: 1 },
@@ -230,12 +244,28 @@ function buildBody(
   }
 
   if (kind === 'video') {
-    // Always sent. The price does not vary with it (measured), but the upstream still needs a
-    // duration, and omitting it leaves the length to whatever default the channel happens to
-    // have — which is not the 5 seconds the UI says.
-    body.duration = Number.isFinite(options.duration) && (options.duration as number) > 0
-      ? options.duration
-      : 5
+    /**
+     * `duration_seconds`, NOT `duration`.
+     *
+     * This was `duration` and it was silently ignored for every video ever generated here. The
+     * field name is the whole defect: the gateway forwards the video body untouched
+     * (PassThroughBodyEnabled), so the wrong name travels all the way to the upstream, which drops
+     * it and uses its own default.
+     *
+     * Measured on UAT with real paid calls, reading the mp4's own mvhd atom rather than trusting
+     * any response field:
+     *
+     *     duration: 10          -> 5.06s   (ignored)
+     *     length: 10            -> 5.06s   (ignored)
+     *     seconds: 10           -> HTTP 500
+     *     duration_seconds: 10  -> 10.05s  ✓
+     *
+     * Nothing upstream of this could have caught it. The price is identical at 5s and 10s, so the
+     * 402 quote is the same either way; the request is a 200 either way; and the job completes
+     * either way. The ONLY observable difference is the length of the file the user paid for.
+     */
+    body.duration_seconds =
+      Number.isFinite(options.duration) && (options.duration as number) > 0 ? options.duration : 5
   }
 
   if (kind === 'speech') {

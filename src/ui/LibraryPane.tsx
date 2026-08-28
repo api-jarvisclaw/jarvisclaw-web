@@ -9,8 +9,9 @@ import {
   type LibraryCategory,
   type LibraryPrompt,
 } from '../lib/library'
+import type { Locale } from '../lib/i18n'
 import { Scrim } from './Scrim'
-import { useT } from './LocaleContext'
+import { useLocale } from './LocaleContext'
 
 /**
  * The prompt library — 119 tested prompts, organised by what they are for.
@@ -33,12 +34,28 @@ import { useT } from './LocaleContext'
  * instead of the scene — which reads as the model being bad rather than the prompt being for
  * something else.
  */
+/**
+ * The category name in the reader's language.
+ *
+ * `LIBRARY_CATEGORIES` has carried both forms since the data was generated — `label` is the
+ * author's own Chinese heading, `en` is our English rendering — and the UI read `.en`
+ * unconditionally, so a Chinese reader got English category names over Chinese prompts.
+ *
+ * Not routed through t(): these are DATA, already translated at the source, and copying them into
+ * the string catalogue would be two places holding one fact with nothing keeping them in step.
+ */
+function categoryName(id: LibraryCategory | string, locale: Locale): string {
+  const c = LIBRARY_CATEGORIES.find((x) => x.id === id)
+  if (!c) return String(id)
+  return locale === 'zh' ? c.label : c.en
+}
+
 export function LibraryPane({
   onUsePrompt,
 }: {
   onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
 }) {
-  const t = useT()
+  const { locale, t } = useLocale()
   const [open, setOpen] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<LibraryCategory | null>(null)
@@ -91,10 +108,21 @@ export function LibraryPane({
           {/* Stated up front rather than discovered by clicking. Most of this collection is video
               direction, and someone expecting image prompts should know that before picking one. */}
           <p className="gallery-sub gallery-sub-quiet">
-            {videoCount} are video shot descriptions with camera moves and physics notes; the
-            other {LIBRARY.length - videoCount} restyle an image you upload. Most carry the
-            author&rsquo;s own aspect ratio, duration and negative prompt.
+            {t(
+              '{video} are video shot descriptions with camera moves and physics notes; the other {image} restyle an image you upload. Most carry the author’s own aspect ratio, duration and negative prompt.',
+              { video: videoCount, image: LIBRARY.length - videoCount },
+            )}
           </p>
+          {/* Stated once for the whole collection rather than per card: all 119 are Chinese, because
+              their author wrote them that way. Said out loud for an English reader, who would
+              otherwise open a card expecting English and find a wall of Chinese — and left unsaid
+              for a Chinese one, to whom it is not news. The prompts themselves are NOT translated:
+              a translated prompt is a different prompt and produces a different video. */}
+          {locale !== 'zh' && (
+            <p className="gallery-sub gallery-sub-quiet">
+              {t('Every prompt here is written in Chinese, by its author. They work as written — the models read Chinese — and are left untranslated because a reworded prompt is a different prompt.')}
+            </p>
+          )}
         </div>
       </div>
 
@@ -117,7 +145,7 @@ export function LibraryPane({
             onClick={() => setCategory((cur) => (cur === c.id ? null : c.id))}
             title={c.label}
           >
-            {c.en}
+            {categoryName(c.id, locale)}
             <span className="market-cat-n">{counts.get(c.id) ?? 0}</span>
           </button>
         ))}
@@ -170,7 +198,7 @@ export function LibraryPane({
             <span className="library-card-body">{p.intent ?? p.prompt}</span>
             <span className="library-card-meta">
               <span className="library-cat-tag">
-                {LIBRARY_CATEGORIES.find((c) => c.id === p.category)?.en ?? p.category}
+                {categoryName(p.category, locale)}
               </span>
               {p.params.aspect_ratio && (
                 <span className="library-param">{p.params.aspect_ratio}</span>
@@ -199,7 +227,7 @@ function LibraryDetail({
   onClose: () => void
   onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
 }) {
-  const t = useT()
+  const { locale, t } = useLocale()
   const [copied, setCopied] = useState(false)
 
   const copy = async () => {
@@ -239,7 +267,7 @@ function LibraryDetail({
           <div>
             <h3>{item.title}</h3>
             <p className="showcase-detail-meta">
-              {LIBRARY_CATEGORIES.find((c) => c.id === item.category)?.en ?? item.category}
+              {categoryName(item.category, locale)}
               {' · '}
               {item.kind === 'video' ? 'video prompt' : 'image prompt'}
               {/* Which of the author's documents this came from, so a reader can find it in

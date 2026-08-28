@@ -343,6 +343,19 @@ const zh: Record<string, string> = {
   'original post': '原帖',
   'watch it there': '去那里看',
   Close: '关闭',
+  '{n} chars': '{n} 字符',
+  // The cue works both ways now. `written in English` has no Chinese-facing counterpart in the old
+  // copy, which is why 73 of the 105 seedance prompts arrived unannounced for a Chinese reader.
+  'written in Chinese': '中文写的',
+  'written in English': '英文写的',
+
+  // ---- the prompt library ----
+  '{video} are video shot descriptions with camera moves and physics notes; the other {image} restyle an image you upload. Most carry the author’s own aspect ratio, duration and negative prompt.':
+    '其中 {video} 条是带镜头运动和物理说明的视频分镜，另外 {image} 条用来改写你上传的图片。大部分都带了作者自己的画面比例、时长和负向提示词。',
+  // Only shown to a non-Chinese reader — see LibraryPane. Kept in the catalogue anyway so a future
+  // locale gets it, and because the drift guard has no way to know a string is conditional.
+  'Every prompt here is written in Chinese, by its author. They work as written — the models read Chinese — and are left untranslated because a reworded prompt is a different prompt.':
+    '这里每一条提示词都是作者用中文写的。它们照原样就能用（模型读得懂中文），我们不做翻译 —— 改过措辞的提示词就是另一条提示词。',
 
   // ---- error messages ----
   //

@@ -346,6 +346,86 @@ describe('generation options', () => {
     expect(sentBody(spy)).toMatchObject({ size: '1024x1024', quality: 'auto', n: 1 })
   })
 
+  it('sends every image field the upstream reads, under its own name', () => {
+    /**
+     * The completeness check. Three fields were measured working and offered nowhere, so the panel
+     * was not just wrong about two options — it was missing three.
+     *
+     * Names matter as much as values: `outputFormat` in our options becomes `output_format` on the
+     * wire, and the video defect was nothing but a name. Asserted on the BODY rather than on the
+     * options object for that reason.
+     */
+    const spy = stubResponse(402, { accepts: [{ amount: '64000' }] })
+    void challengeGeneration('image', 'x', {
+      options: {
+        size: '1024x1024',
+        quality: 'low',
+        n: 2,
+        outputFormat: 'jpeg',
+        background: 'opaque',
+        outputCompression: 60,
+      },
+    })
+    return Promise.resolve().then(() => {
+      expect(sentBody(spy)).toMatchObject({
+        size: '1024x1024',
+        quality: 'low',
+        n: 2,
+        output_format: 'jpeg',
+        background: 'opaque',
+        output_compression: 60,
+      })
+    })
+  })
+
+  it('withholds jpeg compression when the format is png', async () => {
+    // The upstream rejects a compression level it cannot apply, and that rejection lands after the
+    // charge is approved. Gated on the format rather than sent hopefully.
+    const spy = stubResponse(402, { accepts: [{ amount: '64000' }] })
+    await challengeGeneration('image', 'x', {
+      options: { outputFormat: 'png', outputCompression: 60 },
+    })
+    expect(sentBody(spy)).not.toHaveProperty('output_compression')
+  })
+
+  it('sends the speech format under response_format', async () => {
+    // Six audio formats are served and none were offered, so every clip was mp3 by accident rather
+    // than by choice.
+    const spy = stubResponse(402, { accepts: [{ amount: '2000' }] })
+    await challengeGeneration('speech', 'hello', {
+      options: { voice: 'coral', speed: 1.25, responseFormat: 'wav' },
+    })
+    expect(sentBody(spy)).toMatchObject({ voice: 'coral', speed: 1.25, response_format: 'wav' })
+  })
+
+  it('offers the voices and formats the upstream actually serves', () => {
+    /**
+     * Pinned against the upstream's own 400 messages, which is the only place this list exists —
+     * there is no schema endpoint for it, and the 402 quote does not mention parameters at all.
+     *
+     * Six voices were offered out of 37. The point of the assertion is not the count but that a
+     * name here has to come from that measured list rather than from another provider's docs, which
+     * is exactly how `hd` and `standard` got into the quality list.
+     */
+    const MEASURED_VOICES = new Set([
+      'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer', 'coral', 'verse', 'ballad', 'ash',
+      'sage', 'marin', 'cedar', 'amuch', 'aster', 'brook', 'clover', 'dan', 'elan', 'marilyn',
+      'meadow', 'jazz', 'rio', 'breeze', 'cove', 'ember', 'fathom', 'glimmer', 'harp', 'juniper',
+      'maple', 'orbit', 'vale', 'megan-wetherall', 'jade-hardy',
+    ])
+    expect(GENERATION_CHOICES.speech.voice.length).toBeGreaterThan(10)
+    for (const v of GENERATION_CHOICES.speech.voice) {
+      expect(MEASURED_VOICES.has(v), `voice ${v} is not in the upstream's list`).toBe(true)
+    }
+    // mp3, aac, opus, flac, pcm, wav — measured. `pcm` is deliberately not offered: it is headerless
+    // and the in-page player cannot decode it.
+    const MEASURED_FORMATS = new Set(['mp3', 'aac', 'opus', 'flac', 'pcm', 'wav'])
+    for (const f of GENERATION_CHOICES.speech.responseFormat) {
+      expect(MEASURED_FORMATS.has(f), `format ${f}`).toBe(true)
+    }
+    expect(GENERATION_CHOICES.speech.responseFormat as readonly string[]).not.toContain('pcm')
+  })
+
   it('offers only quality values the upstream accepts', () => {
     /**
      * The check this file was missing, and the reason it could not catch the real defect: every

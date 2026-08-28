@@ -84,29 +84,73 @@ export function GenerationOptions({
           {mode === 'image' && (
             <>
               <Choices
-                label="Size"
+                label={t('Size')}
                 values={GENERATION_CHOICES.image.size}
                 current={options.size ?? '1024x1024'}
                 onPick={(size) => onChange({ ...options, size: String(size) })}
               />
               <Choices
-                label="Quality"
+                label={t('Quality')}
                 values={GENERATION_CHOICES.image.quality}
                 current={options.quality ?? 'auto'}
                 onPick={(quality) => onChange({ ...options, quality: String(quality) })}
               />
               <Choices
-                label="Count"
+                label={t('Count')}
                 values={GENERATION_CHOICES.image.n}
                 current={options.n ?? 1}
                 onPick={(n) => onChange({ ...options, n: Number(n) })}
               />
+              {/* Measured against the returned bytes: jpeg really comes back as ffd8, png as
+                  89504e47. Offered because a jpeg is roughly a quarter of the size, which matters
+                  for a file the user is going to download. */}
+              <Choices
+                label={t('Format')}
+                values={GENERATION_CHOICES.image.outputFormat}
+                current={options.outputFormat ?? 'png'}
+                onPick={(f) =>
+                  onChange({
+                    ...options,
+                    outputFormat: String(f),
+                    // A transparent jpeg is not a thing, so switching away from png drops it rather
+                    // than sending a combination the upstream would have to resolve for us.
+                    background:
+                      String(f) !== 'png' && options.background === 'transparent'
+                        ? 'auto'
+                        : options.background,
+                  })
+                }
+              />
+              <Choices
+                label={t('Background')}
+                values={
+                  // `transparent` is withheld rather than shown-and-rejected when the format cannot
+                  // carry it: an option that silently does nothing is the defect this panel just
+                  // had two of.
+                  (options.outputFormat ?? 'png') === 'png'
+                    ? GENERATION_CHOICES.image.background
+                    : GENERATION_CHOICES.image.background.filter((b) => b !== 'transparent')
+                }
+                current={options.background ?? 'auto'}
+                onPick={(b) => onChange({ ...options, background: String(b) })}
+              />
+              {(options.outputFormat ?? 'png') === 'jpeg' && (
+                // Only for jpeg, and only then. Measured monotonic: 20 -> 396 KB, 60 -> 521 KB,
+                // 100 -> 564 KB.
+                <Choices
+                  label={t('Compression')}
+                  values={GENERATION_CHOICES.image.outputCompression}
+                  current={options.outputCompression ?? 80}
+                  format={(v) => `${v}%`}
+                  onPick={(c) => onChange({ ...options, outputCompression: Number(c) })}
+                />
+              )}
             </>
           )}
 
           {mode === 'video' && (
             <Choices
-              label="Length"
+              label={t('Length')}
               values={GENERATION_CHOICES.video.duration}
               current={options.duration ?? 5}
               format={(v) => `${v}s`}
@@ -117,25 +161,34 @@ export function GenerationOptions({
           {mode === 'speech' && (
             <>
               <Choices
-                label="Voice"
+                label={t('Voice')}
                 values={GENERATION_CHOICES.speech.voice}
                 current={options.voice ?? 'default'}
                 onPick={(voice) => onChange({ ...options, voice: String(voice) })}
               />
               <Choices
-                label="Speed"
+                label={t('Speed')}
                 values={GENERATION_CHOICES.speech.speed}
                 current={options.speed ?? 1}
                 format={(v) => `${v}×`}
                 onPick={(speed) => onChange({ ...options, speed: Number(speed) })}
+              />
+              {/* The upstream serves six audio formats and this UI offered none, so every clip was
+                  mp3 whether or not that was wanted. mp3 stays the default: it is what the in-page
+                  player is guaranteed to decode. */}
+              <Choices
+                label={t('Format')}
+                values={GENERATION_CHOICES.speech.responseFormat}
+                current={options.responseFormat ?? 'mp3'}
+                onPick={(f) => onChange({ ...options, responseFormat: String(f) })}
               />
             </>
           )}
 
           <p className="genopts-note">
             {mode === 'speech'
-              ? 'Speech is priced by how much text you send, not by these settings. The exact price is quoted before anything is spent.'
-              : 'These do not change the price — the quote is the same either way. You always see it before anything is spent.'}
+              ? t('Speech is priced by how much text you send, not by these settings. The exact price is quoted before anything is spent.')
+              : t('These do not change the price — the quote is the same either way. You always see it before anything is spent.')}
           </p>
         </div>
       )}

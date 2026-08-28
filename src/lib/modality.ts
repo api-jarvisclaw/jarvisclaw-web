@@ -128,14 +128,51 @@ export const GENERATION_CHOICES = {
      */
     quality: ['auto', 'low', 'medium', 'high'],
     n: [1, 2, 4],
+    /** Measured: the returned bytes really are a JPEG (ffd8) or a PNG (89504e47). */
+    outputFormat: ['png', 'jpeg'],
+    /** `transparent` needs png; a transparent jpeg is not a thing. */
+    background: ['auto', 'opaque', 'transparent'],
+    /** JPEG only. Measured monotonic: 20 -> 396 KB, 60 -> 521 KB, 100 -> 564 KB. */
+    outputCompression: [40, 60, 80, 100],
   },
   video: {
     duration: [5, 10],
   },
   // NOTE: image.quality above is the upstream's OWN value list, not DALL·E's.
   speech: {
-    voice: ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'],
+    /**
+     * The upstream offers 37 voices. Six were listed here — the original OpenAI set — so the other
+     * 31 were unreachable from this UI.
+     *
+     * Not all 37 are listed, and that is a judgement rather than an oversight: the tail includes
+     * dated snapshots (`megan-wetherall-2025-03-07`) that duplicate an undated name, and a menu of
+     * 37 is a menu nobody reads. These are the distinct, undated ones. The full list, from the
+     * upstream's own 400: alloy, echo, fable, onyx, nova, shimmer, coral, verse, ballad, ash, sage,
+     * marin, cedar, amuch, aster, brook, clover, dan, elan, marilyn, meadow, jazz, rio, breeze,
+     * cove, ember, fathom, glimmer, harp, juniper, maple, orbit, vale, megan-wetherall, jade-hardy,
+     * + two dated variants.
+     */
+    voice: [
+      'alloy',
+      'echo',
+      'fable',
+      'onyx',
+      'nova',
+      'shimmer',
+      'coral',
+      'verse',
+      'ballad',
+      'ash',
+      'sage',
+      'marin',
+      'cedar',
+      'juniper',
+      'maple',
+      'ember',
+    ],
     speed: [0.75, 1, 1.25, 1.5],
+    /** Measured from the upstream's own 400. mp3 is the default and what the player expects. */
+    responseFormat: ['mp3', 'wav', 'opus', 'aac', 'flac'],
   },
 } as const
 
@@ -212,16 +249,29 @@ function atomicToUsd(amount: string): number {
 export interface GenerationOptions {
   /** Image: `1024x1024`, `1792x1024`, … */
   size?: string
-  /** Image: `standard` | `hd`. */
+  /** Image: `auto` | `low` | `medium` | `high` — the upstream's own list, not DALL·E's. */
   quality?: string
   /** Image: how many to make. */
   n?: number
-  /** Video: seconds. */
+  /** Image: `png` | `jpeg`. Measured: the returned bytes really do change signature. */
+  outputFormat?: string
+  /** Image: `transparent` | `opaque` | `auto`. Transparency needs png. */
+  background?: string
+  /**
+   * Image: JPEG compression, 0–100.
+   *
+   * Only meaningful with `output_format: jpeg`. Measured monotonic: 20 -> 396 KB, 60 -> 521 KB,
+   * 100 -> 564 KB on one prompt.
+   */
+  outputCompression?: number
+  /** Video: seconds. Sent as `duration_seconds` — see buildBody. */
   duration?: number
-  /** Speech: a named voice, when the upstream offers them. */
+  /** Speech: a named voice. The upstream offers 37; see GENERATION_CHOICES. */
   voice?: string
-  /** Speech: playback rate. */
+  /** Speech: playback rate, 0.25–4.0. */
   speed?: number
+  /** Speech: `mp3` | `aac` | `opus` | `flac` | `pcm` | `wav`. */
+  responseFormat?: string
 }
 
 function buildBody(
@@ -241,6 +291,23 @@ function buildBody(
     // Guarded, not passed through: n=0 would ask for nothing and still be charged, and a
     // non-integer is rejected by the DTO's *uint.
     if (Number.isInteger(options.n) && (options.n as number) > 0) body.n = options.n
+    if (options.outputFormat) body.output_format = options.outputFormat
+    if (options.background) body.background = options.background
+    /**
+     * Only with jpeg, and only in range.
+     *
+     * The upstream rejects a non-integer outright ("expected an integer, but got a string"), and
+     * sending a compression level alongside `output_format: png` asks it to compress a format that
+     * does not take a quality level — so it is gated on the format rather than sent hopefully.
+     */
+    if (
+      options.outputFormat === 'jpeg' &&
+      Number.isInteger(options.outputCompression) &&
+      (options.outputCompression as number) >= 0 &&
+      (options.outputCompression as number) <= 100
+    ) {
+      body.output_compression = options.outputCompression
+    }
   }
 
   if (kind === 'video') {
@@ -270,11 +337,12 @@ function buildBody(
 
   if (kind === 'speech') {
     if (options.voice) body.voice = options.voice
-    // Bounded to the range the OpenAI-compatible schema accepts. An out-of-range speed is a
-    // 400 on a call the user has already been quoted for.
+    // Bounded to the range the upstream accepts — measured: "Expected a value <= 4.0, but got 99".
+    // An out-of-range speed is a 400 on a call the user has already been quoted for.
     if (Number.isFinite(options.speed) && (options.speed as number) >= 0.25 && (options.speed as number) <= 4) {
       body.speed = options.speed
     }
+    if (options.responseFormat) body.response_format = options.responseFormat
   }
 
   return body

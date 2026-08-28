@@ -264,6 +264,21 @@ const zh: Record<string, string> = {
   // is a mismatch between the UI and the API.
   Send: '发送',
   'Generation options': '生成选项',
+  // The generation knobs. Every one of these was measured against a real paid call before being
+  // offered — see GENERATION_CHOICES.
+  Size: '尺寸',
+  Quality: '质量',
+  Count: '数量',
+  Format: '格式',
+  Background: '背景',
+  Compression: '压缩',
+  Length: '时长',
+  Voice: '音色',
+  Speed: '速度',
+  'Speech is priced by how much text you send, not by these settings. The exact price is quoted before anything is spent.':
+    '语音按你发送的文字量计价，与这些设置无关。扣款前会显示确切价格。',
+  'These do not change the price — the quote is the same either way. You always see it before anything is spent.':
+    '这些设置不影响价格 —— 报价两种情况下都一样。扣款前你总能先看到金额。',
   // GENERATIONS[kind].label from lib/modality.ts, rendered as t(...) so the scan cannot see them —
   // gated by their own test, which reads modality.ts directly.
   Image: '图片',

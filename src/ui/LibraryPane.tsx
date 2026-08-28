@@ -9,6 +9,7 @@ import {
   type LibraryCategory,
   type LibraryPrompt,
 } from '../lib/library'
+import { Scrim } from './Scrim'
 
 /**
  * The prompt library — 119 tested prompts, organised by what they are for.
@@ -212,18 +213,29 @@ function LibraryDetail({
   const params = Object.entries(item.params)
 
   return (
-    <div
-      className="showcase-modal"
-      role="dialog"
-      aria-modal="true"
-      aria-label={item.title}
-      onClick={onClose}
-    >
-      <div className="showcase-modal-inner" onClick={(e) => e.stopPropagation()}>
-        <div className="showcase-modal-head">
+    /**
+     * `scrim` + `showcase-detail`, the same pair SeedancePane uses. Deliberately reused rather
+     * than given its own classes: my first version invented `showcase-modal`, `-inner`, `-head`
+     * and `-actions`, and NONE of the four had a CSS rule. The dialog mounted, held a real 573px
+     * box, and Playwright's is_visible() said true — at y=9928, appended a full ten thousand
+     * pixels below the grid, with position:static, z-index:auto and a transparent background.
+     *
+     * So it opened and nothing happened on screen, and the probe that read .showcase-prompt (a
+     * class that DOES have CSS) got its 518 characters and passed. A class name with no rule
+     * behind it fails exactly this way: silently, and only for the person looking at it.
+     */
+    <Scrim onClose={onClose}>
+      <div
+        className="showcase-detail"
+        role="dialog"
+        aria-modal="true"
+        aria-label={item.title}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="showcase-detail-head">
           <div>
             <h3>{item.title}</h3>
-            <p className="showcase-modal-meta">
+            <p className="showcase-detail-meta">
               {LIBRARY_CATEGORIES.find((c) => c.id === item.category)?.en ?? item.category}
               {' · '}
               {item.kind === 'video' ? 'video prompt' : 'image prompt'}
@@ -263,24 +275,33 @@ function LibraryDetail({
           </dl>
         )}
 
-        <div className="showcase-modal-actions">
-          <button className="showcase-run" onClick={() => onUsePrompt(item.prompt, item.kind)}>
-            <SparklesIcon size={13} aria-hidden="true" />
-            Run this prompt
-          </button>
-          <button className="link-btn" onClick={copy}>
+        {/* `showcase-prompt-actions` and `approve` again rather than a new pair: `showcase-run`
+            was also invented and also had no rule, so the primary action rendered as unstyled
+            default-browser text. */}
+        <div className="showcase-prompt-actions">
+          <button className="ghost-btn" onClick={() => void copy()}>
             {copied ? (
-              <>
-                <CheckIcon size={12} aria-hidden="true" /> copied
-              </>
+              <CheckIcon size={13} aria-hidden="true" />
             ) : (
-              <>
-                <CopyIcon size={12} aria-hidden="true" /> copy prompt
-              </>
+              <CopyIcon size={13} aria-hidden="true" />
             )}
+            {copied ? 'Copied' : 'Copy prompt'}
+          </button>
+          {/* Loads the prompt into the composer; it does not spend anything. `item.kind`, never a
+              literal — sending a shot description to the image endpoint returns a poster of the
+              scene instead of the scene. */}
+          <button
+            className="approve"
+            onClick={() => {
+              onUsePrompt(item.prompt, item.kind)
+              onClose()
+            }}
+          >
+            <SparklesIcon size={13} aria-hidden="true" />
+            Make your own
           </button>
         </div>
       </div>
-    </div>
+    </Scrim>
   )
 }

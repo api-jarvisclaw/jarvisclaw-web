@@ -18,6 +18,7 @@ import {
 import { LIBRARY_COUNT } from '../lib/library-count'
 import { SEEDANCE_COUNT } from '../lib/seedance-count'
 import { SHOWCASE, showcaseMode, showcaseUrl, type ShowcaseItem } from '../lib/showcase'
+import { Scrim } from './Scrim'
 
 /**
  * The Seedance pane is lazy, and it is the only lazy thing in this app.
@@ -257,7 +258,8 @@ function ShowcaseDetail({
   }
 
   return (
-    <div className="scrim" onClick={onClose} role="presentation">
+    // Portalled out of `.shell` — see Scrim.tsx. Same stacking-context defect as the other three.
+    <Scrim onClose={onClose}>
       <div
         className="showcase-detail"
         role="dialog"
@@ -348,7 +350,7 @@ function ShowcaseDetail({
           </p>
         )}
       </div>
-    </div>
+    </Scrim>
   )
 }
 

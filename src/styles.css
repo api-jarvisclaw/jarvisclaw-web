@@ -2929,11 +2929,20 @@ body.is-resizing * {
 
 /* ---- seedance prompt collection ---- */
 
+/* `margin-inline: auto`, NOT `margin: 14px 0 4px`.
+   Every child of .transcript is a 860px column centred in a 1328px pane by an auto inline margin.
+   The `0` in the shorthand overwrote that auto, so this one row sat 205px to the LEFT of the
+   heading, the category strip and the grid it belongs to — measured: left=290 against 495 for all
+   of its siblings. Pre-dates the library pane; that pane inherited it and made it obvious by
+   putting a filter strip directly above. */
 .seedance-search-row {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 14px 0 4px;
+  width: 100%;
+  max-width: 860px;
+  margin-block: 14px 4px;
+  margin-inline: auto;
 }
 
 .seedance-count {

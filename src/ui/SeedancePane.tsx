@@ -7,6 +7,7 @@ import {
   seedanceUrl,
   type SeedancePrompt,
 } from '../lib/seedance'
+import { Scrim } from './Scrim'
 
 /**
  * The Seedance 2.0 prompt collection.
@@ -165,7 +166,10 @@ function SeedanceDetail({
   }
 
   return (
-    <div className="scrim" onClick={onClose} role="presentation">
+    // Portalled out of `.shell`. See Scrim.tsx: the shell is a stacking context, so the scrim's
+    // z-index: 10 never outranked the top bar or the conversation rail, both of which stayed
+    // clickable behind this dialog. Measured, not inferred.
+    <Scrim onClose={onClose}>
       <div
         className="showcase-detail"
         role="dialog"
@@ -285,6 +289,6 @@ function SeedanceDetail({
           </p>
         )}
       </div>
-    </div>
+    </Scrim>
   )
 }

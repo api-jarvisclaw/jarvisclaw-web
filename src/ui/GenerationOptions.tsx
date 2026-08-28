@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react'
 import {
   GENERATION_CHOICES,
   videoLimitsFor,
+  speechVoicesFor,
+  speechSpeedsFor,
   type GenerationKind,
   type GenerationOptions as Options,
 } from '../lib/modality'
@@ -50,6 +52,8 @@ export function GenerationOptions({
 }) {
   const t = useT()
   const limits = videoLimitsFor(model ?? '')
+  const voices = speechVoicesFor(model ?? '')
+  const speeds = speechSpeedsFor(model ?? '')
   const [open, setOpen] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
 
@@ -69,8 +73,8 @@ export function GenerationOptions({
     }
   }, [open])
 
-  // Music takes nothing beyond a prompt, so the button would open an empty panel.
-  if (mode === 'music') return null
+  // Music used to take nothing beyond a prompt, which was wrong: `instrumental` and `lyrics` are
+  // documented and were never offered.
 
   const summary = describe(mode, options)
 
@@ -201,15 +205,26 @@ export function GenerationOptions({
 
           {mode === 'speech' && (
             <>
-              <Choices
-                label={t('Voice')}
-                values={GENERATION_CHOICES.speech.voice}
-                current={options.voice ?? 'default'}
-                onPick={(voice) => onChange({ ...options, voice: String(voice) })}
-              />
+              {/* Scoped to the model's own family, because a cross-family name does NOT 400 — it
+                  settles the payment and THEN gets refused: "upstream 402 after payment — USDC
+                  already settled on-chain and cannot be reversed". Measured with
+                  elevenlabs/flash-v2.5 + alloy. Every other wrong option here costs a failed call;
+                  this one costs the charge too.
+
+                  Hidden entirely for models that ignore `voice` (seed-audio steers delivery from the
+                  prompt text) rather than shown as a control that does nothing. */}
+              {voices.length > 0 && (
+                <Choices
+                  label={t('Voice')}
+                  values={voices.map((v) => v.id)}
+                  current={options.voice ?? voices[0].id}
+                  format={(id) => voices.find((v) => v.id === id)?.label ?? String(id)}
+                  onPick={(voice) => onChange({ ...options, voice: String(voice) })}
+                />
+              )}
               <Choices
                 label={t('Speed')}
-                values={GENERATION_CHOICES.speech.speed}
+                values={speeds}
                 current={options.speed ?? 1}
                 format={(v) => `${v}×`}
                 onPick={(speed) => onChange({ ...options, speed: Number(speed) })}
@@ -223,6 +238,41 @@ export function GenerationOptions({
                 current={options.responseFormat ?? 'mp3'}
                 onPick={(f) => onChange({ ...options, responseFormat: String(f) })}
               />
+            </>
+          )}
+
+          {mode === 'music' && (
+            <>
+              {/* Documented and never offered. `instrumental` and `lyrics` cannot be combined — the
+                  upstream 400s on the pair — so picking one clears the other here rather than
+                  sending a conflict we already know fails. */}
+              <Choices
+                label={t('Vocals')}
+                values={['sung', 'instrumental'] as const}
+                current={options.instrumental ? 'instrumental' : 'sung'}
+                format={(v) => t(v)}
+                onPick={(v) =>
+                  onChange({
+                    ...options,
+                    instrumental: v === 'instrumental',
+                    lyrics: v === 'instrumental' ? undefined : options.lyrics,
+                  })
+                }
+              />
+              {!options.instrumental && (
+                <div className="genopts-row">
+                  <span className="genopts-label">{t('Lyrics')}</span>
+                  {/* Left empty means the model writes its own, which is the documented default and
+                      what someone wants on a first try. */}
+                  <textarea
+                    className="genopts-text"
+                    rows={3}
+                    value={options.lyrics ?? ''}
+                    placeholder={t('leave empty and the model writes them')}
+                    onChange={(e) => onChange({ ...options, lyrics: e.target.value })}
+                  />
+                </div>
+              )}
             </>
           )}
 

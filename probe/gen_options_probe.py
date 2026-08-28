@@ -170,6 +170,61 @@ def main() -> int:
             elif max(lens) > 30:
                 fails.append(f"a duration above every documented ceiling is offered: {lens}")
 
+        # ---- speech: the voice list must be scoped to the model's family ----
+        #
+        # An out-of-family voice does NOT 400. Measured: elevenlabs/flash-v2.5 + alloy returns
+        # "upstream 402 after payment — USDC already settled on-chain and cannot be reversed". The
+        # payment goes through and the upstream refuses; the money is gone. So this is the one option
+        # list where a wrong entry costs the charge as well as the call.
+        page.route("**/v1/audio/speech", quote)
+        open_panel("Speech")
+        sp = rows()
+        print(f"speech rows: {list(sp)}")
+        for k, v in sp.items():
+            print(f"  {k}: {v[:6]}{' …' if len(v) > 6 else ''}")
+        if "voice" in sp:
+            vs = sp["voice"]
+            fams = {
+                "elevenlabs": {"Sarah", "George", "Roger", "Brian", "Daniel"},
+                "openai": {"alloy", "echo", "coral", "verse", "ash"},
+            }
+            hits = {
+                f: sum(1 for v in vs if any(n.lower() in v.lower() for n in names))
+                for f, names in fams.items()
+            }
+            print(f"  family hits: {hits}")
+            if hits["elevenlabs"] > 0 and hits["openai"] > 0:
+                fails.append(
+                    f"the voice list mixes families: {vs[:8]} — an out-of-family name settles the "
+                    "payment and is then refused, so the money is lost, not just the call"
+                )
+            if sum(hits.values()) == 0:
+                fails.append(f"no recognisable voices offered: {vs[:8]}")
+
+        # ---- music: instrumental and lyrics were documented and never offered ----
+        open_panel("Music")
+        mu = rows()
+        print(f"music rows: {list(mu)}")
+        if "vocals" not in mu:
+            fails.append(f"the music panel has no vocals control: {list(mu)}")
+        # The lyrics box must be a real, styled textarea rather than a class with no rule behind it.
+        ta = page.locator(".genopts-text")
+        if ta.count() == 0:
+            fails.append("no lyrics box in the music panel")
+        else:
+            st = ta.first.evaluate(
+                "e => { const c = getComputedStyle(e); return [c.display, c.borderStyle, c.padding, c.maxHeight]; }"
+            )
+            tb = ta.first.bounding_box()
+            print(f"  lyrics box: display={st[0]} border={st[1]} padding={st[2]} maxH={st[3]} box={tb}")
+            if st[1] == "none" or st[2] in ("0px", ""):
+                fails.append(
+                    f"the lyrics box has no styling ({st}) — .genopts-text has no CSS rule, the same "
+                    "shape as the dialog that rendered ten thousand pixels off screen"
+                )
+            if st[3] == "none":
+                fails.append("the lyrics box is uncapped; long lyrics push the panel off screen")
+
         browser.close()
 
     print()

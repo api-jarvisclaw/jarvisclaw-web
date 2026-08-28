@@ -1580,6 +1580,36 @@ body.is-resizing * {
   margin-bottom: 6px;
 }
 
+/* The lyrics box.
+   `.composer-shell .genopts-text`, not `.genopts-text` — this panel lives INSIDE the composer shell,
+   whose own `.composer-shell textarea` rule sets `border: none; padding: 4px 2px 8px` and wins on
+   specificity (two selectors to one). My first version had the right properties and no visible
+   effect, which a browser probe caught by reading computed style rather than checking the class was
+   present. Raised specificity rather than !important, so the next override is still winnable. */
+.composer-shell .genopts-text,
+.genopts-text {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--foreground);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  /* Capped and scrollable: lyrics run long, and an uncapped textarea inside a popover pushes the
+     panel past the viewport with no way to reach the controls under it. */
+  max-height: 120px;
+  resize: vertical;
+}
+
+.composer-shell .genopts-text:focus-visible,
+.genopts-text:focus-visible {
+  outline: none;
+  border-color: var(--glow-brand);
+}
+
 .genopts-choices {
   display: flex;
   flex-wrap: wrap;

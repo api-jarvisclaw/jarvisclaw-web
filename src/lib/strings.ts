@@ -280,6 +280,13 @@ const zh: Record<string, string> = {
   Audio: '声音',
   on: '开',
   off: '关',
+  // Music. 纯音乐 rather than a literal rendering of "instrumental": it is what a Chinese music app
+  // calls a track with no vocals.
+  Vocals: '人声',
+  sung: '带唱',
+  instrumental: '纯音乐',
+  Lyrics: '歌词',
+  'leave empty and the model writes them': '留空则由模型自己写',
   'Length does not change the price, but 480p costs about half. The exact amount is quoted before anything is spent.':
     '时长不影响价格，但 480p 大约只要一半。扣款前会显示确切金额。',
   Voice: '音色',

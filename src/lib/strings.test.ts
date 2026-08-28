@@ -84,9 +84,6 @@ const DYNAMIC_KEYS = [
   // distinction does not exist in the target; the pair is checked by its own test below.
   '{n} category',
   '{n} categories',
-  // The audio toggle's chip labels, rendered as t(v) from a values array.
-  'on',
-  'off',
   // GENERATIONS[kind].label from lib/modality.ts, rendered as t(GENERATIONS[kind].label).
   'Image',
   'Video',
@@ -108,6 +105,24 @@ const files = sourceFiles(SRC).filter((f) => !f.endsWith('strings.ts'))
 
 /** A literal `new Error('…')`. Template-literal throws are covered by errorPatternKeys() instead. */
 const THROWN_MESSAGE = /new Error\(\s*'((?:[^'\\]|\\.)+?)'\s*\)/g
+
+/**
+ * Chip labels passed through `format={(v) => t(v)}`.
+ *
+ * Read out of the `values={[...] as const}` arrays in the source, so adding a toggle adds its labels
+ * here automatically. Hand-listing them worked twice and then I added a third toggle and the guard
+ * flagged it — an exemption list that has to be edited by hand is one that goes stale.
+ */
+const CHIP_LABELS: string[] = (() => {
+  const out: string[] = []
+  for (const f of sourceFiles(SRC).filter((x) => x.endsWith('GenerationOptions.tsx'))) {
+    const src = readFileSync(f, 'utf8')
+    for (const m of src.matchAll(/values=\{\[([^\]]+)\] as const\}/g)) {
+      for (const q of m[1].matchAll(/'([^']+)'/g)) out.push(q[1])
+    }
+  }
+  return out
+})()
 
 /**
  * User-facing text that is not thrown at all.
@@ -164,7 +179,14 @@ describe('the translation catalogue', () => {
     // The other direction, and the one that rots quietly: a translated string left behind after its
     // component changed. Harmless on screen, but it makes the catalogue an unreliable record of what
     // is actually translated, and coverage numbers computed from it become fiction.
-    const asked = new Set<string>([...DYNAMIC_KEYS, ...errorMessageKeys()])
+    /**
+     * The exemptions, assembled here rather than folded into DYNAMIC_KEYS.
+     *
+     * CHIP_LABELS is derived from the source further down this file, so spreading it into a
+     * module-level array literal is a use-before-initialisation. Building the set inside the test is
+     * both correct and clearer about what is exempt and why.
+     */
+    const asked = new Set<string>([...DYNAMIC_KEYS, ...CHIP_LABELS, ...errorMessageKeys()])
     for (const f of files) for (const k of callsIn(readFileSync(f, 'utf8'))) asked.add(k)
     const orphans = knownKeys().filter((k) => !asked.has(k))
     expect(orphans).toEqual([])
@@ -214,12 +236,13 @@ describe('the translation catalogue', () => {
     expect(labels.filter((l) => !known.has(l))).toEqual([])
   })
 
-  it('translates the audio toggle labels', () => {
-    // Gate for the on/off exemption. They are rendered as t(v) from a `values` array, so the static
-    // scan cannot see them and an exemption without a gate is where a key goes to be forgotten —
-    // leaving English words on a Chinese panel.
-    for (const k of ['on', 'off']) {
-      expect(translate('zh', k), k).not.toBe(k)
+  it('translates every chip label the panel renders through a variable', () => {
+    // The gate for the CHIP_LABELS exemption, and it has to be a gate: these are exempted from the
+    // orphan check, so without it a new toggle's labels sit in the list untranslated and render as
+    // English words on a Chinese panel.
+    expect(CHIP_LABELS.length, 'no chip labels found — the matcher stopped working').toBeGreaterThan(3)
+    for (const k of CHIP_LABELS) {
+      expect(translate('zh', k), `chip label ${k}`).not.toBe(k)
     }
   })
 

@@ -264,6 +264,104 @@ export const VIDEO_LIMITS: Record<
 }
 
 /**
+ * Speech voices, PER MODEL FAMILY — and this one costs real money to get wrong.
+ *
+ * ## The measurement that made this non-negotiable
+ *
+ * `elevenlabs/flash-v2.5` with `voice: alloy` did not return a 400. It returned:
+ *
+ *     upstream 402 after payment — USDC already settled on-chain and cannot be reversed
+ *
+ * The payment settles, the upstream refuses the voice, and the money is gone. Every other wrong
+ * parameter in this file costs a failed call; this one costs the charge as well. So the voice list
+ * cannot be a union, and cannot be a guess.
+ *
+ * ## Two families, mutually exclusive
+ *
+ *   - ElevenLabs models take aliases (`sarah`, `george`) or a raw `voice_id`. Their roster comes from
+ *     GET /api/v1/audio/voices on the upstream — 22 voices, of which only 8 have an alias; the rest
+ *     are reachable by id only. Our gateway does not proxy that endpoint (404), so the list is
+ *     transcribed here rather than fetched.
+ *   - OpenAI models take their own 37 names (`alloy`, `coral`, …), measured from the upstream's 400.
+ *
+ * Cross-family names are not merely invalid, they are the expensive case above.
+ *
+ * ## bytedance/seed-audio-1.0 ignores voice entirely
+ *
+ * Documented: you steer delivery inside the prompt text. Offering a voice picker for it would be a
+ * control that does nothing — the defect this whole pass exists to remove — so it gets an empty list
+ * and the UI hides the row.
+ */
+export const SPEECH_VOICES: Record<string, readonly { id: string; label: string }[]> = {
+  // ElevenLabs: the 8 aliased voices, then the id-only ones. Labels carry the upstream's own
+  // one-line character description, which is the only way to choose without listening to all 22.
+  elevenlabs: [
+    { id: 'sarah', label: 'Sarah — mature, reassuring' },
+    { id: 'george', label: 'George — warm storyteller' },
+    { id: 'roger', label: 'Roger — laid-back, resonant' },
+    { id: 'laura', label: 'Laura — quirky, enthusiast' },
+    { id: 'charlie', label: 'Charlie — deep, energetic' },
+    { id: 'callum', label: 'Callum — husky trickster' },
+    { id: 'river', label: 'River — relaxed, neutral' },
+    { id: 'harry', label: 'Harry — fierce' },
+    { id: 'nPczCjzI2devNBz1zQrb', label: 'Brian — deep, comforting' },
+    { id: 'onwK4e9ZLuTAKqWW03F9', label: 'Daniel — steady broadcaster' },
+    { id: 'Xb7hH8MSUJpSbSDYk0k2', label: 'Alice — clear educator' },
+    { id: 'cgSgspJ2msm6clMCkdW9', label: 'Jessica — playful, warm' },
+    { id: 'pFZP5JQG7iQjIQuC4Bku', label: 'Lily — velvety' },
+    { id: 'cjVigY5qzO86Huf0OWal', label: 'Eric — smooth, trustworthy' },
+  ],
+  // OpenAI: measured from the upstream's own 400. The full 37 include dated snapshots that duplicate
+  // an undated name; these are the distinct ones.
+  openai: [
+    { id: 'alloy', label: 'alloy' },
+    { id: 'echo', label: 'echo' },
+    { id: 'fable', label: 'fable' },
+    { id: 'onyx', label: 'onyx' },
+    { id: 'nova', label: 'nova' },
+    { id: 'shimmer', label: 'shimmer' },
+    { id: 'coral', label: 'coral' },
+    { id: 'verse', label: 'verse' },
+    { id: 'ballad', label: 'ballad' },
+    { id: 'ash', label: 'ash' },
+    { id: 'sage', label: 'sage' },
+    { id: 'marin', label: 'marin' },
+    { id: 'cedar', label: 'cedar' },
+    { id: 'juniper', label: 'juniper' },
+    { id: 'maple', label: 'maple' },
+    { id: 'ember', label: 'ember' },
+  ],
+}
+
+/** Which voice family a speech model belongs to, or null when it takes no voice at all. */
+export function speechFamilyOf(model: string): 'elevenlabs' | 'openai' | null {
+  const m = model.toLowerCase()
+  if (m.includes('elevenlabs')) return 'elevenlabs'
+  // Gemini TTS models take OpenAI-style names through this gateway; grouped with openai until
+  // measured otherwise rather than given a family of their own on a guess.
+  if (m.includes('openai') || m.includes('gemini')) return 'openai'
+  // seed-audio ignores `voice` (documented), and auto/tts resolves upstream to an unknown model —
+  // in both cases sending a voice risks the paid-then-refused case above.
+  return null
+}
+
+/** The voices one model accepts. Empty means the model takes no voice and the row is hidden. */
+export function speechVoicesFor(model: string): readonly { id: string; label: string }[] {
+  const family = speechFamilyOf(model)
+  return family ? SPEECH_VOICES[family] : []
+}
+
+/**
+ * Speed range, which also differs by family.
+ *
+ * ElevenLabs documents 0.7–1.2; the OpenAI path accepts up to 4.0 (measured: "Expected a value <=
+ * 4.0, but got 99"). Offering 1.5× to an ElevenLabs model would be a rejected call.
+ */
+export function speechSpeedsFor(model: string): readonly number[] {
+  return speechFamilyOf(model) === 'elevenlabs' ? [0.7, 0.85, 1, 1.1, 1.2] : [0.75, 1, 1.25, 1.5]
+}
+
+/**
  * The limits for one model, falling back to the widest SAFE set rather than the union.
  *
  * `auto/video` resolves upstream to whichever model the gateway picks, so its options have to be
@@ -399,6 +497,24 @@ export interface GenerationOptions {
   speed?: number
   /** Speech: `mp3` | `aac` | `opus` | `flac` | `pcm` | `wav`. */
   responseFormat?: string
+  /**
+   * Music: no vocals.
+   *
+   * Cannot be combined with `lyrics` — the upstream 400s on the pair, so the UI clears one when the
+   * other is set rather than sending a conflict it already knows will fail.
+   */
+  instrumental?: boolean
+  /**
+   * Music: your own lyrics.
+   *
+   * Omitting this with `instrumental: false` makes the model write its own, which is the documented
+   * default and usually what someone wants first.
+   *
+   * NOT offered: `duration_seconds`. It is documented as ignored — "MiniMax ignores this — output is
+   * always ~3 min" — and a length control that does nothing is exactly what this pass removed from
+   * the video panel.
+   */
+  lyrics?: string
 }
 
 function buildBody(
@@ -484,6 +600,12 @@ function buildBody(
     // An integer, and 0 is a legitimate seed — hence the explicit Number.isInteger rather than a
     // truthiness check, which would drop it.
     if (Number.isInteger(options.seed)) body.seed = options.seed
+  }
+
+  if (kind === 'music') {
+    if (options.instrumental) body.instrumental = true
+    // Only when there are no vocals to write lyrics for. Sending both is a documented 400.
+    else if (options.lyrics && options.lyrics.trim() !== '') body.lyrics = options.lyrics.trim()
   }
 
   if (kind === 'speech') {

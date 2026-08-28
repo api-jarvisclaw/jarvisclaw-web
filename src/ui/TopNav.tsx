@@ -1,8 +1,11 @@
 import { PanelLeftIcon } from 'lucide-react'
 
 import { navFor } from '../lib/nav'
-import { LANDING_PATH, pathForView } from '../lib/route-path'
+import { landingPath, pathForView, viewPath } from '../lib/route-path'
+import { localePath, type Locale } from '../lib/i18n'
 import type { RailView } from './ChatList'
+import { LocaleToggle } from './LocaleToggle'
+import { useT } from './LocaleContext'
 import { ThemeToggle } from './ThemeToggle'
 import type { Theme } from '../lib/theme'
 
@@ -50,6 +53,8 @@ export function TopNav({
   onStop,
   onNew,
   onHome,
+  locale,
+  onLocale,
 }: {
   view: RailView
   anonymous: boolean
@@ -65,7 +70,15 @@ export function TopNav({
   onNew: () => void
   /** Back to the landing page. Absent when this console was not rendered by the router. */
   onHome?: () => void
+  /** The locale in the URL — every path this bar writes carries it. */
+  locale: Locale
+  /**
+   * Change language. Absent when nothing owns the URL, which also hides the switcher: a control
+   * that cannot navigate is worse than no control, because it looks like the switch failed.
+   */
+  onLocale?: (next: Locale) => void
 }) {
+  const t = useT()
   return (
     <header className="topbar">
       {/* The brand, at the window's left edge rather than inside the rail.
@@ -75,7 +88,7 @@ export function TopNav({
       {onHome ? (
         <a
           className="topbar-brand"
-          href={LANDING_PATH}
+          href={landingPath(locale)}
           onClick={(e) => {
             if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
             e.preventDefault()
@@ -101,13 +114,13 @@ export function TopNav({
         <PanelLeftIcon size={16} aria-hidden="true" />
       </button>
 
-      <nav className="topnav" aria-label="Sections">
+      <nav className="topnav" aria-label={t('Sections')}>
         {navFor('console').map((item) =>
           item.kind === 'view' ? (
             <a
               key={item.label}
               className={view === item.view ? 'topnav-item topnav-item-active' : 'topnav-item'}
-              href={pathForView(item.view)}
+              href={pathForView(locale, item.view)}
               // aria-current, not just a class: the highlight is a colour, and colour alone does not
               // tell a screen reader which pane is open.
               aria-current={view === item.view ? 'page' : undefined}
@@ -120,7 +133,7 @@ export function TopNav({
                 onView(item.view)
               }}
             >
-              {item.label}
+              {t(item.label)}
             </a>
           ) : (
             <a
@@ -130,7 +143,7 @@ export function TopNav({
               target="_blank"
               rel="noopener noreferrer"
             >
-              {item.label}
+              {t(item.label)}
             </a>
           ),
         )}
@@ -144,6 +157,17 @@ export function TopNav({
         {anonymous ? 'free · no sign-in' : 'signed in'}
       </span>
 
+      {onLocale && (
+        <LocaleToggle
+          locale={locale}
+          onLocale={onLocale}
+          // The same pane in the other language. Built from the CURRENT view rather than from
+          // window.location, so the href is correct even before the effect that rewrites the path
+          // has run — otherwise a language switch made immediately after changing pane would carry
+          // the reader back to the pane they just left.
+          hrefFor={(l) => localePath(l, viewPath(view))}
+        />
+      )}
       <ThemeToggle theme={theme} onTheme={onTheme} />
 
       {busy && (

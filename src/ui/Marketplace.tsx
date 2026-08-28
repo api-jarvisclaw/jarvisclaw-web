@@ -8,6 +8,7 @@ import {
   type MarketplaceCategory,
   type MarketplaceService,
 } from '../lib/catalogue'
+import { useT } from './LocaleContext'
 
 /**
  * The marketplace browser.
@@ -76,6 +77,7 @@ export function Marketplace({
   baseUrl: string
   onAsk: (prompt: string) => void
 }) {
+  const t = useT()
   const [services, setServices] = useState<MarketplaceService[]>([])
   const [categories, setCategories] = useState<MarketplaceCategory[]>([])
   const [apis, setApis] = useState<MarketplaceApi[]>([])
@@ -209,7 +211,7 @@ export function Marketplace({
           className="market-search"
           type="search"
           value={query}
-          placeholder="search endpoints"
+          placeholder={t('search endpoints')}
           onChange={(e) => setQuery(e.target.value)}
         />
         {/* The way out of the curated tier, and into it.

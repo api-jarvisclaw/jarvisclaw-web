@@ -53,6 +53,7 @@ import { Marketplace } from './ui/Marketplace'
 import { PaneResizer } from './ui/PaneResizer'
 import { TopNav } from './ui/TopNav'
 import { clampPane, loadPanes, savePanes, type Pane, type PaneWidths } from './lib/panes'
+import { DEFAULT_LOCALE, type Locale } from './lib/i18n'
 import { pathForView, replacePath } from './lib/route-path'
 import {
   isUserRejection,
@@ -81,6 +82,8 @@ export function App({
   initialPrompt,
   initialView,
   onHome,
+  locale = DEFAULT_LOCALE,
+  onLocale,
 }: {
   /** A prompt typed into the landing page's hero, to run once on arrival. */
   initialPrompt?: string
@@ -88,6 +91,16 @@ export function App({
   initialView?: RailView
   /** Back to the landing page. */
   onHome?: () => void
+  /**
+   * The locale in the URL, needed for every path this console writes.
+   *
+   * Defaulted so the tests can render the console with no routing owner, matching `onHome`. It is
+   * NOT defaulted in route-path's helpers, deliberately: there a default would let a caller emit an
+   * unprefixed href that appears to work while costing a redirect and a locale reset.
+   */
+  locale?: Locale
+  /** Change language, keeping the reader on the same pane. Absent when nothing owns the URL. */
+  onLocale?: (next: Locale) => void
 } = {}) {
   const [turns, setTurns] = useState<Turn[]>([])
   const [busy, setBusy] = useState(false)
@@ -142,16 +155,26 @@ export function App({
    */
   useEffect(() => {
     if (!onHome) return
-    replacePath(pathForView(view))
-  }, [onHome, view])
+    replacePath(pathForView(locale, view))
+  }, [onHome, view, locale])
   /**
    * Which gallery tab is showing. Lifted here so it survives leaving the gallery and coming
    * back — a tab that silently resets makes the other pane feel like it was not really there.
    *
-   * Defaults to the showcase: an empty "your creations" is what every new visitor has, and
-   * landing on an empty page is what makes someone leave.
+   * Defaults to the showcase for a new visitor and to their OWN work once they have any.
+   *
+   * Showcase-always was the original choice, for a good reason: an empty "your creations" is what
+   * every first-time visitor has, and landing on an empty page is what makes someone leave. But it
+   * held for everyone, so a person who had just paid for a video opened the gallery onto someone
+   * else's examples and had to find a tab to see the thing they bought. Paid work outranks
+   * examples whenever it exists.
+   *
+   * Read once, at mount, from the store rather than from `gallery` state — the state is loaded in
+   * the same initialiser pass and reading it here would depend on hook order.
    */
-  const [galleryTab, setGalleryTab] = useState<GalleryTab>('showcase')
+  const [galleryTab, setGalleryTab] = useState<GalleryTab>(() =>
+    loadGallery().length > 0 ? 'mine' : 'showcase',
+  )
   /**
    * Text pushed INTO the composer from elsewhere — currently a showcase prompt.
    *
@@ -1174,6 +1197,8 @@ export function App({
         onStop={stop}
         onNew={startNew}
         onHome={onHome}
+        locale={locale}
+        onLocale={onLocale}
       />
 
       <div

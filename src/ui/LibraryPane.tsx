@@ -10,6 +10,7 @@ import {
   type LibraryPrompt,
 } from '../lib/library'
 import { Scrim } from './Scrim'
+import { useT } from './LocaleContext'
 
 /**
  * The prompt library — 119 tested prompts, organised by what they are for.
@@ -37,6 +38,7 @@ export function LibraryPane({
 }: {
   onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
 }) {
+  const t = useT()
   const [open, setOpen] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState<LibraryCategory | null>(null)
@@ -75,7 +77,7 @@ export function LibraryPane({
     <>
       <div className="gallery-head">
         <div>
-          <h2>Prompts that were tested</h2>
+          <h2>{t('Prompts that were tested')}</h2>
           <p className="gallery-sub">
             {LIBRARY.length} prompts written and tested by their author, from{' '}
             {/* MIT requires the notice to travel with the work, and crediting the person who
@@ -103,7 +105,7 @@ export function LibraryPane({
           className={category === null ? 'market-cat is-on' : 'market-cat'}
           onClick={() => setCategory(null)}
         >
-          All
+          {t('All')}
           <span className="market-cat-n">{LIBRARY.length}</span>
         </button>
         {LIBRARY_CATEGORIES.map((c) => (
@@ -126,7 +128,7 @@ export function LibraryPane({
           className="market-search"
           type="search"
           value={query}
-          placeholder="search prompts"
+          placeholder={t('search prompts')}
           onChange={(e) => setQuery(e.target.value)}
         />
         {(query.trim() !== '' || category !== null) && (
@@ -197,6 +199,7 @@ function LibraryDetail({
   onClose: () => void
   onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
 }) {
+  const t = useT()
   const [copied, setCopied] = useState(false)
 
   const copy = async () => {
@@ -254,7 +257,7 @@ function LibraryDetail({
             </p>
           </div>
           <button className="link-btn" onClick={onClose}>
-            close
+            {t('close')}
           </button>
         </div>
 
@@ -285,7 +288,7 @@ function LibraryDetail({
             ) : (
               <CopyIcon size={13} aria-hidden="true" />
             )}
-            {copied ? 'Copied' : 'Copy prompt'}
+            {copied ? t('Copied') : t('Copy prompt')}
           </button>
           {/* Loads the prompt into the composer; it does not spend anything. `item.kind`, never a
               literal — sending a shot description to the image endpoint returns a poster of the
@@ -298,7 +301,7 @@ function LibraryDetail({
             }}
           >
             <SparklesIcon size={13} aria-hidden="true" />
-            Make your own
+            {t('Make your own')}
           </button>
         </div>
       </div>

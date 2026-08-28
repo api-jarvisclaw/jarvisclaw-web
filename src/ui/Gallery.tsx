@@ -19,6 +19,7 @@ import { LIBRARY_COUNT } from '../lib/library-count'
 import { SEEDANCE_COUNT } from '../lib/seedance-count'
 import { SHOWCASE, showcaseMode, showcaseUrl, type ShowcaseItem } from '../lib/showcase'
 import { Scrim } from './Scrim'
+import { useT } from './LocaleContext'
 
 /**
  * The Seedance pane is lazy, and it is the only lazy thing in this app.
@@ -83,6 +84,7 @@ export function Gallery({
   /** Loads a prompt into the composer in the right mode, ready to run. */
   onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
 }) {
+  const t = useT()
   return (
     <div className="transcript">
       <div className="gallery-tabs" role="tablist" aria-label="Gallery">
@@ -92,7 +94,7 @@ export function Gallery({
           className={tab === 'showcase' ? 'gallery-tab gallery-tab-active' : 'gallery-tab'}
           onClick={() => onTab('showcase')}
         >
-          Prompt gallery
+          {t('Prompt gallery')}
           <span className="gallery-tab-count">{SHOWCASE.length}</span>
         </button>
         <button
@@ -101,7 +103,7 @@ export function Gallery({
           className={tab === 'seedance' ? 'gallery-tab gallery-tab-active' : 'gallery-tab'}
           onClick={() => onTab('seedance')}
         >
-          Video prompts
+          {t('Video prompts')}
           <span className="gallery-tab-count">{SEEDANCE_COUNT}</span>
         </button>
         <button
@@ -110,7 +112,7 @@ export function Gallery({
           className={tab === 'library' ? 'gallery-tab gallery-tab-active' : 'gallery-tab'}
           onClick={() => onTab('library')}
         >
-          Prompt library
+          {t('Prompt library')}
           <span className="gallery-tab-count">{LIBRARY_COUNT}</span>
         </button>
         <button
@@ -119,7 +121,7 @@ export function Gallery({
           className={tab === 'mine' ? 'gallery-tab gallery-tab-active' : 'gallery-tab'}
           onClick={() => onTab('mine')}
         >
-          Your creations
+          {t('Your creations')}
           {/* No count when empty. A grey "0" beside a tab reads as a broken counter, and it is
               the one thing a first-time visitor would see. */}
           {items.length > 0 && <span className="gallery-tab-count">{items.length}</span>}
@@ -178,6 +180,7 @@ function ShowcasePane({
 }: {
   onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
 }) {
+  const t = useT()
   const [open, setOpen] = useState<string | null>(null)
   const selected = useMemo(() => SHOWCASE.find((s) => s.slug === open) ?? null, [open])
 
@@ -185,7 +188,7 @@ function ShowcasePane({
     <>
       <div className="gallery-head">
         <div>
-          <h2>Real prompts you can copy</h2>
+          <h2>{t('Real prompts you can copy')}</h2>
           <p className="gallery-sub">
             Every one of these was made by paying per generation — GPT Image 2 and SeeDance. Open
             one to read the full prompt, then run it yourself.
@@ -242,6 +245,7 @@ function ShowcaseDetail({
   onClose: () => void
   onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
 }) {
+  const t = useT()
   const [copied, setCopied] = useState(false)
 
   const copy = async () => {
@@ -307,7 +311,7 @@ function ShowcaseDetail({
         {item.prompt ? (
           <>
             <div className="showcase-prompt-head">
-              <span>Prompt</span>
+              <span>{t('Prompt')}</span>
               <div className="showcase-prompt-actions">
                 <button className="ghost-btn" onClick={copy}>
                   {copied ? (
@@ -315,7 +319,7 @@ function ShowcaseDetail({
                   ) : (
                     <CopyIcon size={13} aria-hidden="true" />
                   )}
-                  {copied ? 'Copied' : 'Copy prompt'}
+                  {copied ? t('Copied') : t('Copy prompt')}
                 </button>
                 {/* The point of the whole gallery. Copying is a step towards running it; this is
                     running it, in the mode the prompt was written for. */}
@@ -368,11 +372,12 @@ function MinePane({
   items: GalleryItem[]
   onRemove: (id: string) => void
 }) {
+  const t = useT()
   if (items.length === 0) {
     return (
       <div className="empty">
-        <span className="eyebrow">Your creations</span>
-        <h1>Nothing here yet</h1>
+        <span className="eyebrow">{t('Your creations')}</span>
+        <h1>{t('Nothing here yet')}</h1>
         <p>
           Images, video, music and speech you generate are collected here, with what each one
           cost. Use the buttons under the message box to make something — or start from one of

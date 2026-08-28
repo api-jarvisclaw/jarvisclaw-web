@@ -8,6 +8,7 @@ import {
   switchToBase,
   type WalletAccount,
 } from '../lib/wallet'
+import { useT } from './LocaleContext'
 
 const BASE_CHAIN_ID = 8453
 
@@ -30,6 +31,7 @@ export function WalletPanel({
   account: WalletAccount | null
   onAccount: (a: WalletAccount | null) => void
 }) {
+  const t = useT()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -71,7 +73,7 @@ export function WalletPanel({
 
   return (
     <section>
-      <h2>Wallet</h2>
+      <h2>{t('Wallet')}</h2>
 
       {!installed ? (
         <>
@@ -95,7 +97,7 @@ export function WalletPanel({
             you, in your wallet, showing the exact amount before it happens.
           </p>
           <button className="wallet-btn" onClick={connect} disabled={busy}>
-            {busy ? 'Waiting for your wallet…' : 'Connect wallet'}
+            {busy ? t('Waiting for your wallet…') : t('Connect wallet')}
           </button>
         </>
       ) : (
@@ -133,7 +135,7 @@ export function WalletPanel({
           )}
 
           <button className="wallet-link" onClick={() => onAccount(null)}>
-            Disconnect
+            {t('Disconnect')}
           </button>
         </>
       )}

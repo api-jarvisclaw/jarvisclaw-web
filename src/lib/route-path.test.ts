@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { CONSOLE_PATH, LANDING_PATH, pathForView, routeFor } from './route-path'
+import { LOCALES } from './i18n'
+import { consolePath, landingPath, pathForView, routeFor } from './route-path'
 
 /**
  * Which screen a URL names.
@@ -17,9 +18,27 @@ describe('routeFor', () => {
   it('opens each console pane from its own path', () => {
     // The reason these paths exist: a nav item that cannot be linked to is a button pretending to be
     // a link, and "look at this API" is a sentence people send as a URL.
-    expect(routeFor('/chat')).toEqual({ page: 'console', view: 'chat' })
-    expect(routeFor('/marketplace')).toEqual({ page: 'console', view: 'marketplace' })
-    expect(routeFor('/gallery')).toEqual({ page: 'console', view: 'gallery' })
+    //
+    // `locale: null` is the whole point of the field: a bare path names no language, which is the
+    // signal main.tsx uses to redirect to a prefixed one. If this returned 'en' instead, `/chat`
+    // and `/en/chat` would be indistinguishable and no redirect could be written — every link would
+    // stay ambiguous about its language forever.
+    expect(routeFor('/chat')).toEqual({ page: 'console', view: 'chat', locale: null })
+    expect(routeFor('/marketplace')).toEqual({
+      page: 'console',
+      view: 'marketplace',
+      locale: null,
+    })
+    expect(routeFor('/gallery')).toEqual({ page: 'console', view: 'gallery', locale: null })
+  })
+
+  it('keeps a bare path working rather than 404ing it', () => {
+    // Old links, and anything typed by hand. `/chat` must still open the console — the redirect to
+    // `/en/chat` happens in main.tsx before the first paint, and it can only do that if this
+    // resolves the route in the first place.
+    for (const p of ['/chat', '/marketplace', '/gallery']) {
+      expect(routeFor(p).page, p).toBe('console')
+    }
   })
 
   it('accepts a trailing slash on each', () => {
@@ -35,7 +54,15 @@ describe('routeFor', () => {
     // landing page is the useful answer; a blank screen is not.
     expect(routeFor('/nonsense').page).toBe('landing')
     expect(routeFor('/chatt').page).toBe('landing')
-    expect(routeFor('/en/chat').page).toBe('landing')
+    // `/en/chat` used to be listed here as an unknown path, and asserting that was correct before
+    // locales existed. It is now the canonical form of the console — recorded rather than quietly
+    // edited, because a test that flips meaning is worth noticing.
+    expect(routeFor('/en/chat').page).toBe('console')
+    // An unknown language is NOT a locale prefix. `/de/chat` has no German copy, so it must fall
+    // through to the landing page rather than render English under a German URL and imply a
+    // translation that does not exist.
+    expect(routeFor('/de/chat').page).toBe('landing')
+    expect(routeFor('/de/chat').locale).toBeNull()
   })
 
   it('does not match a console route by prefix', () => {
@@ -58,13 +85,21 @@ describe('pathForView', () => {
   it('round-trips through routeFor', () => {
     // The property that matters: navigating to pathForView(v) has to land somewhere routeFor agrees is
     // view v. Hardcoding '/gallery' at a call site would silently break the moment this file changed.
-    for (const view of ['chat', 'marketplace', 'gallery'] as const) {
-      expect(routeFor(pathForView(view))).toEqual({ page: 'console', view })
+    // Across every locale, not just the default. The prefix is stripped before the route table is
+    // consulted, and the failure if it were not would be silent: /zh/gallery would render the
+    // landing page and look like the link was wrong rather than the routing.
+    for (const locale of LOCALES) {
+      for (const view of ['chat', 'marketplace', 'gallery'] as const) {
+        expect(routeFor(pathForView(locale, view))).toEqual({ page: 'console', view, locale })
+      }
     }
   })
 
-  it('agrees with the exported constants', () => {
-    expect(pathForView('chat')).toBe(CONSOLE_PATH)
-    expect(routeFor(LANDING_PATH).page).toBe('landing')
+  it('agrees with the locale-aware helpers', () => {
+    for (const locale of LOCALES) {
+      expect(pathForView(locale, 'chat')).toBe(consolePath(locale))
+      expect(routeFor(landingPath(locale)).page).toBe('landing')
+      expect(routeFor(landingPath(locale)).locale).toBe(locale)
+    }
   })
 })

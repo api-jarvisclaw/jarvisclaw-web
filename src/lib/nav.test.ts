@@ -39,7 +39,11 @@ describe('the shared nav', () => {
     // "Gallery" in the console's bar leaves the console.
     for (const item of NAV) {
       if (item.kind !== 'view') continue
-      expect(routeFor(pathForView(item.view))).toEqual({ page: 'console', view: item.view })
+      expect(routeFor(pathForView('en', item.view))).toEqual({
+        page: 'console',
+        view: item.view,
+        locale: 'en',
+      })
     }
   })
 

@@ -12,7 +12,15 @@ import { useEffect, useState } from 'react'
 import { listApis, listCatalogue } from '../lib/catalogue'
 import { DEFAULT_BASE_URL } from '../lib/gateway'
 import { navFor } from '../lib/nav'
-import { LANDING_PATH, pathForView } from '../lib/route-path'
+import { landingPath, pathForView } from '../lib/route-path'
+import { DEFAULT_LOCALE, localePath, type Locale } from '../lib/i18n'
+import { LocaleToggle } from './LocaleToggle'
+import { useT } from './LocaleContext'
+
+/** The lookup, passed into the copy tables below so they are evaluated per render rather than at
+ * module load — a module-level array captures whatever locale existed at import time, which for a
+ * lazily-loaded chunk is whichever page happened to mount first. */
+type T = (key: string, vars?: Record<string, string | number>) => string
 
 /**
  * The landing page at `/`.
@@ -41,13 +49,20 @@ import { LANDING_PATH, pathForView } from '../lib/route-path'
  */
 export function LandingPage({
   onEnter,
+  locale = DEFAULT_LOCALE,
+  onLocale,
 }: {
   /**
    * Into the console. `path` chooses which pane — a nav item for the gallery should arrive at the
    * gallery, not at the chat with the gallery a click away.
    */
   onEnter: (prompt?: string, path?: string) => void
+  /** The locale in the URL. Every path this page writes carries it. */
+  locale?: Locale
+  /** Change language, staying on this page. Absent when nothing owns the URL. */
+  onLocale?: (next: Locale) => void
 }) {
+  const t = useT()
   const [counts, setCounts] = useState<{
     models: number | null
     free: number | null
@@ -88,7 +103,7 @@ export function LandingPage({
               away — says JarvisClaw. A visitor who reads one then the other has to work out whether
               they are the same product, which is a question no landing page should raise about itself.
               The mark and the name now match the bar, the tab icon and the main site. */}
-          <a className="page-brand" href={LANDING_PATH} aria-label="JarvisClaw home">
+          <a className="page-brand" href={landingPath(locale)} aria-label={t('JarvisClaw home')}>
             <img className="page-mark" src="/jc.png" alt="" width={26} height={26} />
             <span className="page-brand-name">JarvisClaw</span>
           </a>
@@ -96,7 +111,7 @@ export function LandingPage({
           {/* The same list the console's bar renders, from lib/nav.ts. Two hand-kept navs drift, and an
               item present on one bar and missing from the other reads as a link that breaks on some
               pages. */}
-          <nav aria-label="Sections">
+          <nav aria-label={t('Sections')}>
             {navFor('landing').map((item) =>
               item.kind === 'anchor' ? (
                 // Classed so the narrow-screen rule can drop the anchors and keep the destinations. The
@@ -104,7 +119,7 @@ export function LandingPage({
                 // jump — and became wrong the moment real links joined it, leaving a phone visitor no way
                 // to reach the marketplace or the docs at all.
                 <a key={item.label} className="page-nav-anchor" href={item.to}>
-                  {item.label}
+                  {t(item.label)}
                 </a>
               ) : item.kind === 'view' ? (
                 // A real href into the console pane, so it can be copied or middle-clicked; the click
@@ -112,37 +127,52 @@ export function LandingPage({
                 // swallowing cmd-click would turn "open in a new tab" into an in-place navigation.
                 <a
                   key={item.label}
-                  href={pathForView(item.view)}
+                  href={pathForView(locale, item.view)}
                   onClick={(e) => {
                     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
                     e.preventDefault()
-                    onEnter(undefined, pathForView(item.view))
+                    onEnter(undefined, pathForView(locale, item.view))
                   }}
                 >
-                  {item.label}
+                  {t(item.label)}
                 </a>
               ) : (
                 <a key={item.label} href={item.href} target="_blank" rel="noopener noreferrer">
-                  {item.label}
+                  {t(item.label)}
                 </a>
               ),
             )}
           </nav>
 
+          {/* Before the CTA, not after: the switcher is a setting for reading the page, and putting
+              it past the primary action makes it the last thing found on the widest screens and the
+              first thing wrapped on the narrowest. */}
+          {onLocale && (
+            <LocaleToggle
+              locale={locale}
+              onLocale={onLocale}
+              hrefFor={(l) => localePath(l, '/')}
+            />
+          )}
+
           {/* The label is wrapped so the narrowest phones can shorten it to "Open" in CSS. `aria-label`
               carries the full wording either way, so what a screen reader announces does not change with
               the viewport — the visual abbreviation is for space, not a different action. */}
-          <button className="page-cta-sm" onClick={() => onEnter()} aria-label="Open the console">
-            <span className="page-cta-label">Open the console</span>
+          <button
+            className="page-cta-sm"
+            onClick={() => onEnter()}
+            aria-label={t('Open the console')}
+          >
+            <span className="page-cta-label">{t('Open the console')}</span>
             <ArrowRightIcon size={13} aria-hidden="true" />
           </button>
         </div>
       </header>
 
       <section className="page-hero">
-        <span className="eyebrow">The browser agent with a wallet</span>
+        <span className="eyebrow">{t('The browser agent with a wallet')}</span>
         <h1>
-          Ask for anything. <em>It pays per call.</em>
+          {t('Ask for anything.')} <em>{t('It pays per call.')}</em>
         </h1>
         <p className="page-lede">
           Other chat sites give you one model and a monthly bill. This one holds a wallet: it reaches{' '}
@@ -157,7 +187,7 @@ export function LandingPage({
         <HeroPrompt onEnter={onEnter} />
 
         <div className="page-hero-chips">
-          {['No sign-up', 'No card', 'Price before every charge'].map((c) => (
+          {[t('No sign-up'), t('No card'), t('Price before every charge')].map((c) => (
             <span key={c}>{c}</span>
           ))}
         </div>
@@ -168,27 +198,27 @@ export function LandingPage({
         <dl className="page-figures">
           <div>
             <dt>{num(counts.models)}</dt>
-            <dd>models, one chat box</dd>
+            <dd>{t('models, one chat box')}</dd>
           </div>
           <div>
             <dt>{num(counts.free)}</dt>
-            <dd>free right now, no credential</dd>
+            <dd>{t('free right now, no credential')}</dd>
           </div>
           <div>
             <dt>{num(counts.apis)}</dt>
-            <dd>callable APIs, priced per call</dd>
+            <dd>{t('callable APIs, priced per call')}</dd>
           </div>
           <div>
             <dt>{num(counts.categories)}</dt>
-            <dd>categories to browse</dd>
+            <dd>{t('categories to browse')}</dd>
           </div>
         </dl>
       </section>
 
       <section className="page-band" id="how">
-        <h2>How it works</h2>
+        <h2>{t('How it works')}</h2>
         <div className="page-steps">
-          {STEPS.map((s, i) => (
+          {stepsRows(t).map((s, i) => (
             <div key={s.title} className="page-step">
               <span className="page-step-n">{String(i + 1).padStart(2, '0')}</span>
               <h3>{s.title}</h3>
@@ -199,14 +229,14 @@ export function LandingPage({
       </section>
 
       <section className="page-band page-band-alt" id="pay">
-        <h2>Three ways to pay, and one of them is free</h2>
+        <h2>{t('Three ways to pay, and one of them is free')}</h2>
         <p className="page-band-lede">
-          Which one you use is a choice you make when you need to, not a decision at the door.
+          {t('Which one you use is a choice you make when you need to, not a decision at the door.')}
         </p>
         <div className="page-cards">
           <article className="page-card">
             <CircleDollarSignIcon size={18} aria-hidden="true" />
-            <h3>Free, right now</h3>
+            <h3>{t('Free, right now')}</h3>
             <p>
               {counts.free !== null && counts.free > 0
                 ? `${counts.free} models`
@@ -216,7 +246,7 @@ export function LandingPage({
           </article>
           <article className="page-card">
             <WalletIcon size={18} aria-hidden="true" />
-            <h3>A wallet, per call</h3>
+            <h3>{t('A wallet, per call')}</h3>
             <p>
               Connect a wallet to reach paid models and every callable API. Each charge is signed by
               you, in your wallet, showing the exact amount before it happens.
@@ -224,10 +254,9 @@ export function LandingPage({
           </article>
           <article className="page-card">
             <KeyRoundIcon size={18} aria-hidden="true" />
-            <h3>An account you already have</h3>
+            <h3>{t('An account you already have')}</h3>
             <p>
-              Sign in on the platform and spend the quota on it. Your existing key works here the
-              same way it works everywhere else.
+              {t('Sign in on the platform and spend the quota on it. Your existing key works here the same way it works everywhere else.')}
             </p>
           </article>
         </div>
@@ -239,23 +268,23 @@ export function LandingPage({
         <div className="page-steps page-steps-tight">
           <div className="page-step">
             <span className="page-step-n">01</span>
-            <h3>Or run it in your terminal</h3>
+            <h3>{t('Or run it in your terminal')}</h3>
             <p>
-              One npm install, Node 20+. The same gateway, the same per-call pricing, no browser.
+              {t('One npm install, Node 20+. The same gateway, the same per-call pricing, no browser.')}
             </p>
             <code className="page-code">npm i -g jarvisclaw</code>
           </div>
           <div className="page-step">
             <span className="page-step-n">02</span>
-            <h3>Start free</h3>
+            <h3>{t('Start free')}</h3>
             <p>
-              The free models need no wallet and no key, in the terminal exactly as they do here.
+              {t('The free models need no wallet and no key, in the terminal exactly as they do here.')}
             </p>
             <code className="page-code">jarvisclaw</code>
           </div>
           <div className="page-step">
             <span className="page-step-n">03</span>
-            <h3>Fund it when you need more</h3>
+            <h3>{t('Fund it when you need more')}</h3>
             <p>
               Send USDC to a wallet it generates for you. The balance is the cap — when it is empty,
               it stops rather than billing you.
@@ -266,7 +295,7 @@ export function LandingPage({
               target="_blank"
               rel="noopener noreferrer"
             >
-              Read the CLI docs
+              {t('Read the CLI docs')}
               <ArrowRightIcon size={12} aria-hidden="true" />
             </a>
           </div>
@@ -274,7 +303,7 @@ export function LandingPage({
       </section>
 
       <section className="page-band" id="what">
-        <h2>What is actually here</h2>
+        <h2>{t('What is actually here')}</h2>
         <div className="page-cards">
           <article className="page-card">
             <StoreIcon size={18} aria-hidden="true" />
@@ -287,7 +316,7 @@ export function LandingPage({
           </article>
           <article className="page-card">
             <ImagesIcon size={18} aria-hidden="true" />
-            <h3>Prompts that already worked</h3>
+            <h3>{t('Prompts that already worked')}</h3>
             <p>
               A curated image gallery and over a hundred published video prompts, each with the
               frame it produced. Read a real one, edit it, run it — rather than guessing at an empty
@@ -296,10 +325,9 @@ export function LandingPage({
           </article>
           <article className="page-card">
             <TerminalIcon size={18} aria-hidden="true" />
-            <h3>The same API from your own code</h3>
+            <h3>{t('The same API from your own code')}</h3>
             <p>
-              This console is one client of a public HTTP API. Anything you can do here works from
-              the CLI or an SDK against the same gateway, at the same per-call price.
+              {t('This console is one client of a public HTTP API. Anything you can do here works from the CLI or an SDK against the same gateway, at the same per-call price.')}
             </p>
           </article>
         </div>
@@ -312,7 +340,7 @@ export function LandingPage({
           what a subscription is, and the row that matters most to us ("What it can reach") is the one
           where the difference is structural rather than a matter of degree. */}
       <section className="page-band" id="compare">
-        <h2>The same question, three ways to answer it</h2>
+        <h2>{t('The same question, three ways to answer it')}</h2>
         <p className="page-band-lede">
           You want a five-second video, a gas-price lookup and a long chat. Here is what each kind of
           product does with that.
@@ -324,15 +352,15 @@ export function LandingPage({
                 <th scope="col">
                   <span className="page-table-corner">&nbsp;</span>
                 </th>
-                <th scope="col">A chat subscription</th>
-                <th scope="col">Raw API keys</th>
+                <th scope="col">{t('A chat subscription')}</th>
+                <th scope="col">{t('Raw API keys')}</th>
                 <th scope="col" className="page-table-ours">
-                  This console
+                  {t('This console')}
                 </th>
               </tr>
             </thead>
             <tbody>
-              {COMPARE.map((row) => (
+              {compareRows(t).map((row) => (
                 <tr key={row.label}>
                   <th scope="row">{row.label}</th>
                   <td>{row.subscription}</td>
@@ -351,9 +379,9 @@ export function LandingPage({
           leave your wallet, your transcript never leaves your browser, and the same API is callable
           without this page. Overclaiming here would be the easiest lie on the page to tell. */}
       <section className="page-band" id="own">
-        <h2>What stays yours</h2>
+        <h2>{t('What stays yours')}</h2>
         <div className="page-cards">
-          {OWNERSHIP.map((o) => (
+          {ownershipRows(t).map((o) => (
             <article className="page-card" key={o.title}>
               <h3>{o.title}</h3>
               <p>{o.desc}</p>
@@ -363,9 +391,9 @@ export function LandingPage({
       </section>
 
       <section className="page-band page-band-alt" id="faq">
-        <h2>Questions people actually ask</h2>
+        <h2>{t('Questions people actually ask')}</h2>
         <div className="page-faq">
-          {FAQ.map((f) => (
+          {faqRows(t).map((f) => (
             <details key={f.q}>
               <summary>{f.q}</summary>
               <p>{f.a}</p>
@@ -375,10 +403,10 @@ export function LandingPage({
       </section>
 
       <section className="page-close">
-        <h2>Type something and see what it costs.</h2>
-        <p>The free models need nothing from you.</p>
+        <h2>{t('Type something and see what it costs.')}</h2>
+        <p>{t('The free models need nothing from you.')}</p>
         <button className="page-cta" onClick={() => onEnter()}>
-          Open the console
+          {t('Open the console')}
           <ArrowRightIcon size={15} aria-hidden="true" />
         </button>
       </section>
@@ -419,6 +447,7 @@ export function LandingPage({
  * responsible for spending money.
  */
 function HeroPrompt({ onEnter }: { onEnter: (prompt?: string) => void }) {
+  const t = useT()
   const [text, setText] = useState('')
   return (
     <form
@@ -432,10 +461,10 @@ function HeroPrompt({ onEnter }: { onEnter: (prompt?: string) => void }) {
         value={text}
         onChange={(e) => setText(e.target.value)}
         placeholder="Ask for anything — a video, an API, a price comparison…"
-        aria-label="What should it do?"
+        aria-label={t('What should it do?')}
       />
       <button type="submit">
-        Start
+        {t('Start')}
         <ArrowRightIcon size={14} aria-hidden="true" />
       </button>
     </form>
@@ -454,36 +483,36 @@ function HeroPrompt({ onEnter }: { onEnter: (prompt?: string) => void }) {
  * runs", not "cheapest" — we resell some upstreams at their own price and cannot honestly claim to
  * undercut a direct key.
  */
-const COMPARE = [
+const compareRows = (t: T) => [
   {
-    label: 'What it can reach',
-    subscription: 'The models that vendor hosts. A video or an on-chain lookup is a different product.',
-    keys: 'Whatever you have signed up for, one account and one key at a time.',
-    ours: 'Every model and every callable API behind one box — chat, image, video, music, speech, data.',
+    label: t('What it can reach'),
+    subscription: t('The models that vendor hosts. A video or an on-chain lookup is a different product.'),
+    keys: t('Whatever you have signed up for, one account and one key at a time.'),
+    ours: t('Every model and every callable API behind one box — chat, image, video, music, speech, data.'),
   },
   {
-    label: 'What you pay',
-    subscription: 'A monthly fee, whether you used it or not.',
-    keys: 'Per token, per provider, on a card that has to clear first.',
-    ours: 'Per call, quoted before it runs, and you approve that exact amount.',
+    label: t('What you pay'),
+    subscription: t('A monthly fee, whether you used it or not.'),
+    keys: t('Per token, per provider, on a card that has to clear first.'),
+    ours: t('Per call, quoted before it runs, and you approve that exact amount.'),
   },
   {
-    label: 'To start',
-    subscription: 'Email, password, card.',
-    keys: 'An account and a key per provider, each with its own billing.',
-    ours: 'Nothing. The free models answer with no credential at all.',
+    label: t('To start'),
+    subscription: t('Email, password, card.'),
+    keys: t('An account and a key per provider, each with its own billing.'),
+    ours: t('Nothing. The free models answer with no credential at all.'),
   },
   {
-    label: 'When you run out',
-    subscription: 'Rate limits, usually when you need it most.',
-    keys: 'A failed call and an email about your card.',
-    ours: 'It stops. The wallet balance and your session budget are the only caps.',
+    label: t('When you run out'),
+    subscription: t('Rate limits, usually when you need it most.'),
+    keys: t('A failed call and an email about your card.'),
+    ours: t('It stops. The wallet balance and your session budget are the only caps.'),
   },
   {
-    label: 'What it knows about you',
-    subscription: 'An account, a history, and a payment profile.',
-    keys: 'One account per provider.',
-    ours: 'Nothing, if you use it anonymously. Conversations stay in this browser.',
+    label: t('What it knows about you'),
+    subscription: t('An account, a history, and a payment profile.'),
+    keys: t('One account per provider.'),
+    ours: t('Nothing, if you use it anonymously. Conversations stay in this browser.'),
   },
 ]
 
@@ -495,33 +524,33 @@ const COMPARE = [
  * What IS true is stated exactly: keys never leave the wallet, the transcript never leaves the
  * browser, and the API is callable without this page.
  */
-const OWNERSHIP = [
+const ownershipRows = (t: T) => [
   {
-    title: 'Your keys',
-    desc: 'Private keys never leave your wallet. This page asks it to sign each payment and never sees one. An API key, if you use one, is held in that tab only and never stored.',
+    title: t('Your keys'),
+    desc: t('Private keys never leave your wallet. This page asks it to sign each payment and never sees one. An API key, if you use one, is held in that tab only and never stored.'),
   },
   {
-    title: 'Your conversations',
-    desc: 'The transcript lives in this browser, not in an account. That cuts both ways and the FAQ says so: nothing to leak, and nothing that follows you to another device.',
+    title: t('Your conversations'),
+    desc: t('The transcript lives in this browser, not in an account. That cuts both ways and the FAQ says so: nothing to leak, and nothing that follows you to another device.'),
   },
   {
-    title: 'Your way out',
-    desc: 'This console is one client of a public HTTP API. The CLI, an SDK or plain curl reach the same gateway at the same per-call price, so nothing here is the only door.',
+    title: t('Your way out'),
+    desc: t('This console is one client of a public HTTP API. The CLI, an SDK or plain curl reach the same gateway at the same per-call price, so nothing here is the only door.'),
   },
 ]
 
-const STEPS = [
+const stepsRows = (t: T) => [
   {
-    title: 'Ask for what you want',
-    desc: 'Plain language. The agent picks the model or the API — you do not have to know which one exists.',
+    title: t('Ask for what you want'),
+    desc: t('Plain language. The agent picks the model or the API — you do not have to know which one exists.'),
   },
   {
-    title: 'See the price first',
-    desc: 'Anything that costs money is quoted before it runs, and you approve that exact amount. Nothing is charged on a guess.',
+    title: t('See the price first'),
+    desc: t('Anything that costs money is quoted before it runs, and you approve that exact amount. Nothing is charged on a guess.'),
   },
   {
-    title: 'Keep what it makes',
-    desc: 'Images, video, music and speech are collected in your gallery with what each one cost, and every row says how long that file lasts.',
+    title: t('Keep what it makes'),
+    desc: t('Images, video, music and speech are collected in your gallery with what each one cost, and every row says how long that file lasts.'),
   },
 ]
 
@@ -532,29 +561,29 @@ const STEPS = [
  * the history lives in one browser because there is no account. Someone who finds that out from the
  * FAQ can plan around it. Someone who finds it out by losing a file cannot.
  */
-const FAQ = [
+const faqRows = (t: T) => [
   {
-    q: 'Do I need an account?',
-    a: 'No. The free models answer with no credential at all — no key, no wallet, no card. An account or a wallet is only needed to reach paid models and the callable APIs.',
+    q: t('Do I need an account?'),
+    a: t('No. The free models answer with no credential at all — no key, no wallet, no card. An account or a wallet is only needed to reach paid models and the callable APIs.'),
   },
   {
-    q: 'How do I know what something costs before I pay?',
-    a: 'Every paid call is quoted first and you approve that exact amount. Per-token models show their rate in the picker; per-call ones cannot be known from a rate card, so the gateway returns a quote for your specific request and the dialog shows it.',
+    q: t('How do I know what something costs before I pay?'),
+    a: t('Every paid call is quoted first and you approve that exact amount. Per-token models show their rate in the picker; per-call ones cannot be known from a rate card, so the gateway returns a quote for your specific request and the dialog shows it.'),
   },
   {
-    q: 'Where does my generated media go?',
-    a: 'Most of it is copied to our own CDN and kept with no expiry. Some cannot be — an archive can fail, and speech arrives as raw bytes with no URL to copy from — so every row in the gallery says which case it is and warns you when a file is on a clock. Download the ones that are.',
+    q: t('Where does my generated media go?'),
+    a: t('Most of it is copied to our own CDN and kept with no expiry. Some cannot be — an archive can fail, and speech arrives as raw bytes with no URL to copy from — so every row in the gallery says which case it is and warns you when a file is on a clock. Download the ones that are.'),
   },
   {
-    q: 'Is my conversation history saved?',
-    a: 'In this browser. There is no account to attach it to, so clearing site data loses the list and it does not follow you to another device. Media that reached the CDN survives either way; the transcript does not.',
+    q: t('Is my conversation history saved?'),
+    a: t('In this browser. There is no account to attach it to, so clearing site data loses the list and it does not follow you to another device. Media that reached the CDN survives either way; the transcript does not.'),
   },
   {
-    q: 'What happens to my wallet keys?',
-    a: 'They never leave your wallet. This page asks it to sign each payment and never sees a private key. An API key, if you use one, is held in that tab only and never stored.',
+    q: t('What happens to my wallet keys?'),
+    a: t('They never leave your wallet. This page asks it to sign each payment and never sees a private key. An API key, if you use one, is held in that tab only and never stored.'),
   },
   {
-    q: 'Can I use this from my own code?',
-    a: 'Yes — this console is one client of a public HTTP API. Anything you can do here you can do from the CLI or an SDK against the same gateway, with the same per-call pricing.',
+    q: t('Can I use this from my own code?'),
+    a: t('Yes — this console is one client of a public HTTP API. Anything you can do here you can do from the CLI or an SDK against the same gateway, with the same per-call pricing.'),
   },
 ]

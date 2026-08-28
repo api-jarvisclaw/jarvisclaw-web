@@ -24,6 +24,7 @@ Usage: python probe/limits_gallery_probe.py [url]
 
 import asyncio
 import json
+import re
 import sys
 
 for stream in (sys.stdout, sys.stderr):
@@ -84,6 +85,21 @@ async def set_limit(page, label: str, value: str) -> None:
 
 async def read_limit(page, label: str) -> str:
     return await page.locator(f"input[aria-label='{label} in US dollars']").input_value()
+
+
+async def open_own_creations(page) -> None:
+    """Opens the gallery and selects the user's own work.
+
+    Named explicitly rather than trusting the default tab. The default is now "mine" when the store
+    holds anything and "showcase" when it does not, so a probe that relies on it passes or fails
+    depending on leftover state from an earlier step.
+    """
+    await page.click(".rail-item:has-text('Gallery')")
+    await page.wait_for_selector(".gallery-tabs", timeout=20_000)
+    tab = page.get_by_role("tab", name=re.compile("your creations", re.I))
+    if await tab.count():
+        await tab.first.click()
+    await page.wait_for_timeout(600)
 
 
 async def main() -> int:
@@ -215,16 +231,32 @@ async def main() -> int:
             failures.append(f"the archive POST carried no source: {archived[0]}")
 
         print("== 7. it shows up in the Gallery, and survives a reload ==")
-        await page.click(".rail-item:has-text('Gallery')")
-        await page.wait_for_timeout(700)
+        # The gallery has FOUR tabs now (prompt gallery, video prompts, prompt library, your
+        # creations) and .gallery-card only exists on the last one. Counting without naming the tab
+        # reported "the gallery is empty after a paid generation" for weeks while the item was in
+        # localStorage, correctly, and the tab badge already read "Your creations 1". The store and
+        # the badge are checked too, so a real loss is distinguishable from landing on a sibling
+        # tab — which is the thing that made the old failure so convincing.
+        await open_own_creations(page)
         cards = await page.locator(".gallery-card").count()
-        print(f"   gallery cards: {cards}")
-        if cards == 0:
-            failures.append("the gallery is empty after a paid generation")
+        stored = await page.evaluate(
+            "() => { try { return JSON.parse(localStorage.getItem('jarvisclaw.gallery.v1') || '[]').length }"
+            " catch { return -1 } }"
+        )
+        print(f"   gallery cards: {cards}   items in the store: {stored}")
+        if stored <= 0:
+            failures.append(
+                f"the paid artifact never reached the gallery store (length {stored}) — "
+                "this is a real loss, not a tab problem"
+            )
+        elif cards == 0:
+            failures.append(
+                f"the store holds {stored} item(s) but the pane rendered none — the data survived "
+                "and the view did not"
+            )
         await page.reload(wait_until="networkidle")
         await page.wait_for_timeout(1200)
-        await page.click(".rail-item:has-text('Gallery')")
-        await page.wait_for_timeout(600)
+        await open_own_creations(page)
         after_reload = await page.locator(".gallery-card").count()
         print(f"   after reload: {after_reload}")
         if after_reload != cards:

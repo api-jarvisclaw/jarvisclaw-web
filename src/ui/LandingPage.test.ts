@@ -58,7 +58,7 @@ describe('the landing copy', () => {
   it('promises no permanence the gallery cannot deliver', () => {
     // The gallery's own retention notes are per-row for a reason: some files expire in hours. The
     // landing FAQ must not undo that with a blanket reassurance.
-    const faq = source.slice(source.indexOf('const FAQ'))
+    const faq = source.slice(source.indexOf('const faqRows'))
     expect(faq).not.toMatch(/stored permanently|kept forever|never expires/i)
     // And it has to actually mention the limit, not just avoid overclaiming by saying nothing.
     expect(faq).toMatch(/expire|on a clock/i)
@@ -67,7 +67,7 @@ describe('the landing copy', () => {
   it('is honest that history lives in one browser', () => {
     // There is no account, so the transcript does not follow anyone anywhere. Someone who learns
     // that from the FAQ can plan around it; someone who learns it by losing a conversation cannot.
-    const faq = source.slice(source.indexOf('const FAQ'))
+    const faq = source.slice(source.indexOf('const faqRows'))
     expect(faq).toMatch(/this browser/i)
     expect(faq).toMatch(/another device|other devices/i)
   })
@@ -88,7 +88,7 @@ describe('the landing copy', () => {
      * Checked by looking for the words that would give it away as a jab: nothing in the other columns
      * should be calling them bad, only describing what they do.
      */
-    const block = source.slice(source.indexOf('const COMPARE'), source.indexOf('const OWNERSHIP'))
+    const block = source.slice(source.indexOf('const compareRows'), source.indexOf('const ownershipRows'))
     expect(block.length).toBeGreaterThan(200)
     for (const jab of ['useless', 'terrible', 'rip-off', 'ripoff', 'scam', 'garbage', 'worst']) {
       expect(block.toLowerCase()).not.toContain(jab)
@@ -110,7 +110,7 @@ describe('the landing copy', () => {
      * What is true and stated: keys never leave the wallet, the transcript never leaves the browser,
      * and the same API is reachable without this page.
      */
-    const block = source.slice(source.indexOf('const OWNERSHIP'), source.indexOf('const STEPS'))
+    const block = source.slice(source.indexOf('const ownershipRows'), source.indexOf('const stepsRows'))
     expect(block.length).toBeGreaterThan(200)
     expect(block).not.toMatch(/self-host|on your machine|runs locally|zero telemetry|if we disappear/i)
     expect(block).toMatch(/never leave/i)
@@ -126,6 +126,59 @@ describe('the landing copy', () => {
       // Each ends as a question or an instruction, not a fragment — these are sent verbatim as a
       // user message.
       expect(e.replace(/'/g, '').trim().length).toBeGreaterThan(15)
+    }
+  })
+})
+
+/**
+ * The same honesty rules, applied to the Chinese.
+ *
+ * Every check above reads LandingPage.tsx, which now holds only English keys. So on its own it lets
+ * the Chinese copy promise anything at all — permanence the gallery cannot deliver, a self-hosting
+ * claim this gateway cannot make — and no test would notice, because the reviewer who reads the
+ * assertions and the reader who reads the page are looking at different text.
+ *
+ * A translation is not a lesser artifact. It is the whole product for the reader who uses it.
+ */
+describe('the Chinese copy', () => {
+  const zh = readFileSync(new URL('../lib/strings.ts', import.meta.url), 'utf8')
+
+  it('reads the catalogue at all', () => {
+    // Without this, every assertion below passes over an empty string.
+    expect(zh.length).toBeGreaterThan(4000)
+    expect(zh).toContain('打开控制台')
+  })
+
+  it('promises no permanence either', () => {
+    // 永久保存 / 永不过期 / 一直保留 — the Chinese equivalents of the claim the English is
+    // forbidden from making. The gallery's per-row retention notes are the reason.
+    expect(zh).not.toMatch(/永久保存|永不过期|永远保留|一直保留/)
+    // And the retention answer must still state the limit rather than going quiet about it.
+    expect(zh).toMatch(/时限|过期/)
+  })
+
+  it('is honest in Chinese that history lives in one browser', () => {
+    expect(zh).toMatch(/这个浏览器/)
+    expect(zh).toMatch(/换设备|其他设备/)
+  })
+
+  it('claims no ownership this hosted gateway cannot deliver', () => {
+    // 本地运行 / 自托管 — the sentence Franklin can write and we cannot, and the easiest thing for a
+    // translator to add while trying to sound reassuring.
+    expect(zh).not.toMatch(/本地运行|自托管|在你的机器上运行|即使我们消失/)
+    expect(zh).toMatch(/不离开你的钱包/)
+  })
+
+  it('does not undercut on price in Chinese', () => {
+    // 最便宜 / 最低价 — we resell some upstreams at their own price, so this is not a claim the
+    // product can make in any language.
+    expect(zh).not.toMatch(/最便宜|最低价|全网最低/)
+    expect(zh).toMatch(/先报价/)
+  })
+
+  it('does not strawman the alternatives in Chinese', () => {
+    for (const jab of ['垃圾', '骗钱', '智商税', '一无是处']) {
+      expect(zh, jab).not.toContain(jab)
     }
   })
 })

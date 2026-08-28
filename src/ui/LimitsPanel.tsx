@@ -2,6 +2,7 @@ import { ChevronDownIcon, ChevronUpIcon } from 'lucide-react'
 import { useState } from 'react'
 
 import { LIMITS, type Settings } from '../lib/settings'
+import { useT } from './LocaleContext'
 
 /**
  * The spend limits, editable.
@@ -21,6 +22,7 @@ export function LimitsPanel({
   settings: Settings
   onChange: (next: Settings) => void
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
 
   return (
@@ -30,7 +32,7 @@ export function LimitsPanel({
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
       >
-        <h2>Limits</h2>
+        <h2>{t('Limits')}</h2>
         {open ? (
           <ChevronUpIcon className="caret" size={14} aria-hidden="true" />
         ) : (

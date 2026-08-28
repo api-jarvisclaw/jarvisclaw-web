@@ -53,7 +53,10 @@ def main() -> int:
         )
         page.route("**/api/discovery/models**", lambda r: r.fulfill(status=200, json={"free": []}))
 
-        page.goto(f"{URL}/gallery", wait_until="domcontentloaded")
+        # /en/gallery, not /gallery. A bare path resolves to whatever the RUNNING MACHINE's browser
+        # asks for, so this probe read Chinese tabs on my laptop and failed on tab names that were
+        # correct — a probe whose result depends on the tester's locale tests the tester.
+        page.goto(f"{URL}/en/gallery", wait_until="domcontentloaded")
         page.wait_for_selector(".gallery-tabs", timeout=30000)
 
         # ---- 1. alignment, on both panes that carry the search row ----

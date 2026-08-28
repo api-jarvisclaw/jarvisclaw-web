@@ -14,6 +14,7 @@ import {
   type ApiKeyRef,
 } from '../lib/account'
 import { CANONICAL_HOST } from '../lib/host'
+import { useT } from './LocaleContext'
 
 /**
  * Sign in with a main-site account, and pick one of its API keys.
@@ -41,6 +42,7 @@ export function AccountPanel({
   /** The selected key's secret and its label, or null to clear it. */
   onKey: (v: { key: string; name: string } | null) => void
 }) {
+  const t = useT()
   const [checking, setChecking] = useState(true)
   const [keys, setKeys] = useState<ApiKeyRef[]>([])
   const [loadingKeys, setLoadingKeys] = useState(false)
@@ -96,7 +98,7 @@ export function AccountPanel({
   if (checking) {
     return (
       <section>
-        <h2>Account</h2>
+        <h2>{t('Account')}</h2>
         <div className="panel">
           <p className="panel-note">Checking for a signed-in session…</p>
         </div>
@@ -108,7 +110,7 @@ export function AccountPanel({
     const available = canUseAccount()
     return (
       <section>
-        <h2>Account</h2>
+        <h2>{t('Account')}</h2>
         <div className="panel">
           <p className="account-blurb">
             Sign in to use quota you already have on JarvisClaw. Your key works here exactly as it
@@ -169,14 +171,14 @@ export function AccountPanel({
 
   return (
     <section>
-      <h2>Account</h2>
+      <h2>{t('Account')}</h2>
       <div className="panel">
         <div className="kv">
-          <span>Signed in</span>
+          <span>{t('Signed in')}</span>
           <span className="account-name">{account.displayName}</span>
         </div>
         <div className="kv">
-          <span>Balance</span>
+          <span>{t('Balance')}</span>
           {/* The platform's own quota, converted. Showing a raw six-digit quota where someone
               expects a balance is how "why does it say 1500000" gets asked. */}
           <span className="price">${quotaToUsd(account.quota).toFixed(4)}</span>

@@ -5,6 +5,7 @@ import type { WalletAccount } from '../lib/wallet'
 import { AccountPanel } from './AccountPanel'
 import { LimitsPanel } from './LimitsPanel'
 import { WalletPanel } from './WalletPanel'
+import { useT } from './LocaleContext'
 
 export function Sidebar({
   wallet,
@@ -32,20 +33,21 @@ export function Sidebar({
   onSettings: (next: Settings) => void
   onWallet: (a: WalletAccount | null) => void
 }) {
+  const t = useT()
   const budget = spend.policy.sessionUsd
   const usedPct = budget > 0 ? Math.min(100, Math.max(0, (spend.spentUsd / budget) * 100)) : 0
 
   return (
     <aside className="sidebar">
       <section>
-        <h2>This session</h2>
+        <h2>{t('This session')}</h2>
         <div className="panel">
           <div className="kv kv-spent">
-            <span>Spent</span>
+            <span>{t('Spent')}</span>
             <span>${spend.spentUsd.toFixed(6)}</span>
           </div>
           <div className="kv kv-left">
-            <span>Budget left</span>
+            <span>{t('Budget left')}</span>
             <span>${spend.remainingUsd.toFixed(4)}</span>
           </div>
           {/* Clamped both ways: a spend that somehow exceeded the budget would otherwise
@@ -68,7 +70,7 @@ export function Sidebar({
 
       {spend.history.length > 0 && (
         <section>
-          <h2>Charges</h2>
+          <h2>{t('Charges')}</h2>
           <div className="ledger">
             {spend.history.map((e, i) => (
               <div key={i} className="ledger-row">

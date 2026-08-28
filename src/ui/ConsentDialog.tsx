@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import { useT } from './LocaleContext'
 
 export interface PendingSpend {
   tool: string
@@ -24,6 +25,7 @@ export function ConsentDialog({
   pending: PendingSpend
   onDecide: (approved: boolean) => void
 }) {
+  const t = useT()
   const declineRef = useRef<HTMLButtonElement>(null)
 
   // Focus starts on Decline, and Escape declines. The safe choice is the default for
@@ -64,7 +66,7 @@ export function ConsentDialog({
       }}
     >
       <div className="dialog">
-        <h3 id="consent-title">Approve this charge?</h3>
+        <h3 id="consent-title">{t('Approve this charge?')}</h3>
         <p>{pending.description}</p>
         <div className="amount">${pending.usd.toFixed(6)}</div>
         <p>
@@ -73,10 +75,10 @@ export function ConsentDialog({
         </p>
         <div className="dialog-actions">
           <button ref={declineRef} className="decline" onClick={() => onDecide(false)}>
-            Don't spend
+            {t("Don't spend")}
           </button>
           <button className="approve" onClick={() => onDecide(true)}>
-            Approve
+            {t('Approve')}
           </button>
         </div>
       </div>

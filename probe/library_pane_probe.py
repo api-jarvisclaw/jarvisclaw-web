@@ -1,7 +1,7 @@
 """Verify the prompt library renders, filters, and hands a prompt to the composer.
 
 The data is covered by library.test.ts. What that cannot show is whether the tab opens, whether
-the lazy chunk actually arrives, whether the category strip filters, and whether "Run this prompt"
+the lazy chunk actually arrives, whether the category strip filters, and whether "Make your own"
 puts the text where the user can send it — the last one being the only reason the collection is
 here at all.
 
@@ -69,7 +69,10 @@ async def main() -> int:
         await page.route("**/api/discovery/models**", lambda r: r.fulfill(
             status=200, json={"free": []}))
         await page.route("https://ducat.jarvisclaw.ai/**", route_local)
-        await page.goto("https://ducat.jarvisclaw.ai/gallery", wait_until="domcontentloaded")
+        # /en/gallery, not /gallery. A bare path resolves to whatever the RUNNING MACHINE's browser
+        # asks for, so this probe read Chinese tabs on my laptop and failed on tab names that were
+        # correct — a probe whose result depends on the tester's locale tests the tester.
+        await page.goto("https://ducat.jarvisclaw.ai/en/gallery", wait_until="domcontentloaded")
 
         # 1. The library chunk must NOT be in the initial load. That split is what keeps a
         #    152 KB prompt library out of the path to the chat box.
@@ -166,17 +169,32 @@ async def main() -> int:
         if await page.locator(".library-params").count() == 0:
             print("  note: this entry has no published parameters")
 
-        # 6. Run this prompt must reach the composer. This is the whole point of the collection.
-        run = page.get_by_role("button", name="Run this prompt")
+        # 6. "Make your own" must reach the composer (renamed from "Run this prompt" when this pane
+        #    moved onto SeedancePane's styled action row — the old label had no CSS behind it). This is the whole point of the collection.
+        run = page.get_by_role("button", name="Make your own")
         if await run.count() == 0:
             failures.append("no way to run the prompt")
         else:
             await run.first.click()
             await page.wait_for_selector("textarea", timeout=20_000)
+            # Wait for the VALUE, not just the element.
+            #
+            # The textarea exists as soon as the chat pane mounts, so reading immediately after
+            # wait_for_selector catches it before React has committed setDraft — measured 0 chars on
+            # a page where the prompt had in fact arrived (3,906 chars on the Seedance pane in the
+            # same conditions). A false failure here points at the button, which is the wrong place
+            # to look.
+            try:
+                await page.wait_for_function(
+                    "() => { const t = document.querySelector('textarea'); return t && t.value.trim().length > 0 }",
+                    timeout=15_000,
+                )
+            except Exception:
+                pass
             composer = await page.locator("textarea").first.input_value()
             print(f"composer received: {len(composer)} chars")
             if composer.strip() == "":
-                failures.append("Run this prompt left the composer empty")
+                failures.append("Make your own left the composer empty")
             elif composer.strip()[:40] not in prompt_text:
                 failures.append("the composer text does not match the prompt that was opened")
 

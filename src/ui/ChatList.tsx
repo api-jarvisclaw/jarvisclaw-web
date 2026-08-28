@@ -10,6 +10,7 @@ import {
 import { useMemo, useState } from 'react'
 
 import { relativeAge, search, type Conversation } from '../lib/conversations'
+import { useT } from './LocaleContext'
 
 /**
  * The left rail: new chat, search, navigation, and the conversation list.
@@ -57,6 +58,7 @@ export function ChatList({
   // No onHome. The way back to the landing page is the brand in the global top bar, which is reachable
   // whether or not this pane is open — the point of moving it there.
 }) {
+  const t = useT()
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
 
@@ -73,7 +75,7 @@ export function ChatList({
           read as the pane's — and it disappeared entirely when the rail was collapsed. */}
       <button className="rail-item rail-item-strong" onClick={onNew}>
         <PlusIcon className="rail-glyph" size={16} aria-hidden="true" />
-        New chat
+        {t('New chat')}
       </button>
 
       <button

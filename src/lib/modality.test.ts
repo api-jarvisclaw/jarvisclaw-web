@@ -16,6 +16,9 @@ import {
   POLL_DEADLINE_MS,
   pollJob,
   pollUrlFor,
+  reconcileOptions,
+  speechSpeedsFor,
+  speechVoicesFor,
   UNSERVABLE_VIRTUALS,
 } from './modality'
 
@@ -259,26 +262,46 @@ describe('speech is its own endpoint, not a chat model', () => {
 describe('generation options', () => {
   it('sends image size, quality and count', async () => {
     const spy = stubResponse(402, { accepts: [{ amount: '64000' }] })
+    // `quality: 'hd'` was asserted here, and it is a value the upstream answers 400 to. The test
+    // was checking that an invalid quality is faithfully forwarded — see the reconcile test below.
     await challengeGeneration('image', 'a cube', {
-      options: { size: '1792x1024', quality: 'hd', n: 2 },
+      options: { size: '1792x1024', quality: 'high', n: 2 },
     })
-    expect(sentBody(spy)).toMatchObject({ size: '1792x1024', quality: 'hd', n: 2 })
+    expect(sentBody(spy)).toMatchObject({ size: '1792x1024', quality: 'high', n: 2 })
   })
 
   it('sends speech voice and speed', async () => {
     const spy = stubResponse(402, { accepts: [{ amount: '2000' }] })
-    await challengeGeneration('speech', 'hello', { options: { voice: 'nova', speed: 1.25 } })
-    expect(sentBody(spy)).toMatchObject({ voice: 'nova', speed: 1.25, input: 'hello' })
+    /**
+     * An IN-FAMILY voice, and this test used to prove the opposite.
+     *
+     * It asserted `voice: 'nova'` reached the body — with no model given, so the default is
+     * `elevenlabs/turbo-v2.5` and `nova` is an OpenAI name. That combination does not 400: the
+     * payment settles on-chain and the upstream then refuses, so the money is gone. The suite was
+     * asserting the expensive defect as the desired behaviour.
+     */
+    await challengeGeneration('speech', 'hello', { options: { voice: 'sarah', speed: 1.1 } })
+    expect(sentBody(spy)).toMatchObject({ voice: 'sarah', speed: 1.1, input: 'hello' })
+
+    // And with an OpenAI model, an OpenAI voice.
+    const spy2 = stubResponse(402, { accepts: [{ amount: '2000' }] })
+    await challengeGeneration('speech', 'hello', {
+      model: 'openai/gpt-4o-mini-tts',
+      options: { voice: 'nova', speed: 1.25 },
+    })
+    expect(sentBody(spy2)).toMatchObject({ voice: 'nova', speed: 1.25 })
   })
 
   it('does not put image fields on a speech call, or vice versa', async () => {
     // Each endpoint has its own DTO, and a field it does not know is at best ignored and at
     // worst a 400 on a call that was already quoted.
     const spy = stubResponse(402, { accepts: [{ amount: '2000' }] })
-    await challengeGeneration('speech', 'hi', { options: { size: '1792x1024', voice: 'nova' } })
+    // `sarah`, not `nova`: the default speech model is elevenlabs/turbo-v2.5, and an OpenAI voice
+    // there settles the payment before being refused.
+    await challengeGeneration('speech', 'hi', { options: { size: '1792x1024', voice: 'sarah' } })
     const body = sentBody(spy)
     expect(body).not.toHaveProperty('size')
-    expect(body.voice).toBe('nova')
+    expect(body.voice).toBe('sarah')
 
     const spy2 = stubResponse(402, { accepts: [{ amount: '64000' }] })
     await challengeGeneration('image', 'x', { options: { voice: 'nova', size: '1024x1024' } })
@@ -394,7 +417,10 @@ describe('generation options', () => {
     // Six audio formats are served and none were offered, so every clip was mp3 by accident rather
     // than by choice.
     const spy = stubResponse(402, { accepts: [{ amount: '2000' }] })
+    // Measured with `coral` + `wav` -> RIFF....WAVE, 40,812 bytes — on an OPENAI model, which is
+    // where `coral` is a legal name. Naming the model is what makes the fixture honest.
     await challengeGeneration('speech', 'hello', {
+      model: 'openai/gpt-4o-mini-tts',
       options: { voice: 'coral', speed: 1.25, responseFormat: 'wav' },
     })
     expect(sentBody(spy)).toMatchObject({ voice: 'coral', speed: 1.25, response_format: 'wav' })
@@ -476,10 +502,25 @@ describe('generation options', () => {
     expect(maxOf('bytedance/seedance-2.0')).toBe(15)
     expect(maxOf('bytedance/seedance-2.5')).toBe(30)
 
-    // Grok has no `adaptive` and no 21:9.
+    // Grok has no `adaptive` and no 21:9, and DOES have 3:2 and 2:3 — both were missing here, so
+    // two shapes the model serves were unreachable from the UI. Verified against the running
+    // service under a live control (a bogus 99:1 answers 400 in the same breath).
     const grok = videoLimitsFor('xai/grok-imagine-video').aspectRatios
     expect(grok).not.toContain('adaptive')
     expect(grok).not.toContain('21:9')
+    expect(grok).toContain('3:2')
+    expect(grok).toContain('2:3')
+    expect(videoLimitsFor('xai/grok-imagine-video-1.5').aspectRatios).toContain('3:2')
+
+    /**
+     * The mini's ceiling is 720p, and `1080p` was offered.
+     *
+     * The reference documents "480p, 720p (default)" for this tier. The service quotes 1080p anyway,
+     * which is a docs/service disagreement — and a 402 proves the request is priced, not that the
+     * frames arrive at 1080p. When those two disagree the documented ceiling is the safer thing for
+     * a UI to claim, because over-offering means a user paying for a resolution they do not get.
+     */
+    expect(videoLimitsFor('bytedance/seedance-2.0-mini').resolutions).not.toContain('1080p')
 
     /**
      * `auto/video` resolves upstream to whichever model the gateway picks, so its options must be an
@@ -544,6 +585,184 @@ describe('generation options', () => {
     for (const bad of ['standard', 'hd']) {
       expect(GENERATION_CHOICES.image.quality as readonly string[]).not.toContain(bad)
     }
+  })
+})
+
+/**
+ * A chosen option must still be valid for whatever model ends up running.
+ *
+ * `genOptions` is stored per generation KIND — deliberately, so switching Image -> Video -> Image
+ * remembers the size you chose. But the limits are per MODEL. All four cases below were measured on
+ * the live site by reading the request body off the wire, and all four sent an invalid value:
+ *
+ *     30s picked under seedance-2.5, then sora-2   -> duration_seconds: 30  (accepts 4/8/12)
+ *     4K picked under seedance-2.0, then 2.0-fast  -> resolution: "4K"      (reaches 720p)
+ *     a voice picked under elevenlabs, then openai -> voice: "george"
+ *     1.5x picked under openai, then elevenlabs    -> speed: 1.5            (documents ≤1.2)
+ *
+ * Invisible in every case: the panel redraws from the new model's limits and shows the right chips,
+ * so the offending value appears nowhere on screen. It lives in state, and state is what is sent.
+ */
+describe('reconcileOptions — a stale option cannot reach a model that rejects it', () => {
+  it('narrows a duration past the model ceiling to the nearest it accepts', () => {
+    // Sora takes 4, 8 or 12 only. 30 is nearest 12, so the intent ("long") survives.
+    expect(reconcileOptions('video', 'azure/sora-2', { duration: 30 }).duration).toBe(12)
+    expect(reconcileOptions('video', 'xai/grok-imagine-video', { duration: 30 }).duration).toBe(15)
+    // `auto/video` resolves upstream to an unknown model, so it gets the intersection.
+    expect(reconcileOptions('video', 'auto/video', { duration: 30 }).duration).toBe(12)
+  })
+
+  it('leaves a duration the model does accept exactly alone', () => {
+    expect(reconcileOptions('video', 'bytedance/seedance-2.5', { duration: 30 }).duration).toBe(30)
+    expect(reconcileOptions('video', 'azure/sora-2', { duration: 8 }).duration).toBe(8)
+  })
+
+  it('always yields a duration the model accepts, even when none was chosen', () => {
+    // The hardcoded fallback was 5, which Sora rejects — it takes 4, 8 or 12.
+    expect(reconcileOptions('video', 'azure/sora-2', {}).duration).toBe(4)
+    expect(reconcileOptions('video', 'bytedance/seedance-2.0', {}).duration).toBe(5)
+    // 0 means unset, not "as short as possible".
+    expect(reconcileOptions('video', 'bytedance/seedance-2.0', { duration: 0 }).duration).toBe(5)
+  })
+
+  it('drops a resolution the model cannot reach', () => {
+    // 4K is 2.0-only. On 2.0-fast the answer is `default` — let the upstream choose — rather than
+    // silently downgrading to a resolution the user never picked.
+    expect(
+      reconcileOptions('video', 'bytedance/seedance-2.0-fast', { resolution: '4K' }).resolution,
+    ).toBe('default')
+    // Grok's list has no `default`, so there is no neutral choice and the field is omitted.
+    expect(
+      reconcileOptions('video', 'xai/grok-imagine-video', { resolution: '4K' }),
+    ).not.toHaveProperty('resolution')
+  })
+
+  it('never rewrites the "default" sentinel, which is valid everywhere', () => {
+    /**
+     * This is the bug the first version of reconcileOptions had.
+     *
+     * `default` means "send nothing and let the upstream choose", and buildBody drops it. Most
+     * models' aspectRatios lists contain no `default` entry, so a membership test fails and the
+     * sentinel was replaced with the list's first real value — switching on a 16:9 crop nobody
+     * asked for. Exactly the shape of defect this function exists to close.
+     */
+    for (const model of ['azure/sora-2', 'xai/grok-imagine-video', 'bytedance/seedance-2.0']) {
+      const out = reconcileOptions('video', model, {
+        resolution: 'default',
+        aspectRatio: 'default',
+      })
+      expect(out.resolution).toBe('default')
+      expect(out.aspectRatio).toBe('default')
+    }
+  })
+
+  it('replaces an aspect ratio the model has no support for', () => {
+    // Grok has no 21:9 and no `adaptive`, so there is no neutral landing place: omit it.
+    expect(
+      reconcileOptions('video', 'xai/grok-imagine-video', { aspectRatio: '21:9' }),
+    ).not.toHaveProperty('aspectRatio')
+    // Sora ignores shape entirely; its list is ['default'].
+    expect(reconcileOptions('video', 'azure/sora-2', { aspectRatio: '21:9' }).aspectRatio).toBe(
+      'default',
+    )
+  })
+
+  it('never carries a voice across families, because that one costs the payment', () => {
+    /**
+     * The expensive case. An out-of-family voice does NOT 400 — measured with
+     * elevenlabs/flash-v2.5 + alloy: "upstream 402 after payment — USDC already settled on-chain
+     * and cannot be reversed". Every other wrong option costs a failed call; this costs the charge.
+     */
+    const toOpenai = reconcileOptions('speech', 'openai/gpt-4o-mini-tts', { voice: 'george' })
+    expect(speechVoicesFor('openai/gpt-4o-mini-tts').map((v) => v.id)).toContain(toOpenai.voice)
+    expect(toOpenai.voice).not.toBe('george')
+
+    const toEleven = reconcileOptions('speech', 'elevenlabs/flash-v2.5', { voice: 'alloy' })
+    expect(speechVoicesFor('elevenlabs/flash-v2.5').map((v) => v.id)).toContain(toEleven.voice)
+    expect(toEleven.voice).not.toBe('alloy')
+  })
+
+  it('drops the voice entirely for a model that takes none', () => {
+    // seed-audio steers delivery from the prompt text; auto/tts resolves to an unknown family.
+    // Sending a voice to either risks the paid-then-refused case.
+    expect(
+      reconcileOptions('speech', 'bytedance/seed-audio-1.0', { voice: 'sarah' }),
+    ).not.toHaveProperty('voice')
+  })
+
+  it('keeps an in-family voice untouched', () => {
+    expect(reconcileOptions('speech', 'elevenlabs/turbo-v2.5', { voice: 'george' }).voice).toBe(
+      'george',
+    )
+    expect(reconcileOptions('speech', 'openai/gpt-4o-mini-tts', { voice: 'coral' }).voice).toBe(
+      'coral',
+    )
+  })
+
+  it('narrows a speed the family cannot reach, but drops outright nonsense', () => {
+    // 1.5 is a real intent an ElevenLabs model cannot honour (it documents 0.7–1.2) -> nearest.
+    const narrowed = reconcileOptions('speech', 'elevenlabs/turbo-v2.5', { speed: 1.5 })
+    expect(narrowed.speed).toBe(1.2)
+    expect(speechSpeedsFor('elevenlabs/turbo-v2.5')).toContain(narrowed.speed)
+    // 99 is not an intent; snapping it to a legal value would invent a choice.
+    expect(reconcileOptions('speech', 'elevenlabs/turbo-v2.5', { speed: 99 })).not.toHaveProperty(
+      'speed',
+    )
+    expect(reconcileOptions('speech', 'openai/gpt-4o-mini-tts', { speed: 0.1 })).not.toHaveProperty(
+      'speed',
+    )
+  })
+
+  it('clears a transparent background once the format cannot carry it', () => {
+    const out = reconcileOptions('image', 'openai/gpt-image-2', {
+      background: 'transparent',
+      outputFormat: 'jpeg',
+    })
+    expect(out.background).toBe('auto')
+  })
+
+  it('replaces an image value the upstream rejects', () => {
+    // `hd` is the measured 400: "Supported values are: 'low', 'medium', 'high', and 'auto'".
+    expect(reconcileOptions('image', 'openai/gpt-image-2', { quality: 'hd' }).quality).toBe('auto')
+    expect(reconcileOptions('image', 'openai/gpt-image-2', { size: '3x3' }).size).toBe(
+      GENERATION_CHOICES.image.size[0],
+    )
+  })
+
+  it('drops lyrics when the track is instrumental, which the upstream 400s on together', () => {
+    const out = reconcileOptions('music', 'minimax/music-2.5+', {
+      instrumental: true,
+      lyrics: 'la la la',
+    })
+    expect(out).not.toHaveProperty('lyrics')
+  })
+
+  it('is applied by buildBody, so no caller can forget it', async () => {
+    // The whole point of reconciling at the choke point: both the quote and the paid call marshal
+    // through buildBody, so an unreconciled body cannot reach either.
+    const spy = stubResponse(402, { accepts: [{ amount: '1' }] })
+    await challengeGeneration('video', 'x', {
+      model: 'azure/sora-2',
+      options: { duration: 30, resolution: '4K' },
+    })
+    const body = sentBody(spy)
+    expect(body.duration_seconds).toBe(12)
+    expect(body).not.toHaveProperty('resolution')
+
+    const spy2 = stubResponse(402, { accepts: [{ amount: '1' }] })
+    await challengeGeneration('speech', 'hi', {
+      model: 'openai/gpt-4o-mini-tts',
+      options: { voice: 'george', speed: 1.1 },
+    })
+    expect(sentBody(spy2).voice).not.toBe('george')
+  })
+
+  it('does not mutate the options it was given', () => {
+    // The STORED value must survive: switching back to seedance-2.5 has to restore the 30s the
+    // user picked, which is the entire reason options are kept per kind rather than per model.
+    const stored = { duration: 30, resolution: '4K' }
+    reconcileOptions('video', 'azure/sora-2', stored)
+    expect(stored).toEqual({ duration: 30, resolution: '4K' })
   })
 })
 

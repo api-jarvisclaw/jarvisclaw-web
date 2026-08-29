@@ -168,11 +168,17 @@ describe('LibraryPane attribution', () => {
     // The mutation this guards: `onUsePrompt(item.prompt, 'image')`. It sends a cinematic shot
     // description to the image endpoint, which returns a poster of a scene instead of the scene.
     // The browser probe catches it too — this catches it without needing a build.
+    //
+    // The call now carries a third argument — the model the example was produced on, which the
+    // gallery was dropping and which made a Seedance 2.0 prompt get quoted against the modality
+    // default. Matched with a pattern rather than a fixed string so the assertion is about
+    // `item.kind` being forwarded, which is what this test is for; arity is pinned separately in
+    // ui/UsePrompt.test.ts.
     return import('node:fs/promises')
       .then((fs) => fs.readFile(new URL('../ui/LibraryPane.tsx', import.meta.url), 'utf8'))
       .then((src) => {
-        expect(src).toContain('onUsePrompt(item.prompt, item.kind)')
-        expect(src).not.toMatch(/onUsePrompt\(item\.prompt, '(image|video)'\)/)
+        expect(src).toMatch(/onUsePrompt\(item\.prompt,\s*item\.kind\b/)
+        expect(src).not.toMatch(/onUsePrompt\(item\.prompt,\s*'(image|video)'/)
       })
   })
 })

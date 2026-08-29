@@ -7,8 +7,18 @@ import {
   seedanceUrl,
   type SeedancePrompt,
 } from '../lib/seedance'
+import { gatewayModelFor } from '../lib/showcase-model'
 import { Scrim } from './Scrim'
 import { useLocale, useT } from './LocaleContext'
+
+/**
+ * The model this entire collection was produced on.
+ *
+ * Named once instead of repeated as a string in the heading, the detail panel and the handoff:
+ * the handoff is what decides which model gets QUOTED and CHARGED, so it must not be able to
+ * disagree with what the panel claims. A test asserts the displayed text uses this constant.
+ */
+const SEEDANCE_MODEL = 'Seedance 2.0'
 
 /**
  * The Seedance 2.0 prompt collection.
@@ -30,7 +40,7 @@ import { useLocale, useT } from './LocaleContext'
 export function SeedancePane({
   onUsePrompt,
 }: {
-  onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
+  onUsePrompt: (prompt: string, mode: 'image' | 'video', model: string | null) => void
 }) {
   const t = useT()
   const [open, setOpen] = useState<number | null>(null)
@@ -61,7 +71,7 @@ export function SeedancePane({
         <div>
           <h2>{t('Video prompts that worked')}</h2>
           <p className="gallery-sub">
-            {SEEDANCE.length} published Seedance 2.0 prompts with the frame each one produced, from{' '}
+            {SEEDANCE.length} published {SEEDANCE_MODEL} prompts with the frame each one produced, from{' '}
             {/* The collection's own credit, shown once. Per-item credits name the prompt's author;
                 this names the people who assembled the collection. CC BY 4.0 asks for both, and
                 they are genuinely different contributions. */}
@@ -152,7 +162,7 @@ function SeedanceDetail({
 }: {
   item: SeedancePrompt
   onClose: () => void
-  onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
+  onUsePrompt: (prompt: string, mode: 'image' | 'video', model: string | null) => void
 }) {
   const { locale, t } = useLocale()
   const [copied, setCopied] = useState(false)
@@ -184,7 +194,7 @@ function SeedanceDetail({
           <div>
             <h3>{item.title}</h3>
             <p className="showcase-detail-meta">
-              <span className="tool-name">Seedance 2.0</span>
+              <span className="tool-name">{SEEDANCE_MODEL}</span>
               {/* Attribution, required by CC BY 4.0 and right regardless: someone wrote this. The
                   handle links to their profile and the source to the post it was published in. */}
               {item.author &&
@@ -274,7 +284,11 @@ function SeedanceDetail({
             <button
               className="approve"
               onClick={() => {
-                onUsePrompt(item.prompt, 'video')
+                // This whole collection is Seedance 2.0 — the detail panel says so a few lines
+                // above. Passing it means the composer quotes the model that produced the frame
+                // being looked at, instead of the video default (the mini, ~2.8x cheaper and a
+                // different parameter ceiling), which is what a screenshot showed it doing.
+                onUsePrompt(item.prompt, 'video', gatewayModelFor(SEEDANCE_MODEL))
                 onClose()
               }}
             >

@@ -95,6 +95,36 @@ export function AccountPanel({
     }
   }
 
+  /**
+   * Adopt a usable key as soon as one is known, without a second click.
+   *
+   * Signing in did not make the session able to pay. The keys loaded and were rendered as a LIST OF
+   * BUTTONS — the panel showed "test / unlimited" — and until one was clicked, `apiKey` stayed null,
+   * so `anonymous` stayed true and every paid tool refused. Reported from a screenshot where the
+   * user wrote "我已经登录了，你直接调用API" and the reply was still "由于这个会话没有钱包和API密钥".
+   *
+   * The panel was telling the truth and the user was reading it as a status line, not a menu. That
+   * reading is the reasonable one: signing in is the act that grants access, and no product asks
+   * you to then pick which of your own credentials to activate.
+   *
+   * Narrow on purpose:
+   *   - only when nothing is chosen yet (`keyName === null`), so it never overrides a deliberate
+   *     pick or fights the "use wallet instead" button;
+   *   - only usable keys — an expired or exhausted one would make the session look able to pay and
+   *     then fail at the gateway, which is worse than asking;
+   *   - the first usable key by the account's own order. With several, that is a guess, but a
+   *     working credential beats a refusal, and the list stays visible for switching.
+   */
+  useEffect(() => {
+    if (account === null || keyName !== null) return
+    const usable = keys.find((k) => !k.expired && !k.exhausted)
+    if (usable) void pick(usable)
+    // `pick` is recreated each render and depends only on `account`; including it would re-run this on
+    // every render. The guard above is what makes that safe — once a key is chosen, keyName is set.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account, keys, keyName])
+
+
   if (checking) {
     return (
       <section>

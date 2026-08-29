@@ -1263,9 +1263,25 @@ export function App({
                * before the user had a chance to change the headline. So the prompt lands in the box,
                * in the right mode, and the existing consent dialog still asks before any money moves.
                */
-              onUsePrompt={(prompt, promptMode) => {
+              onUsePrompt={(prompt, promptMode, promptModel) => {
                 setView('chat')
                 setMode(promptMode)
+                /**
+                 * The model that produced the example, when the collection publishes one.
+                 *
+                 * Without this the prompt ran on the modality default: a Seedance 2.0 showcase
+                 * item was quoted "One video from bytedance/seedance-2.0-mini costs $0.399554" —
+                 * a different model from the one printed on the card, ~2.8x cheaper, with
+                 * different parameter ceilings. The price shown was real, so nothing looked
+                 * wrong; it was simply the price of something else.
+                 *
+                 * Only set when the item names a model AND this gateway serves it. A null leaves
+                 * the picker alone, which is right for the library collection, whose authors did
+                 * not record what they ran.
+                 */
+                if (promptModel !== null && models.some((m) => m.model === promptModel)) {
+                  setModel(promptModel)
+                }
                 setDraft(prompt)
               }}
             />

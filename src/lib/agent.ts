@@ -307,6 +307,24 @@ const DEFAULT_MAX_TURNS = 8
 const MAX_REASONING_CHARS = 40_000
 
 /**
+ * Output ceiling for an answer turn.
+ *
+ * gateway.streamChat defaults to 1024 and the agent never overrode it, so an answer that needed
+ * more simply stopped: a screenshot shows "这个市场的描述是：如果" ending mid-sentence, right after
+ * two paid tool calls had already been made. The user paid for the data and got a fragment.
+ *
+ * Confirmed against the live gateway rather than reasoned about — the same prompt returns
+ * `finish_reason: 'length'` at a low ceiling and `'stop'` at a high one, and the truncated reply
+ * arrives as an ordinary successful response with no marker of its own.
+ *
+ * 4096 because a tool-using turn spends its budget twice over: the answer has to restate what the
+ * API returned before interpreting it, and a catalogue row plus a JSON payload is most of 1024 on
+ * its own. Not unbounded — MAX_REASONING_CHARS exists because a free model already ran to 229k
+ * characters once, and a ceiling is the cheap half of that defence.
+ */
+const ANSWER_MAX_TOKENS = 4096
+
+/**
  * A model abandoned for deliberating past MAX_REASONING_CHARS.
  *
  * Its own class so the loop can tell it apart from the abort it performs to stop the stream.
@@ -564,7 +582,7 @@ export async function* runAgent(
         else opts.signal.addEventListener('abort', () => abortRunaway.abort(), { once: true })
       }
       const request = streamChat(
-        { messages: history, model, tools: schemas },
+        { messages: history, model, tools: schemas, maxTokens: ANSWER_MAX_TOKENS },
         (delta) => {
           if (attempt > 1 && first && (delta.content || delta.reasoning)) {
             // Emitted on the first real delta rather than before the request, so an attempt that
@@ -783,6 +801,28 @@ export async function* runAgent(
           text: `${result.model} returned an empty answer. Try again, or pick a different model.`,
         }
         return
+      }
+      /**
+       * A truncated answer, said out loud.
+       *
+       * `finish_reason: 'length'` was captured by the gateway layer and read by nobody, so an
+       * answer that hit the output ceiling rendered as a finished one. A screenshot shows a reply
+       * ending "这个市场的描述是：如果" — mid-sentence, after two paid tool calls had already
+       * spent the user's money to fetch the data being described.
+       *
+       * That is the worst shape this can take: the fragment reads as an answer, so the user has
+       * no reason to doubt it and no way to know the rest existed. Raising ANSWER_MAX_TOKENS
+       * makes it rarer; only this makes it visible when it still happens.
+       *
+       * A notice rather than an error: the text above IS the model's real partial answer and is
+       * worth keeping on screen. Deliberately not an automatic retry — the turn already paid for
+       * its tool calls, and running it again would pay for them a second time.
+       */
+      if (result.finishReason === 'length') {
+        yield {
+          type: 'notice',
+          text: `The answer above was cut off at the length limit — it is incomplete. Ask for the rest, or ask for a shorter version.`,
+        }
       }
       yield { type: 'done', model: result.model }
       return

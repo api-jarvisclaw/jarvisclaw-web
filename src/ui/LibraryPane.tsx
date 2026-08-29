@@ -53,7 +53,7 @@ function categoryName(id: LibraryCategory | string, locale: Locale): string {
 export function LibraryPane({
   onUsePrompt,
 }: {
-  onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
+  onUsePrompt: (prompt: string, mode: 'image' | 'video', model: string | null) => void
 }) {
   const { locale, t } = useLocale()
   const [open, setOpen] = useState<string | null>(null)
@@ -225,7 +225,7 @@ function LibraryDetail({
 }: {
   item: LibraryPrompt
   onClose: () => void
-  onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
+  onUsePrompt: (prompt: string, mode: 'image' | 'video', model: string | null) => void
 }) {
   const { locale, t } = useLocale()
   const [copied, setCopied] = useState(false)
@@ -324,7 +324,11 @@ function LibraryDetail({
           <button
             className="approve"
             onClick={() => {
-              onUsePrompt(item.prompt, item.kind)
+              // `null` on purpose, and it is not an oversight: this collection publishes no
+              // model. These are prompts scraped from authors who did not record what they ran,
+              // so there is nothing to honour and the modality default is the honest choice.
+              // Naming one here would quote a model the page never claimed.
+              onUsePrompt(item.prompt, item.kind, null)
               onClose()
             }}
           >

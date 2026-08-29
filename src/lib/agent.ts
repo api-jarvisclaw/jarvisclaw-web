@@ -325,6 +325,43 @@ const MAX_REASONING_CHARS = 40_000
 const ANSWER_MAX_TOKENS = 4096
 
 /**
+ * Why an answer stopped, in words, or null when it finished normally.
+ *
+ * The reasons are not interchangeable and the wording has to differ, because what the user should
+ * do next differs: a length cut can be continued, a moderation cut cannot. Getting that wrong is
+ * its own defect — telling someone to "ask for the rest" when the upstream will refuse the same
+ * material again just wastes another paid turn.
+ *
+ * The default branch is the load-bearing part. Measured reasons on this gateway are 'stop',
+ * 'length', 'tool_calls' and 'sensitive'; upstreams add their own without notice, and an
+ * unrecognised one previously fell through as a finished answer. Reporting an unknown reason as an
+ * early stop can only ever be over-cautious; the alternative silently presents a fragment.
+ */
+export function earlyStopNotice(reason: string): string | null {
+  switch (reason) {
+    // A normal end. '' covers a stream that carried no finish_reason at all, which is not
+    // evidence of a problem — some upstreams omit it on the final frame.
+    case 'stop':
+    case '':
+      return null
+    // Not an early stop: the model asked for a tool and the loop is about to run it. Reaching
+    // here with this reason would be a bug elsewhere, but reporting it to the user would be noise.
+    case 'tool_calls':
+    case 'function_call':
+      return null
+    case 'length':
+      return 'The answer above was cut off at the length limit — it is incomplete. Ask for the rest, or ask for a shorter version.'
+    // GLM's wording is "系统检测到输入或生成内容可能包含不安全或敏感内容". Named for what happened
+    // rather than blamed on the user: the material came from an API result they paid for.
+    case 'sensitive':
+    case 'content_filter':
+      return "The answer above stopped early — the model's content filter cut it off mid-sentence, so it is incomplete. Retrying will hit the same filter; try asking about a specific part of the data instead."
+    default:
+      return `The answer above stopped early (${reason}) and may be incomplete.`
+  }
+}
+
+/**
  * A model abandoned for deliberating past MAX_REASONING_CHARS.
  *
  * Its own class so the loop can tell it apart from the abort it performs to stop the stream.
@@ -803,26 +840,36 @@ export async function* runAgent(
         return
       }
       /**
-       * A truncated answer, said out loud.
+       * An answer that stopped early, said out loud.
        *
-       * `finish_reason: 'length'` was captured by the gateway layer and read by nobody, so an
-       * answer that hit the output ceiling rendered as a finished one. A screenshot shows a reply
-       * ending "这个市场的描述是：如果" — mid-sentence, after two paid tool calls had already
-       * spent the user's money to fetch the data being described.
+       * Any finish reason other than a normal stop means the text on screen is a FRAGMENT, and
+       * the stream closes cleanly either way — same `[DONE]`, same 200 — so nothing distinguishes
+       * the two unless this is read. A screenshot showed a reply ending
+       * "这个市场的描述是：如果中国共产党的总书记", mid-sentence, after two paid tool calls had
+       * already spent the user's money fetching the data being described.
        *
-       * That is the worst shape this can take: the fragment reads as an answer, so the user has
-       * no reason to doubt it and no way to know the rest existed. Raising ANSWER_MAX_TOKENS
-       * makes it rarer; only this makes it visible when it still happens.
+       * My first fix here handled only `'length'`, on the assumption that the output ceiling was
+       * the cause. Measured afterwards against the live gateway, it was not: the real reason was
        *
-       * A notice rather than an error: the text above IS the model's real partial answer and is
-       * worth keeping on screen. Deliberately not an automatic retry — the turn already paid for
-       * its tool calls, and running it again would pay for them a second time.
+       *     finish_reason: 'sensitive'   (37 frames, 64 chars, clean [DONE])
+       *
+       * GLM's own content moderation cuts generation mid-sentence when the material trips it —
+       * here a Polymarket question about Chinese politics, arriving as a tool result the user
+       * had paid for. Non-streaming returns a 400 for the same input; streaming returns 200 and
+       * simply stops. So checking one reason fixed one cause and left the reported one intact.
+       *
+       * Hence a default branch rather than a list: an unrecognised reason is reported as an early
+       * stop rather than silently accepted, because the failure mode of guessing wrong is a
+       * fragment presented as an answer, and there is no way for a reader to tell.
+       *
+       * A notice rather than an error, because the text IS the model's real partial answer and is
+       * worth keeping on screen. Deliberately not an automatic retry: the turn already paid for
+       * its tool calls, and re-running it would pay for them again — and for 'sensitive' the
+       * retry would be refused the same way.
        */
-      if (result.finishReason === 'length') {
-        yield {
-          type: 'notice',
-          text: `The answer above was cut off at the length limit — it is incomplete. Ask for the rest, or ask for a shorter version.`,
-        }
+      const stopped = earlyStopNotice(result.finishReason)
+      if (stopped !== null) {
+        yield { type: 'notice', text: stopped }
       }
       yield { type: 'done', model: result.model }
       return

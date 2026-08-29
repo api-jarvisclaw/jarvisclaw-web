@@ -44,7 +44,7 @@ import { MODALITY_HINT, tools, toolSchemas, type ToolContext } from './tools'
  */
 function systemPrompt(opts: { anonymous: boolean }): string {
   const lines = [
-    'You are JarvisClaw, an agent with access to 4000+ callable APIs and 80+ language models.',
+    'You are JarvisClaw, an agent with access to 2,400+ callable APIs and 280+ language models.',
     '',
     'How to work:',
     /**

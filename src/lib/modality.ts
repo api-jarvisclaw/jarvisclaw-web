@@ -239,9 +239,19 @@ export const VIDEO_LIMITS: Record<
     resolutions: ['default', '480p', '720p'],
     aspectRatios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
   },
+  /**
+   * The mini's ceiling is 720p, and `1080p` was offered here.
+   *
+   * The reference says "480p, 720p (default)" for this tier. The running service quotes 1080p
+   * anyway (402 under a live control), which is the same docs-vs-service disagreement that appears
+   * on Grok's 21:9 — and the same reasoning applies in the opposite direction: a 402 proves the
+   * request is priced, not that the frames come back at 1080p. When the documented ceiling and an
+   * accepting quote disagree, the ceiling is the safer claim to make in a UI, because the failure
+   * mode of over-offering is a user paying for a resolution they do not receive.
+   */
   'bytedance/seedance-2.0-mini': {
     durations: [4, 5, 6, 8, 10, 12, 15],
-    resolutions: ['default', '480p', '720p', '1080p'],
+    resolutions: ['default', '480p', '720p'],
     aspectRatios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
   },
   'bytedance/seedance-2.5': {
@@ -249,17 +259,33 @@ export const VIDEO_LIMITS: Record<
     resolutions: ['default', '480p', '720p'],
     aspectRatios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
   },
+  /**
+   * Grok's aspect list includes `3:2` and `2:3`, which were missing here.
+   *
+   * Verified against the running service under a live control (a bogus `99:1` answers 400 in the
+   * same breath, so the 402s below carry information):
+   *
+   *     aspect_ratio: 3:2   -> 402  ✓ offered now
+   *     aspect_ratio: 2:3   -> 402  ✓ offered now
+   *     aspect_ratio: 21:9  -> 402  — documented as a 400, but the service accepts it
+   *
+   * `21:9` stays out despite that 402. The docs say Grok rejects it, the service quotes it, and a
+   * quote is not a delivery — this endpoint validates before payment for these models but the price
+   * is the same either way, so a 402 cannot distinguish "will render 21:9" from "will ignore it".
+   * Offering it would be a control that might silently do nothing, which is the defect this whole
+   * table exists to remove. Adding it needs an artifact measurement, not a quote.
+   */
   'xai/grok-imagine-video': {
     durations: [1, 2, 4, 6, 8, 10, 12, 15],
     // Grok renders and bills 480p when resolution is omitted, so `default` is not a distinct option.
     resolutions: ['480p', '720p'],
-    // No `adaptive`, no 21:9.
-    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    // No `adaptive`. See the note above on 21:9.
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'],
   },
   'xai/grok-imagine-video-1.5': {
     durations: [1, 2, 4, 6, 8, 10, 12, 15],
     resolutions: ['480p', '720p', '1080p'],
-    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    aspectRatios: ['16:9', '9:16', '1:1', '4:3', '3:4', '3:2', '2:3'],
   },
 }
 
@@ -278,11 +304,32 @@ export const VIDEO_LIMITS: Record<
  *
  * ## Two families, mutually exclusive
  *
- *   - ElevenLabs models take aliases (`sarah`, `george`) or a raw `voice_id`. Their roster comes from
- *     GET /api/v1/audio/voices on the upstream — 22 voices, of which only 8 have an alias; the rest
- *     are reachable by id only. Our gateway does not proxy that endpoint (404), so the list is
- *     transcribed here rather than fetched.
+ *   - ElevenLabs models take aliases (`sarah`, `george`) or a raw `voice_id`. All 22 are listed here,
+ *     of which only 8 have an alias; the rest are reachable by id only.
  *   - OpenAI models take their own 37 names (`alloy`, `coral`, …), measured from the upstream's 400.
+ *
+ * ## The roster IS served, and this list was 8 short
+ *
+ * I claimed our gateway does not proxy the voices endpoint, having probed `/v1/audio/voices` (404)
+ * and concluded the capability was absent. It is served, at
+ *
+ *     GET /v1/marketplace/audio/voices     -> 200, 22 voices with voice_id/name/labels/preview_url
+ *
+ * confirmed by paying $0.001 for it. A 402 there proves nothing on its own — the marketplace `audio`
+ * service registers a wildcard `GET / -> $0.001`, so a path that was never registered quotes exactly
+ * the same. The control settles it: the bogus sibling answers 404 with an HTML error page while
+ * `/voices` returns the roster.
+ *
+ * Fourteen of the 22 were listed here; the other 8 (Liam, Matilda, Will, Bella, Chris, Adam, Bill,
+ * and one clone) were unreachable from this UI. None of the 14 was invalid, so nothing was
+ * mispriced — the cost was reach, not money.
+ *
+ * ## Why it is still a table rather than a fetch
+ *
+ * Because reading it costs $0.001 per call and an anonymous visitor has no wallet. Fetching it to
+ * fill a dropdown would charge for opening a menu and would leave the picker empty for exactly the
+ * users who have not connected one. `probe/marketplace_voices_paid_probe.py` pays for it once and
+ * fails when this table and the live roster disagree, which is the cheap half of the same guarantee.
  *
  * Cross-family names are not merely invalid, they are the expensive case above.
  *
@@ -295,21 +342,33 @@ export const VIDEO_LIMITS: Record<
 export const SPEECH_VOICES: Record<string, readonly { id: string; label: string }[]> = {
   // ElevenLabs: the 8 aliased voices, then the id-only ones. Labels carry the upstream's own
   // one-line character description, which is the only way to choose without listening to all 22.
+  // All 22, from the gateway's own roster at GET /v1/marketplace/audio/voices (paid $0.001 to
+  // read). Aliased ones first as the upstream orders them, then the id-only ones. Labels carry
+  // the upstream's own character description, which is the only way to choose without
+  // listening to all 22.
   elevenlabs: [
-    { id: 'sarah', label: 'Sarah — mature, reassuring' },
-    { id: 'george', label: 'George — warm storyteller' },
-    { id: 'roger', label: 'Roger — laid-back, resonant' },
-    { id: 'laura', label: 'Laura — quirky, enthusiast' },
-    { id: 'charlie', label: 'Charlie — deep, energetic' },
+    { id: 'roger', label: 'Roger — laid-back, casual, resonant' },
+    { id: 'sarah', label: 'Sarah — mature, reassuring, confident' },
+    { id: 'laura', label: 'Laura — enthusiast, quirky attitude' },
+    { id: 'charlie', label: 'Charlie — deep, confident, energetic' },
+    { id: 'george', label: 'George — warm, captivating storyteller' },
     { id: 'callum', label: 'Callum — husky trickster' },
-    { id: 'river', label: 'River — relaxed, neutral' },
-    { id: 'harry', label: 'Harry — fierce' },
-    { id: 'nPczCjzI2devNBz1zQrb', label: 'Brian — deep, comforting' },
-    { id: 'onwK4e9ZLuTAKqWW03F9', label: 'Daniel — steady broadcaster' },
-    { id: 'Xb7hH8MSUJpSbSDYk0k2', label: 'Alice — clear educator' },
-    { id: 'cgSgspJ2msm6clMCkdW9', label: 'Jessica — playful, warm' },
-    { id: 'pFZP5JQG7iQjIQuC4Bku', label: 'Lily — velvety' },
+    { id: 'river', label: 'River — relaxed, neutral, informative' },
+    { id: 'harry', label: 'Harry — fierce warrior' },
+    { id: 'TX3LPaxmHKxFdv7VOQHJ', label: 'Liam — energetic, social media creator' },
+    { id: 'Xb7hH8MSUJpSbSDYk0k2', label: 'Alice — clear, engaging educator' },
+    { id: 'XrExE9yKIg1WjnnlVkGX', label: 'Matilda — knowledgable, professional' },
+    { id: 'bIHbv24MWmeRgasZH58o', label: 'Will — relaxed optimist' },
+    { id: 'cgSgspJ2msm6clMCkdW9', label: 'Jessica — playful, bright, warm' },
     { id: 'cjVigY5qzO86Huf0OWal', label: 'Eric — smooth, trustworthy' },
+    { id: 'hpp4J3VqNfWAUOO0d1Us', label: 'Bella — professional, bright, warm' },
+    { id: 'iP95p4xoKVk53GoZ742B', label: 'Chris — charming, down-to-earth' },
+    { id: 'nPczCjzI2devNBz1zQrb', label: 'Brian — deep, resonant and comforting' },
+    { id: 'onwK4e9ZLuTAKqWW03F9', label: 'Daniel — steady broadcaster' },
+    { id: 'pFZP5JQG7iQjIQuC4Bku', label: 'Lily — velvety actress' },
+    { id: 'pNInz6obpgDQGcFmaJgB', label: 'Adam — dominant, firm' },
+    { id: 'pqHfZKP75CvOlQylNhV4', label: 'Bill — wise, mature, balanced' },
+    { id: 'hILdTfuUq4LRBMrxHERr', label: 'Lamin Clone' },
   ],
   // OpenAI: measured from the upstream's own 400. The full 37 include dated snapshots that duplicate
   // an undated name; these are the distinct ones.
@@ -382,6 +441,147 @@ export function videoLimitsFor(model: string): {
     resolutions: ['default', '480p', '720p'],
     aspectRatios: ['default', '16:9', '9:16', '1:1'],
   }
+}
+
+/** The number in `allowed` closest to `want`, for narrowing a choice rather than discarding it. */
+function nearest(want: number, allowed: readonly number[]): number {
+  return allowed.reduce((best, v) => (Math.abs(v - want) < Math.abs(best - want) ? v : best), allowed[0])
+}
+
+/**
+ * The neutral choice from a list, or `undefined` when the list has none.
+ *
+ * `default` and `adaptive` both mean "let the upstream decide" — the safe landing place for a value
+ * this model cannot honour. When neither is on offer (Grok has no `adaptive`, and renders 480p when
+ * resolution is omitted) the answer is `undefined`: say nothing rather than pick a crop or a
+ * resolution on the user's behalf.
+ */
+function neutralOr(allowed: readonly string[]): string | undefined {
+  return allowed.find((v) => v === 'default' || v === 'adaptive')
+}
+
+/**
+ * Narrows a set of options to what THIS model accepts.
+ *
+ * ## The defect this closes
+ *
+ * `genOptions` is stored per generation KIND, not per model — deliberately, so that switching
+ * Image -> Video -> Image does not forget the size you chose. But the limits are per MODEL, and
+ * nothing reconciled the two. Measured on the live site, reading the request body off the wire:
+ *
+ *     pick 30s under seedance-2.5, switch to sora-2       -> duration_seconds: 30   (accepts 4/8/12)
+ *     pick 4K under seedance-2.0, switch to 2.0-fast      -> resolution: "4K"       (reaches 720p)
+ *     pick a voice under elevenlabs, switch to openai/*   -> voice: "george"
+ *     pick 1.5x under openai, switch to elevenlabs        -> speed: 1.5             (documents ≤1.2)
+ *
+ * All four were invisible: the panel redraws from `videoLimitsFor(model)` and showed the correct
+ * chips, so the offending value appeared nowhere on screen. It was in state, and state is what
+ * `buildBody` marshals.
+ *
+ * The speech one is not a failed call. An out-of-family voice settles the payment and is THEN
+ * refused — "USDC already settled on-chain and cannot be reversed" — so it costs the charge too.
+ *
+ * ## Narrowed, not discarded
+ *
+ * A number moves to the nearest value the model accepts (30s -> 12s on Sora) rather than resetting
+ * to a default, because the user's intent was "long" and the closest legal answer honours it. An
+ * enum with no near neighbour falls back to `default` — meaning "send nothing and let the upstream
+ * choose" — or to the model's first offered value when it has no `default`.
+ *
+ * The stored value is left alone: only the OUTGOING one is narrowed. Switching back to seedance-2.5
+ * restores the 30s the user picked, which is the whole point of keeping options per kind.
+ */
+export function reconcileOptions(
+  kind: GenerationKind,
+  model: string,
+  options: GenerationOptions = {},
+): GenerationOptions {
+  const out: GenerationOptions = { ...options }
+
+  if (kind === 'video') {
+    const limits = videoLimitsFor(model)
+    /**
+     * A duration is ALWAYS set, and always to a value this model accepts.
+     *
+     * `buildBody` used to fall back to a hardcoded 5 when the duration was missing or nonsensical.
+     * 5 is not universally legal: Sora takes only 4, 8 or 12, so that fallback sent a rejected
+     * value to it. The fallback is now 5-or-nearest, which is 5 on Seedance and 4 on Sora.
+     *
+     * A non-positive duration is treated as ABSENT rather than as an intent to be honoured: 0 means
+     * unset, not "as short as possible", so it must not snap to the model's floor.
+     */
+    const wanted =
+      Number.isFinite(out.duration) && (out.duration as number) > 0 ? (out.duration as number) : 5
+    out.duration = limits.durations.includes(wanted) ? wanted : nearest(wanted, limits.durations)
+
+    /**
+     * `default` is a sentinel, not a value — it means "send nothing and let the upstream choose",
+     * and `buildBody` drops it. So it is valid for EVERY model and must never be rewritten.
+     *
+     * Rewriting it was a bug in the first version of this function: most models' aspectRatios lists
+     * have no `default` entry, so the sentinel failed the membership test and got replaced with the
+     * list's first real value — silently switching on a 16:9 crop the user never asked for. That is
+     * the same shape of defect this function exists to close.
+     */
+    if (out.resolution && out.resolution !== 'default' && !limits.resolutions.includes(out.resolution)) {
+      out.resolution = neutralOr(limits.resolutions)
+    }
+    if (out.aspectRatio && out.aspectRatio !== 'default' && !limits.aspectRatios.includes(out.aspectRatio)) {
+      out.aspectRatio = neutralOr(limits.aspectRatios)
+    }
+    // `undefined` from neutralOr means "no neutral option exists, so say nothing at all".
+    if (out.resolution === undefined) delete out.resolution
+    if (out.aspectRatio === undefined) delete out.aspectRatio
+  }
+
+  if (kind === 'speech') {
+    const voices = speechVoicesFor(model)
+    if (voices.length === 0) {
+      // The model ignores `voice` (seed-audio steers from the prompt), or is a virtual whose
+      // resolved family is unknown. Sending one risks the paid-then-refused case, so it goes.
+      delete out.voice
+    } else if (out.voice && !voices.some((v) => v.id === out.voice)) {
+      out.voice = voices[0].id
+    }
+    /**
+     * Speed narrows only WITHIN the endpoint's absolute range; nonsense is dropped, not snapped.
+     *
+     * 1.5 chosen under an OpenAI model then carried to ElevenLabs is a real intent that the target
+     * cannot honour, so it becomes 1.2 — the closest thing to what was asked for. But 99 or 0.1 are
+     * not intents, they are out of range for every model here, and snapping them to a legal value
+     * would invent a choice. Those are dropped, letting the upstream use its own default.
+     */
+    const speeds = speechSpeedsFor(model)
+    if (Number.isFinite(out.speed) && !speeds.includes(out.speed as number)) {
+      const s = out.speed as number
+      if (s >= 0.25 && s <= 4) out.speed = nearest(s, speeds)
+      else delete out.speed
+    }
+  }
+
+  if (kind === 'image') {
+    const c = GENERATION_CHOICES.image
+    if (out.size && !(c.size as readonly string[]).includes(out.size)) out.size = c.size[0]
+    if (out.quality && !(c.quality as readonly string[]).includes(out.quality)) out.quality = 'auto'
+    if (out.outputFormat && !(c.outputFormat as readonly string[]).includes(out.outputFormat)) {
+      out.outputFormat = 'png'
+    }
+    if (out.background && !(c.background as readonly string[]).includes(out.background)) {
+      out.background = 'auto'
+    }
+    // A transparent jpeg is not a thing. The panel already withholds the option, but the stored
+    // value survives a format switch the same way every case above does.
+    if (out.background === 'transparent' && (out.outputFormat ?? 'png') !== 'png') {
+      out.background = 'auto'
+    }
+  }
+
+  if (kind === 'music') {
+    // The upstream 400s on the pair, so the conflict is resolved here rather than sent.
+    if (out.instrumental) delete out.lyrics
+  }
+
+  return out
 }
 
 export const DEFAULT_OPTIONS: Record<GenerationKind, GenerationOptions> = {
@@ -521,9 +721,18 @@ function buildBody(
   kind: GenerationKind,
   prompt: string,
   model: string,
-  options: GenerationOptions = {},
+  rawOptions: GenerationOptions = {},
 ): Record<string, unknown> {
   const spec = GENERATIONS[kind]
+  /**
+   * Narrowed HERE, at the single choke point, rather than in the component that owns the state.
+   *
+   * Both `challengeGeneration` and `generate` marshal through this function, so a value that is
+   * invalid for the chosen model cannot reach either the quote or the paid call — and a future
+   * caller cannot forget to reconcile first. Doing it in the UI would leave the library exporting
+   * a `buildBody` that happily sends 30 seconds to a model with a 12-second ceiling.
+   */
+  const options = reconcileOptions(kind, model, rawOptions)
   // Keyed off the spec rather than hardcoded, so adding an endpoint cannot silently reuse
   // the wrong field name. /v1/audio/speech reads `input` and 400s on `prompt`.
   const body: Record<string, unknown> = { model, [spec.promptField]: prompt }
@@ -574,8 +783,15 @@ function buildBody(
      * 402 quote is the same either way; the request is a 200 either way; and the job completes
      * either way. The ONLY observable difference is the length of the file the user paid for.
      */
-    body.duration_seconds =
-      Number.isFinite(options.duration) && (options.duration as number) > 0 ? options.duration : 5
+    /**
+     * Always present, and always a value THIS model accepts — `reconcileOptions` guarantees both,
+     * including the missing and non-positive cases.
+     *
+     * The fallback used to be a hardcoded 5 right here, which was wrong for Sora: it accepts only
+     * 4, 8 or 12, so the default sent it a rejected number. Keeping the fallback in one place also
+     * stops the two from disagreeing.
+     */
+    body.duration_seconds = options.duration
     /**
      * `default` means "send nothing", not the literal string.
      *

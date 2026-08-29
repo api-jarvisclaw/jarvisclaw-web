@@ -102,6 +102,52 @@ export function isModelUnavailable(err: unknown): boolean {
   )
 }
 
+/**
+ * True when a failure means "this model cannot stream", as opposed to anything else.
+ *
+ * Reported from the live gateway as a plain sentence — `Streaming not supported for this model.
+ * Set stream: false` — with no distinct error code, so it has to be matched on the message the
+ * same way `isModelUnavailable` is.
+ *
+ * ## Why this is retried rather than surfaced
+ *
+ * A user asked "北京时间" and was shown that sentence, in English, as the assistant's reply. Three
+ * things are wrong with that and only the last is cosmetic: the request had already been PAID for,
+ * the instruction ("set stream: false") is addressed to whoever wrote the client rather than to the
+ * person reading it, and it is untranslated in a UI that otherwise reads Chinese.
+ *
+ * The 402 quote cannot prevent it — measured, `stream: true` and `stream: false` are quoted at the
+ * same $0.001 — so this is another "the charge is approved and then the call fails" case, and the
+ * only place left to handle it is after the failure.
+ *
+ * Deliberately NOT a list of models. I know of no reliable enumeration: the obvious candidate
+ * (`auto/search`, whose handler writes plain JSON and cannot emit SSE) answers 200 to `stream:
+ * true` on the live gateway, resolved to gemini-3.5-flash rather than reaching that handler at all.
+ * A hardcoded list built from one sample would be wrong for the models it omits and would rot as
+ * routing changes. Reacting to what the gateway actually says covers every model, including ones
+ * added later.
+ *
+ * ## Deliberately NARROW, and one measurement is why
+ *
+ * `openai/text-embedding-3-small` on this endpoint answers 400 "The requested operation is
+ * unsupported." — no mention of streaming, and it is tempting to widen the pattern to catch it.
+ * That would be wrong: measured, it returns the SAME 400 with `stream: false`. The problem is that
+ * an embedding model is not a chat model at all, so a retry would spend a second charge, fail
+ * again, and replace the real reason with a misleading one.
+ *
+ * The rule this settles: only retry a message that says the STREAM is the problem. A message that
+ * merely says something is unsupported has not told us that, and the gateway's own wording is the
+ * only evidence available before paying — the 402 quote is identical in every one of these cases.
+ */
+export function isStreamingUnsupported(err: unknown): boolean {
+  if (!(err instanceof GatewayError)) return false
+  const m = err.message.toLowerCase()
+  return (
+    (m.includes('streaming') || m.includes('stream')) &&
+    (m.includes('not supported') || m.includes('not available') || m.includes('unsupported'))
+  )
+}
+
 interface RawFreeModel {
   model?: string
   /**
@@ -319,7 +365,26 @@ export async function streamChat(
       ...(req.tools && req.tools.length > 0 ? { tools: req.tools } : {}),
     }),
   })
-  if (!res.ok) throw await readError(res)
+  if (!res.ok) {
+    const err = await readError(res)
+    /**
+     * A model that cannot stream is retried WITHOUT streaming rather than reported.
+     *
+     * Measured on the live gateway: the refusal arrives as "Streaming not supported for this
+     * model. Set stream: false", and a user who asked "北京时间" was shown exactly that — an
+     * English instruction aimed at a developer, as the assistant's answer, for a call they had
+     * already paid for. The 402 quote is identical either way ($0.001 for both), so nothing
+     * upstream of the failure can prevent it.
+     *
+     * The retry is not a second charge in the paid sense that matters here: the first request
+     * never produced an answer, and the alternative is charging for nothing at all. Emitted
+     * through the same `onDelta` so every caller — agent loop included — needs no change.
+     */
+    if (isStreamingUnsupported(err)) {
+      return completeChat(req, onDelta, opts)
+    }
+    throw err
+  }
   if (!res.body) throw new GatewayError('the gateway returned no response body', res.status)
 
   const reader = res.body.getReader()
@@ -432,4 +497,72 @@ export async function streamChat(
     .filter((call) => call.function.name !== '')
 
   return { content, reasoning, toolCalls, model, finishReason }
+}
+
+/**
+ * One non-streaming chat call, reported through the streaming interface.
+ *
+ * The fallback for a model that refuses `stream: true`. It returns the same `ChatResult` and calls
+ * the same `onDelta`, so `streamChat` can switch to it mid-flight and no caller — the agent loop
+ * included — has to know it happened.
+ *
+ * `onDelta` fires ONCE with the whole answer, which is the honest shape: there were no increments
+ * to report. It is called rather than skipped because the UI renders from those deltas, and a
+ * caller that only collected the return value would show an empty bubble until the promise settled.
+ *
+ * Tool calls are read here too. Without that, a non-streaming model would appear to have answered
+ * in prose whenever it actually asked for a tool, and the agent loop would end its turn — the
+ * failure being silent rather than visible, which is worse than the error this replaces.
+ */
+async function completeChat(
+  req: { messages: ChatMessage[]; model?: string; tools?: ToolSchema[]; maxTokens?: number },
+  onDelta: (delta: ChatDelta) => void,
+  opts: RequestOptions = {},
+): Promise<ChatResult> {
+  const res = await fetch((opts.baseUrl ?? DEFAULT_BASE_URL) + '/v1/chat/completions', {
+    method: 'POST',
+    headers: authHeaders(opts.cred ?? {}),
+    signal: opts.signal,
+    body: JSON.stringify({
+      model: req.model ?? FREE_MODEL,
+      messages: req.messages,
+      stream: false,
+      max_tokens: req.maxTokens ?? 1024,
+      ...(req.tools && req.tools.length > 0 ? { tools: req.tools } : {}),
+    }),
+  })
+  if (!res.ok) throw await readError(res)
+
+  const body = (await res.json()) as {
+    model?: string
+    choices?: {
+      message?: {
+        content?: string
+        reasoning?: string
+        reasoning_content?: string
+        tool_calls?: ToolCall[]
+      }
+      finish_reason?: string
+    }[]
+  }
+  const choice = body.choices?.[0]
+  const msg = choice?.message ?? {}
+  const content = typeof msg.content === 'string' ? msg.content : ''
+  // Both spellings: `reasoning` and `reasoning_content` are each used by models we serve, and
+  // reading only one puts a model's thinking into the void.
+  const reasoning =
+    (typeof msg.reasoning === 'string' && msg.reasoning) ||
+    (typeof msg.reasoning_content === 'string' && msg.reasoning_content) ||
+    ''
+
+  if (reasoning !== '') onDelta({ reasoning })
+  if (content !== '') onDelta({ content })
+
+  return {
+    content,
+    reasoning,
+    toolCalls: Array.isArray(msg.tool_calls) ? msg.tool_calls : [],
+    model: typeof body.model === 'string' && body.model !== '' ? body.model : req.model ?? FREE_MODEL,
+    finishReason: typeof choice?.finish_reason === 'string' ? choice.finish_reason : '',
+  }
 }

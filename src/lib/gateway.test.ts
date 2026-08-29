@@ -1,6 +1,12 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 
-import { authHeaders, streamChat, GatewayError, isRateLimited } from './gateway'
+import {
+  authHeaders,
+  streamChat,
+  GatewayError,
+  isRateLimited,
+  isStreamingUnsupported,
+} from './gateway'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -241,5 +247,155 @@ describe('streamChat', () => {
 
     await streamChat({ messages: [], tools: [] }, () => {})
     expect(JSON.parse(sentBody)).not.toHaveProperty('tools')
+  })
+})
+
+/**
+ * A model that cannot stream must be retried, not reported.
+ *
+ * The defect: a user asked "北京时间" and the assistant's reply was the sentence "Streaming not
+ * supported for this model. Set stream: false" — in English, in a Chinese UI, instructing the
+ * reader to change a JSON field they never wrote, for a call that had ALREADY BEEN PAID for. The
+ * 402 quote cannot catch it: measured on the live gateway, `stream: true` and `stream: false` are
+ * both quoted at $0.001, so the price is identical whether the call is about to work or fail.
+ */
+describe('a model that refuses streaming', () => {
+  it('recognises the refusal, and only that', () => {
+    const refusal = new GatewayError(
+      'Streaming not supported for this model. Set stream: false',
+      400,
+    )
+    expect(isStreamingUnsupported(refusal)).toBe(true)
+    // Wording varies across upstreams; the classifier reads the message because the gateway
+    // reports no distinct code for it.
+    expect(isStreamingUnsupported(new GatewayError('stream is unsupported here', 400))).toBe(true)
+
+    // The falsifier: unrelated failures must NOT be swallowed into a silent retry. A classifier
+    // that matched too widely would turn an auth error or a dead model into a second charge and a
+    // second failure, with the real reason never shown.
+    for (const other of [
+      'Unknown model: zai/glm-4-flash',
+      'insufficient balance: need at least $0.50',
+      'rate limited, try again',
+      'the gateway answered 500',
+      /**
+       * MEASURED, and the reason this classifier stays narrow.
+       *
+       * `openai/text-embedding-3-small` answers exactly this on /v1/chat/completions, and it is
+       * tempting to treat "unsupported" as a streaming refusal. It is not: the SAME 400 comes back
+       * with `stream: false`, because an embedding model is not a chat model at all. Retrying would
+       * spend a second charge, fail again, and hide the real reason.
+       */
+      'The requested operation is unsupported.',
+    ]) {
+      expect(isStreamingUnsupported(new GatewayError(other, 400)), other).toBe(false)
+    }
+    // Not every thrown value is a GatewayError.
+    expect(isStreamingUnsupported(new Error('Streaming not supported'))).toBe(false)
+  })
+
+  it('retries without streaming and delivers the answer through onDelta', async () => {
+    const calls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { stream?: boolean }
+        calls.push(body.stream ? 'stream' : 'complete')
+        if (body.stream) {
+          return new Response(
+            JSON.stringify({
+              error: { message: 'Streaming not supported for this model. Set stream: false' },
+            }),
+            { status: 400 },
+          )
+        }
+        return new Response(
+          JSON.stringify({
+            model: 'gemini-3.5-flash',
+            choices: [
+              {
+                message: { content: '北京时间是 21:13。', reasoning_content: 'checking the clock' },
+                finish_reason: 'stop',
+              },
+            ],
+          }),
+          { status: 200 },
+        )
+      }),
+    )
+
+    const deltas: string[] = []
+    const result = await streamChat({ messages: [{ role: 'user', content: '北京时间' }] }, (d) => {
+      if (d.content) deltas.push(d.content)
+    })
+
+    // Retried once, unstreamed — not reported to the user as an error.
+    expect(calls).toEqual(['stream', 'complete'])
+    expect(result.content).toBe('北京时间是 21:13。')
+    // Read under BOTH spellings: `reasoning` and `reasoning_content` are each used by models we
+    // serve, and reading one only would put a model's thinking into the void.
+    expect(result.reasoning).toBe('checking the clock')
+    // The UI renders from deltas, so a fallback that only returned a value would leave an empty
+    // bubble until the promise settled.
+    expect(deltas).toEqual(['北京时间是 21:13。'])
+    expect(result.model).toBe('gemini-3.5-flash')
+  })
+
+  it('carries tool calls through the fallback', async () => {
+    // Without this, a non-streaming model that asked for a tool would look like it answered in
+    // prose, and the agent loop would end the turn — a silent wrong answer rather than a visible
+    // error, which is worse than the message this replaces.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { stream?: boolean }
+        if (body.stream) {
+          return new Response(
+            JSON.stringify({ error: { message: 'Streaming not supported for this model' } }),
+            { status: 400 },
+          )
+        }
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: '',
+                  tool_calls: [
+                    {
+                      id: 'call_1',
+                      type: 'function',
+                      function: { name: 'search_apis', arguments: '{"query":"time"}' },
+                    },
+                  ],
+                },
+                finish_reason: 'tool_calls',
+              },
+            ],
+          }),
+          { status: 200 },
+        )
+      }),
+    )
+
+    const result = await streamChat({ messages: [{ role: 'user', content: 'hi' }] }, () => {})
+    expect(result.toolCalls).toHaveLength(1)
+    expect(result.toolCalls[0].function.name).toBe('search_apis')
+    expect(result.finishReason).toBe('tool_calls')
+  })
+
+  it('does not retry a failure that is not about streaming', async () => {
+    // One call, and the real error surfaces. A retry here would charge twice and hide the cause.
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ error: { message: 'Unknown model: zai/glm-4-flash' } }), {
+          status: 400,
+        }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(
+      streamChat({ messages: [{ role: 'user', content: 'hi' }] }, () => {}),
+    ).rejects.toThrow(/unknown model/i)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

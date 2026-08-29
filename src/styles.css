@@ -1554,12 +1554,27 @@ body.is-resizing * {
 
 /* Opens upward for the same reason the model picker does: the composer sits at the bottom of
    the viewport, so a downward menu would be clipped. */
+/**
+ * The panel opens upward from the composer, so it needs a ceiling AND a scroller.
+ *
+ * Completing the ElevenLabs roster from 14 voices to 22 made this 1024px tall, and because it is
+ * anchored by `bottom` with no cap it grew off the TOP of the window — measured at y = -143 in a
+ * 1000px viewport, putting the first rows above the visible area with no way to reach them.
+ * `is_visible()` returned true for every one of those chips, so only geometry catches it.
+ *
+ * `overflow-y: auto` alone would not have been enough either: a scroller with no bounded height is
+ * not a scroller. The cap is what makes the overflow mean something.
+ */
 .genopts-menu {
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
   z-index: 20;
   min-width: 260px;
+  /* Leave room for the composer below and a margin above; the panel scrolls past that. */
+  max-height: min(460px, calc(100vh - 220px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 12px 14px;
   background: var(--popover);
   border: 1px solid var(--border);

@@ -120,7 +120,7 @@ const searchApis: Tool = {
     function: {
       name: 'search_apis',
       description:
-        'Search the catalogue of 4000+ callable APIs by natural-language query (free, no charge). ' +
+        'Search the catalogue of 2,400+ callable APIs by natural-language query (free, no charge). ' +
         'Returns each result with its real per-call price. Search before assuming an API does or ' +
         'does not exist — but do not search twice for the same thing; a reworded query returns the ' +
         'same rows.',

@@ -18,6 +18,7 @@ import {
 import { LIBRARY_COUNT } from '../lib/library-count'
 import { SEEDANCE_COUNT } from '../lib/seedance-count'
 import { SHOWCASE, showcaseMode, showcaseUrl, type ShowcaseItem } from '../lib/showcase'
+import { gatewayModelFor } from '../lib/showcase-model'
 import { Scrim } from './Scrim'
 import { useT } from './LocaleContext'
 
@@ -82,7 +83,7 @@ export function Gallery({
   onTab: (t: GalleryTab) => void
   onRemove: (id: string) => void
   /** Loads a prompt into the composer in the right mode, ready to run. */
-  onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
+  onUsePrompt: (prompt: string, mode: 'image' | 'video', model: string | null) => void
 }) {
   const t = useT()
   return (
@@ -178,7 +179,7 @@ function RetentionLine({ item }: { item: GalleryItem }) {
 function ShowcasePane({
   onUsePrompt,
 }: {
-  onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
+  onUsePrompt: (prompt: string, mode: 'image' | 'video', model: string | null) => void
 }) {
   const t = useT()
   const [open, setOpen] = useState<string | null>(null)
@@ -243,7 +244,7 @@ function ShowcaseDetail({
 }: {
   item: ShowcaseItem
   onClose: () => void
-  onUsePrompt: (prompt: string, mode: 'image' | 'video') => void
+  onUsePrompt: (prompt: string, mode: 'image' | 'video', model: string | null) => void
 }) {
   const t = useT()
   const [copied, setCopied] = useState(false)
@@ -326,7 +327,11 @@ function ShowcaseDetail({
                 <button
                   className="approve"
                   onClick={() => {
-                    onUsePrompt(item.prompt as string, showcaseMode(item))
+                    // The model the card is already displaying. Dropping it here is what
+                    // quoted a Seedance 2.0 example against the modality default (the mini,
+                    // ~2.8x cheaper and different parameter ceilings), so the price shown
+                    // belonged to a model the user had not picked.
+                    onUsePrompt(item.prompt as string, showcaseMode(item), gatewayModelFor(item.model))
                     onClose()
                   }}
                 >

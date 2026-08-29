@@ -1,6 +1,6 @@
 # jarvisclaw-web
 
-A browser agent with its own wallet. 4000+ callable APIs and 80+ models, paid per call
+A browser agent with its own wallet. 2,400+ callable APIs and 280+ models, paid per call
 over x402.
 
 The web counterpart to the [`jarvisclaw` CLI](https://www.npmjs.com/package/jarvisclaw):

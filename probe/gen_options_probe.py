@@ -182,6 +182,43 @@ def main() -> int:
         print(f"speech rows: {list(sp)}")
         for k, v in sp.items():
             print(f"  {k}: {v[:6]}{' …' if len(v) > 6 else ''}")
+        # ---- the panel must fit on screen and scroll ----
+        #
+        # Completing the ElevenLabs roster from 14 voices to 22 made this panel 1024px tall. It is
+        # anchored by `bottom` with no cap, so it grew off the TOP of the window: measured at
+        # y = -143 in a 1000px viewport, with the first rows unreachable — and is_visible() returned
+        # true for every chip up there. Only geometry sees this.
+        menu = page.locator(".genopts-menu")
+        mb = menu.bounding_box()
+        style = menu.evaluate(
+            "e => { const c = getComputedStyle(e); return [c.overflowY, c.maxHeight, e.scrollHeight, e.clientHeight]; }"
+        )
+        print(f"menu: box={mb} overflow={style[0]} maxH={style[1]} scrollH={style[2]} clientH={style[3]}")
+        if not mb or mb["y"] < 0:
+            fails.append(
+                f"the options panel starts above the viewport (y={mb['y'] if mb else '?'}) — its top "
+                "rows cannot be reached, though is_visible() reports them fine"
+            )
+        if style[2] > style[3] + 1 and style[0] not in ("auto", "scroll"):
+            fails.append(
+                f"the panel overflows ({style[2]}px of content in {style[3]}px) with overflow-y="
+                f"{style[0]} — the excess is unreachable"
+            )
+        if style[1] == "none":
+            fails.append(
+                "the panel has no max-height, so a longer list grows off screen; overflow alone is "
+                "not a scroller without a bounded height"
+            )
+        # Every chip must sit inside the viewport once scrolled to.
+        last_voice = page.locator(".genopts-row", has_text="VOICE").first.locator(".genopts-chip").last
+        if last_voice.count() > 0:
+            last_voice.scroll_into_view_if_needed()
+            page.wait_for_timeout(200)
+            lb = last_voice.bounding_box()
+            print(f"  last voice chip after scrolling: {lb}")
+            if not lb or lb["y"] < 0 or lb["y"] + lb["height"] > 1000:
+                fails.append(f"the last voice cannot be brought on screen: {lb}")
+
         if "voice" in sp:
             vs = sp["voice"]
             fams = {

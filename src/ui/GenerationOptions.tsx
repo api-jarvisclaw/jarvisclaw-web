@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import {
   GENERATION_CHOICES,
+  reconcileOptions,
   videoLimitsFor,
   speechVoicesFor,
   speechSpeedsFor,
@@ -54,6 +55,20 @@ export function GenerationOptions({
   const limits = videoLimitsFor(model ?? '')
   const voices = speechVoicesFor(model ?? '')
   const speeds = speechSpeedsFor(model ?? '')
+  /**
+   * What will ACTUALLY be sent for this model, not what is in state.
+   *
+   * The two differ after a model switch: the options are stored per generation kind so that
+   * switching Image -> Video -> Image remembers your size, but the limits are per model. Pick 30s
+   * under seedance-2.5, switch to Sora, and state still holds 30 while Sora accepts 4/8/12.
+   * `buildBody` narrows it to 12 before sending — so showing the stored 30 here would put the
+   * highlight on a chip that is not what runs, and leave the button reading "30s" for a
+   * twelve-second video.
+   *
+   * The STORED value is untouched. Switching back to 2.5 restores the 30s, which is the whole
+   * reason the options are kept per kind.
+   */
+  const shown = reconcileOptions(mode, model ?? '', options)
   const [open, setOpen] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
 
@@ -76,7 +91,8 @@ export function GenerationOptions({
   // Music used to take nothing beyond a prompt, which was wrong: `instrumental` and `lyrics` are
   // documented and were never offered.
 
-  const summary = describe(mode, options)
+  // The button names what will run, so a stale 30s cannot label a twelve-second video.
+  const summary = describe(mode, shown)
 
   return (
     <div className="genopts" ref={boxRef}>
@@ -99,19 +115,19 @@ export function GenerationOptions({
               <Choices
                 label={t('Size')}
                 values={GENERATION_CHOICES.image.size}
-                current={options.size ?? '1024x1024'}
+                current={shown.size ?? '1024x1024'}
                 onPick={(size) => onChange({ ...options, size: String(size) })}
               />
               <Choices
                 label={t('Quality')}
                 values={GENERATION_CHOICES.image.quality}
-                current={options.quality ?? 'auto'}
+                current={shown.quality ?? 'auto'}
                 onPick={(quality) => onChange({ ...options, quality: String(quality) })}
               />
               <Choices
                 label={t('Count')}
                 values={GENERATION_CHOICES.image.n}
-                current={options.n ?? 1}
+                current={shown.n ?? 1}
                 onPick={(n) => onChange({ ...options, n: Number(n) })}
               />
               {/* Measured against the returned bytes: jpeg really comes back as ffd8, png as
@@ -120,7 +136,7 @@ export function GenerationOptions({
               <Choices
                 label={t('Format')}
                 values={GENERATION_CHOICES.image.outputFormat}
-                current={options.outputFormat ?? 'png'}
+                current={shown.outputFormat ?? 'png'}
                 onPick={(f) =>
                   onChange({
                     ...options,
@@ -128,7 +144,7 @@ export function GenerationOptions({
                     // A transparent jpeg is not a thing, so switching away from png drops it rather
                     // than sending a combination the upstream would have to resolve for us.
                     background:
-                      String(f) !== 'png' && options.background === 'transparent'
+                      String(f) !== 'png' && shown.background === 'transparent'
                         ? 'auto'
                         : options.background,
                   })
@@ -140,20 +156,20 @@ export function GenerationOptions({
                   // `transparent` is withheld rather than shown-and-rejected when the format cannot
                   // carry it: an option that silently does nothing is the defect this panel just
                   // had two of.
-                  (options.outputFormat ?? 'png') === 'png'
+                  (shown.outputFormat ?? 'png') === 'png'
                     ? GENERATION_CHOICES.image.background
                     : GENERATION_CHOICES.image.background.filter((b) => b !== 'transparent')
                 }
-                current={options.background ?? 'auto'}
+                current={shown.background ?? 'auto'}
                 onPick={(b) => onChange({ ...options, background: String(b) })}
               />
-              {(options.outputFormat ?? 'png') === 'jpeg' && (
+              {(shown.outputFormat ?? 'png') === 'jpeg' && (
                 // Only for jpeg, and only then. Measured monotonic: 20 -> 396 KB, 60 -> 521 KB,
                 // 100 -> 564 KB.
                 <Choices
                   label={t('Compression')}
                   values={GENERATION_CHOICES.image.outputCompression}
-                  current={options.outputCompression ?? 80}
+                  current={shown.outputCompression ?? 80}
                   format={(v) => `${v}%`}
                   onPick={(c) => onChange({ ...options, outputCompression: Number(c) })}
                 />
@@ -166,7 +182,7 @@ export function GenerationOptions({
               <Choices
                 label={t('Length')}
                 values={limits.durations}
-                current={options.duration ?? 5}
+                current={shown.duration ?? 5}
                 format={(v) => `${v}s`}
                 onPick={(duration) => onChange({ ...options, duration: Number(duration) })}
               />
@@ -176,7 +192,7 @@ export function GenerationOptions({
               <Choices
                 label={t('Resolution')}
                 values={limits.resolutions}
-                current={options.resolution ?? 'default'}
+                current={shown.resolution ?? 'default'}
                 onPick={(r) => onChange({ ...options, resolution: String(r) })}
               />
               {/* Seven documented values, and the single most useful control here for anyone posting
@@ -184,7 +200,7 @@ export function GenerationOptions({
               <Choices
                 label={t('Shape')}
                 values={limits.aspectRatios}
-                current={options.aspectRatio ?? 'default'}
+                current={shown.aspectRatio ?? 'default'}
                 onPick={(a) => onChange({ ...options, aspectRatio: String(a) })}
               />
               {/* Seedance scores text-to-video by default, and there was no way to ask for silence.
@@ -193,7 +209,7 @@ export function GenerationOptions({
               <Choices
                 label={t('Audio')}
                 values={['on', 'off'] as const}
-                current={options.generateAudio === false ? 'off' : 'on'}
+                current={shown.generateAudio === false ? 'off' : 'on'}
                 // The chip labels go through t() too. Without `format` they render as literal
                 // "on"/"off" — English words on a Chinese panel, and the guard flagged them as keys
                 // nothing asks for, which is the same signal from the other side.
@@ -217,7 +233,7 @@ export function GenerationOptions({
                 <Choices
                   label={t('Voice')}
                   values={voices.map((v) => v.id)}
-                  current={options.voice ?? voices[0].id}
+                  current={shown.voice ?? voices[0].id}
                   format={(id) => voices.find((v) => v.id === id)?.label ?? String(id)}
                   onPick={(voice) => onChange({ ...options, voice: String(voice) })}
                 />
@@ -225,7 +241,7 @@ export function GenerationOptions({
               <Choices
                 label={t('Speed')}
                 values={speeds}
-                current={options.speed ?? 1}
+                current={shown.speed ?? 1}
                 format={(v) => `${v}×`}
                 onPick={(speed) => onChange({ ...options, speed: Number(speed) })}
               />
@@ -235,7 +251,7 @@ export function GenerationOptions({
               <Choices
                 label={t('Format')}
                 values={GENERATION_CHOICES.speech.responseFormat}
-                current={options.responseFormat ?? 'mp3'}
+                current={shown.responseFormat ?? 'mp3'}
                 onPick={(f) => onChange({ ...options, responseFormat: String(f) })}
               />
             </>
@@ -249,7 +265,7 @@ export function GenerationOptions({
               <Choices
                 label={t('Vocals')}
                 values={['sung', 'instrumental'] as const}
-                current={options.instrumental ? 'instrumental' : 'sung'}
+                current={shown.instrumental ? 'instrumental' : 'sung'}
                 format={(v) => t(v)}
                 onPick={(v) =>
                   onChange({
@@ -259,7 +275,7 @@ export function GenerationOptions({
                   })
                 }
               />
-              {!options.instrumental && (
+              {!shown.instrumental && (
                 <div className="genopts-row">
                   <span className="genopts-label">{t('Lyrics')}</span>
                   {/* Left empty means the model writes its own, which is the documented default and
@@ -267,7 +283,7 @@ export function GenerationOptions({
                   <textarea
                     className="genopts-text"
                     rows={3}
-                    value={options.lyrics ?? ''}
+                    value={shown.lyrics ?? ''}
                     placeholder={t('leave empty and the model writes them')}
                     onChange={(e) => onChange({ ...options, lyrics: e.target.value })}
                   />

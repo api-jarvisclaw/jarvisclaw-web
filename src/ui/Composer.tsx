@@ -1,4 +1,11 @@
-import { AudioLinesIcon, ImageIcon, MusicIcon, SendIcon, VideoIcon } from 'lucide-react'
+import {
+  AudioLinesIcon,
+  ImageIcon,
+  MessageSquareIcon,
+  MusicIcon,
+  SendIcon,
+  VideoIcon,
+} from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import type { CatalogueModel } from '../lib/catalogue'
@@ -26,6 +33,30 @@ const MODE_ICONS = {
   music: MusicIcon,
   speech: AudioLinesIcon,
 } as const
+
+/**
+ * The modes shown in the composer, chat first.
+ *
+ * Chat used to be absent from this row, and that absence was the whole defect. Reported as
+ * "一旦切到 image 或者其他的 就回不去正常聊天了" — once you switch to Image you cannot get
+ * back to normal chat.
+ *
+ * The mechanism was never broken. Measured on the live console: pressing the ACTIVE mode
+ * toggles back, the model resets from `openai/gpt-image-2` to `auto/free`, and a question
+ * then answers. What was missing was any way to KNOW that:
+ *
+ *   buttons labelled exactly "Chat": 0
+ *
+ * Every other mode is a button you press to enter it, so the row taught a rule that chat
+ * was the one exception to — and the only escape was pressing a button that already looked
+ * pressed, which reads as "already there, this does nothing". A toggle whose off-switch is
+ * the on-switch is discoverable only to whoever wrote it.
+ *
+ * So chat becomes a peer: visible, labelled, pressable, and highlighted when active. The
+ * toggle behaviour on the other four stays, because it now costs nothing and someone who
+ * found it will keep using it.
+ */
+export const COMPOSER_MODES = ['chat', 'image', 'video', 'music', 'speech'] as const
 
 /**
  * The composer: text box, model picker, and the generation modes.
@@ -151,22 +182,28 @@ export function Composer({
             onSelect={onModel}
           />
 
-          {(['image', 'video', 'music', 'speech'] as const).map((kind) => {
-            const Icon = MODE_ICONS[kind]
+          {COMPOSER_MODES.map((kind) => {
+            const Icon = kind === 'chat' ? MessageSquareIcon : MODE_ICONS[kind]
+            // GENERATIONS has no 'chat' entry — it maps a generation kind to an endpoint,
+            // a price and a unit, and chat has none of those. Labelling it here rather
+            // than adding a fake row keeps that type honest.
+            const label = kind === 'chat' ? t('Chat') : t(GENERATIONS[kind].label)
             return (
               <button
                 key={kind}
                 className={mode === kind ? 'mode-btn mode-btn-active' : 'mode-btn'}
-                // Toggles: pressing the active mode returns to chat, so there is always a
-                // way back without hunting for a "chat" button that would otherwise be the
-                // only unlabelled state.
+                // Pressing the active generation mode still returns to chat, which is how
+                // this worked before Chat had a button of its own. Chat itself is a no-op
+                // when already active rather than a toggle: there is nothing to toggle to,
+                // and switching to a paid mode by accident is exactly what a visitor
+                // reaching for "put it back" must not get.
                 onClick={() => onMode(mode === kind ? 'chat' : kind)}
                 aria-pressed={mode === kind}
               >
                 {/* aria-hidden because the label right beside it already names the mode; a
                     screen reader announcing "image image" is worse than silence. */}
                 <Icon className="mode-glyph" size={15} aria-hidden="true" />
-                {t(GENERATIONS[kind].label)}
+                {label}
               </button>
             )
           })}

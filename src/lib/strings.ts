@@ -301,6 +301,9 @@ const zh: Record<string, string> = {
   Video: '视频',
   Music: '音乐',
   Speech: '语音',
+  // The composer's chat button. Not from GENERATIONS — chat has no endpoint, price or unit, so
+  // it has no row there and is labelled in Composer.tsx instead.
+  Chat: '聊天',
   'Prompt categories': '提示词分类',
   auto: 'auto',
   'not servable': '当前无法服务',

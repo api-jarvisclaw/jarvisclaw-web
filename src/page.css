@@ -15,6 +15,17 @@
   background: var(--background);
   color: var(--foreground);
 
+  /* 16px, the main site's base size, measured on its rendered body against ducat's 15px.
+   *
+   * Set on the landing page rather than on `body`, deliberately. `body` is 15px for the
+   * CONSOLE, which is a dense working surface — a chat transcript, a model picker, a ledger
+   * — and 15px is the right density there. A marketing page is read, not operated, and the
+   * main site's 16px is what makes its prose feel like the same product's prose.
+   *
+   * Everything below inherits it, so the lede, the section copy and the figures all move
+   * together instead of needing per-rule sizes. */
+  font-size: 16px;
+
   /* One measure and one gutter for the whole page.
    *
    * Declared here rather than repeated per section because the failure they prevent is exactly the one
@@ -25,18 +36,105 @@
   --page-gutter: 28px;
 }
 
-/* The bar's background and border span the window; its contents sit on the page measure, so the brand
-   lines up with the section headings underneath rather than hugging the window edge. */
+/* The bar, matched to the main site's.
+ *
+ * Its contents sit on the page measure, so the brand lines up with the section headings
+ * underneath rather than hugging the window edge. That part was already right.
+ *
+ * What was not: measured on the main site's rendered header at 1440px, walking every
+ * descendant that paints anything —
+ *
+ *   HEADER  fixed   1440x64  bg rgba(0,0,0,0)  blur none  border 0px
+ *   DIV     static  1440x64  bg rgba(0,0,0,0)  blur none  border 0px
+ *   NAV     static  1328x64  bg rgba(0,0,0,0)  blur none  border 0px
+ *
+ * Nothing in that chain paints a background, a blur or a rule. The main site's nav is
+ * transparent and the page simply runs underneath it. Ducat's was an 82%-opaque bar with
+ * blur(10px) and a 1px bottom border — a visible horizontal band across the top of the
+ * page that the main site does not have, which is a large part of "这两个看起来不像一家".
+ *
+ * Height matched too: 64px there, 63px here from padding-block: 13px on a 37px row.
+ *
+ * Kept sticky rather than switched to fixed. Fixed would take the bar out of flow and
+ * require the hero to reserve 64px for it, and getting that wrong puts the headline under
+ * the nav — a worse defect than the scroll behaviour it would buy. Sticky at the top of a
+ * scroll container is visually identical here while the page is at rest.
+ *
+ * TRANSPARENT ONLY AT REST, which is the part worth measuring rather than assuming. Scrolled
+ * to 1200px the main site's header is not transparent at all:
+ *
+ *   at top    bg rgba(0,0,0,0)            blur none
+ *   scrolled  bg rgba(245,249,252,0.80)   blur(40px)
+ *
+ * It fades in a backdrop once content is underneath it. Copying only the at-rest state would
+ * have left nav labels sitting on top of moving text — a readability regression dressed up as
+ * parity. So the backdrop stays; it is applied on scroll instead of always, and its values are
+ * the main site's (80%, blur 40px) rather than the 82%/blur(10px) that were here.
+ *
+ * `animation-timeline: scroll()` does this in CSS with no scroll listener. Where it is
+ * unsupported the bar keeps the backdrop permanently — the previous behaviour, which is the
+ * safe direction to degrade in: legible everywhere, merely less airy at the top. */
 .page-nav {
   position: sticky;
   top: 0;
   z-index: 20;
-  border-bottom: 1px solid var(--border);
   padding-inline: var(--page-gutter);
-  /* The one blur on this page, and it is on an overlay — the console's own convention. A sticky
-     bar over scrolling content is exactly the case backdrop-filter exists for. */
-  background: color-mix(in oklab, var(--background) 82%, transparent);
-  backdrop-filter: blur(10px);
+  /* The backdrop lives on ::before below, so its opacity can be driven by scroll. */
+  background: transparent;
+}
+
+/* The at-rest transparency, done with a scroll-driven animation on OPACITY.
+ *
+ * Three things had to be got right here, and the first two versions got them wrong:
+ *
+ *   - the animated properties. Keyframing `background` and `backdrop-filter` did nothing —
+ *     backdrop-filter does not interpolate from blur(0) reliably, and the bar stayed opaque
+ *     at the top. Opacity on a pseudo-element does interpolate, so the backdrop moves to
+ *     ::before and only its opacity is animated.
+ *   - the timeline's scroller. `scroll(nearest)` resolves to the nearest ancestor that
+ *     actually scrolls, and on this page that is `.page` (it carries overflow-y: auto), not
+ *     the document. Naming it explicitly rather than relying on "nearest" being what I
+ *     assumed.
+ *   - the fallback. Without support the ::before simply stays at opacity 1, which is the
+ *     old always-on backdrop: legible everywhere, merely less airy at the top. Degrading
+ *     toward legible is the only acceptable direction for a nav over moving text. */
+.page-nav {
+  isolation: isolate;
+}
+
+.page-nav::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: color-mix(in oklab, var(--background) 80%, transparent);
+  backdrop-filter: blur(40px);
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+  pointer-events: none;
+}
+
+@supports (animation-timeline: scroll()) {
+  .page-nav::before {
+    /* `scroll(root)`, not `scroll(nearest)`. Measured: on this route the DOCUMENT scrolls
+       (window.scrollY reached 700 on a wheel) while `.page` stayed at scrollTop 0 — it
+       declares overflow-y: auto but never becomes the scroll container here. `nearest`
+       resolved to something that never moves, so the animation sat frozen at its start and
+       the bar stayed opaque. Naming the root is what makes the timeline actually tick.
+       Clear over the hero, solid once content is underneath — the main site's own feel,
+       measured: transparent at scrollY 0, rgba(245,249,252,0.80) + blur(40px) at 1200. */
+    animation: page-nav-settle linear both;
+    animation-timeline: scroll(root block);
+    animation-range: 0 80px;
+  }
+
+  @keyframes page-nav-settle {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
 }
 
 .page-nav-inner {
@@ -45,7 +143,10 @@
   gap: 24px;
   max-width: var(--page-measure);
   margin-inline: auto;
+  /* 64px total, the main site's nav height, on the 38px content row. */
   padding-block: 13px;
+  min-height: 64px;
+  box-sizing: border-box;
 }
 
 /* The wordmark.
@@ -133,13 +234,28 @@
   color: var(--foreground);
 }
 
+/* The buttons, matched to the main site's.
+ *
+ * Measured on the rendered pages — its primary CTA ("Get Started") against this one:
+ *
+ *                 main site           ducat (before)
+ *   radius        10px                999px  (a full pill)
+ *   background    rgb(0, 92, 204)     rgb(0, 92, 204)   <- already identical
+ *   text colour   rgb(249,252,255)    rgb(249,252,255)  <- already identical
+ *   font-size     14px                13px
+ *   height        36px                34px
+ *
+ * The fill was already right. The SHAPE was not: a full pill against the main site's
+ * 10px rounded rectangle is the single most visible difference between the two pages,
+ * because it repeats on every button. `var(--radius)` is this app's own 10px token, so
+ * the two now derive from the same number instead of agreeing by coincidence. */
 .page-cta-sm,
 .page-cta {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: var(--primary);
   color: var(--primary-foreground);
   font: inherit;
@@ -148,7 +264,7 @@
 
 .page-cta-sm {
   padding: 8px 15px;
-  font-size: 13px;
+  font-size: 14px;
   /* The one thing on this bar that must stay clickable at any width, so it neither shrinks nor wraps.
      Measured at 768px: it wrapped to two lines and took the sticky bar from 65px to 85px, dropping the
      border partway down the hero. The nav yields instead — it scrolls, so it can lose space without
@@ -186,11 +302,33 @@
   text-align: center;
 }
 
+/* Headline scale, matched to the main site rather than chosen here.
+ *
+ * Measured on both rendered homepages at 1440px wide, colours resolved through a canvas so
+ * the two colour notations could be compared at all:
+ *
+ *                    main site      ducat (before)
+ *   h1 size          37.44px        56px
+ *   h1 line-height   40.44px        60.48px
+ *   h1 tracking      -0.936px       -1.96px
+ *   body size        16px           15px
+ *   bodyBg           rgb(245,249,252)   rgb(245,249,252)   <- already identical
+ *   body colour      rgb(26,31,45)      rgb(26,31,45)      <- already identical
+ *
+ * So the palette was never the problem; the type was. A 56px headline against the main
+ * site's 37px is what makes the two pages read as different products even with the same
+ * colours — ducat's hero was half again as large, tracked twice as tight.
+ *
+ * The main site sizes with clamp(2.25rem, 2.6vw, 3rem) — 36px to 48px — and this follows
+ * it, keeping the fluid behaviour that already exists here rather than pinning one size.
+ * The upper bound is 3rem to match, not 56px. */
 .page-hero h1 {
   margin: 16px 0 18px;
-  font-size: clamp(34px, 5.2vw, 56px);
+  font-size: clamp(2.25rem, 2.6vw, 3rem);
   font-weight: 700;
-  letter-spacing: -0.035em;
+  /* -0.025em ≈ the main site's -0.936px at its own 37.44px, where the previous -0.035em
+     computed to -1.96px — more than twice as tight. */
+  letter-spacing: -0.025em;
   line-height: 1.08;
 }
 

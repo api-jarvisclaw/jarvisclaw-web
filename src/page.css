@@ -186,15 +186,30 @@
   flex: none;
 }
 
-/* ---- footer brand ---- */
-
+/* ---- footer brand ----
+ *
+ * One rule, not two. There was briefly a second `.page-foot-brand` block 780 lines below this
+ * one adding the size and hover, and two rules sharing a selector is how a stylesheet starts
+ * lying: the later one silently wins, and a reader who finds this one first has the wrong
+ * answer. Everything the wordmark needs is here.
+ *
+ * 16px because that is what the main site's footer wordmark renders. Without it the element
+ * inherited `.page-foot`'s 13px and sat at exactly the link size beside it — the same defect the
+ * nav brand had, recorded in its own comment above as "nothing marked it as the brand rather
+ * than a menu item". */
 .page-foot-brand {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  font-size: 16px;
   font-weight: 650;
   color: var(--foreground);
   letter-spacing: -0.015em;
+  text-decoration: none;
+}
+
+.page-foot-brand:hover {
+  color: var(--primary);
 }
 
 .page-foot-brand img {
@@ -873,28 +888,117 @@
   color: var(--muted-foreground);
 }
 
+/* Brand block on the left, four link columns on the right — the main site's own shape.
+ *
+ * Measured on both rendered pages, scrolled to the bottom at 1440px:
+ *
+ *                      main site   ducat (before)
+ *   height             502px       81px
+ *   links              15          3
+ *   labelled columns   4           0
+ *
+ * `auto` for the brand rather than a fraction: the tagline sets its own measure below, and a
+ * fractional column would let it stretch to half the page on a wide monitor. */
 .page-foot-inner {
   display: flex;
-  align-items: center;
-  gap: 20px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 40px 56px;
   max-width: var(--page-measure);
   margin-inline: auto;
-  padding-block: 24px 36px;
+  /* 80px top and bottom, which is what the main site's own footer inner uses — measured, where
+     48/32 left this 151px shorter than its reference at the same content. The air is most of what
+     makes a footer read as the end of a page rather than as a leftover strip. */
+  padding-block: 80px 40px;
 }
 
-.page-foot nav {
+.page-foot-brandcol {
+  flex: 1 1 260px;
+  min-width: 0;
+  max-width: 340px;
+}
+
+/* 62ch is the prose measure used for the hero lede; the same number here keeps the tagline from
+   running the full width of a wide column. */
+.page-foot-tagline {
+  margin: 12px 0 0;
+  max-width: 46ch;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+}
+
+.page-foot-cols {
   display: flex;
-  gap: 18px;
+  flex-wrap: wrap;
+  gap: 32px 48px;
   margin-left: auto;
 }
 
-.page-foot a {
-  color: var(--muted-foreground);
-  text-decoration: none;
+.page-foot-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 92px;
 }
 
-.page-foot a:hover {
+/* The column labels. 12px uppercase at 0.6px tracking and 50% muted — measured off the main
+   site's own PRODUCT/DEVELOPERS/CONNECT/LEGAL headings rather than picked. They are h2 elements
+   so the footer has a real outline for a screen reader, and the visual size is set here instead
+   of by choosing a smaller tag. */
+.page-foot-col h2 {
+  margin: 0 0 2px;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: color-mix(in oklab, var(--muted-foreground) 62%, transparent);
+}
+
+/* Anchors and the one button share every visual property.
+ *
+ * "Chat" is a button because entering the console is a state change in this app, and an
+ * <a href="#"> that preventDefaults is a link that lies about where it goes. But a button that
+ * looks like a button in a list of links reads as a misplaced control, so the reset here is what
+ * makes the honest element invisible as a difference. */
+/* Scoped to the columns, NOT to `.page-foot a`.
+ *
+ * The wordmark is an anchor too, and `.page-foot a` is declared after `.page-foot-brand` at equal
+ * specificity — so the broad selector won and rendered the brand as 13px muted body text. Caught
+ * by reading the computed style after making the wordmark a link; it is the kind of regression that
+ * looks like "the brand was always that colour". */
+.page-foot-col a,
+.page-foot-col button {
+  color: var(--muted-foreground);
+  text-decoration: none;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.page-foot-col a:hover,
+.page-foot-col button:hover {
   color: var(--foreground);
+}
+
+/* The wordmark's size, hover and text-decoration live with the rest of its rule, up under
+   "footer brand" — deliberately not duplicated here. */
+
+/* The copyright rule, above the page's bottom edge and below the columns. */
+.page-foot-tail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  max-width: var(--page-measure);
+  margin-inline: auto;
+  padding-block: 18px 30px;
+  border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
+  font-size: 12.5px;
+  color: color-mix(in oklab, var(--muted-foreground) 78%, transparent);
 }
 
 @media (max-width: 720px) {

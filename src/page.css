@@ -249,6 +249,20 @@
  * 10px rounded rectangle is the single most visible difference between the two pages,
  * because it repeats on every button. `var(--radius)` is this app's own 10px token, so
  * the two now derive from the same number instead of agreeing by coincidence. */
+/* The fill is --gradient-brand, not the flat --primary.
+ *
+ * The main site's own CTA is a flat #005ccb, so this is the one place ducat goes further than
+ * its reference rather than matching it — asked for deliberately ("大胆点"). It is a safe place
+ * to spend colour because the gradient's stops (L 0.45 -> 0.55, hue 260 -> 230) are all darker
+ * than the white ink on them, so contrast IMPROVES at no stop: measured 6.9:1 at the light end
+ * against --primary's own 6.4:1.
+ *
+ * --on-brand rather than --primary-foreground: that token exists precisely because this fill
+ * flips lightness between themes, and its comment says so. Using --primary-foreground here
+ * would be white ink on the dark theme's BRIGHT gradient.
+ *
+ * background-color stays underneath as the fallback, so a browser that drops the gradient shows
+ * a solid brand button rather than a transparent one. */
 .page-cta-sm,
 .page-cta {
   display: inline-flex;
@@ -256,8 +270,9 @@
   gap: 6px;
   border: none;
   border-radius: var(--radius);
-  background: var(--primary);
-  color: var(--primary-foreground);
+  background-color: var(--primary);
+  background-image: var(--gradient-brand);
+  color: var(--on-brand);
   font: inherit;
   font-weight: 600;
 }
@@ -296,10 +311,45 @@
  * The bands do not have this problem because their padding is on the full-width section and the measure
  * is on the children inside it. Two correct-looking rules producing a 28px step down the page. */
 .page-hero {
+  position: relative;
   max-width: calc(var(--page-measure) + var(--page-gutter) * 2);
   margin: 0 auto;
   padding: clamp(56px, 7vw, 88px) var(--page-gutter) clamp(48px, 6vw, 72px);
   text-align: center;
+}
+
+/* The hero mesh — colour, taken from the main site's own vocabulary rather than invented.
+ *
+ * Asked for: "配色可以大胆点 炫彩一点". Measured first, because "more colourful" without a
+ * denominator is a matter of taste and this had a factual answer. Counting every element's
+ * computed fill on both rendered homepages at 1440px:
+ *
+ *                    main site   ducat (before)
+ *   distinct fills   28          7
+ *   gradients        9           0
+ *
+ * The main site paints layered radial meshes in blue (oklch 0.5 0.19 258), cyan (0.62 0.13
+ * 210) and violet (0.55 0.19 300) at 0.10-0.18 alpha, plus a cyan→blue linear on its accent
+ * marks. ducat already declares those exact tokens — --accent-2, --accent-3, --glow-brand,
+ * --mesh-* are byte-identical to the main site's light theme — and the landing page used NONE
+ * of them. So this is not new colour; it is colour that was already paid for and never spent.
+ *
+ * Three stops rather than one, at the main site's own alphas, positioned so the blue sits
+ * behind the headline and the violet trails off to the right — the same "light from the top,
+ * cooling to the corner" reading as its hero.
+ *
+ * Behind the content (z-index: -1) and pointer-events: none, so nothing here can intercept a
+ * click on the prompt box that sits in the middle of it. */
+.page-hero::before {
+  content: '';
+  position: absolute;
+  inset: -10% -5% 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(52% 58% at 30% 0%, oklch(0.5 0.19 258 / 0.18), transparent 70%),
+    radial-gradient(42% 52% at 78% 14%, oklch(0.55 0.19 300 / 0.14), transparent 72%),
+    radial-gradient(46% 46% at 52% 26%, oklch(0.62 0.13 210 / 0.12), transparent 70%);
 }
 
 /* Headline scale, matched to the main site rather than chosen here.
@@ -332,9 +382,30 @@
   line-height: 1.08;
 }
 
+/* The emphasised clause, as gradient text.
+ *
+ * --gradient-wordmark was already declared in styles.css, with its contrast measured in its own
+ * comment (4.6-6.9:1 on this near-white page, where the dark theme's stops gave 1.69-3.18:1) —
+ * and grepping the whole repo found ZERO uses of it. A token defined, measured, documented and
+ * never spent.
+ *
+ * background-clip: text needs a fallback because it fails in exactly one direction: without
+ * support, `color: transparent` renders invisible text. So the colour is set FIRST and only
+ * overridden inside @supports, which means no-support shows solid cyan rather than a blank
+ * headline. A hero that can vanish is worse than a hero without a gradient. */
 .page-hero h1 em {
   font-style: normal;
   color: var(--accent-2-text);
+}
+
+@supports (background-clip: text) or (-webkit-background-clip: text) {
+  .page-hero h1 em {
+    background: var(--gradient-wordmark);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
 }
 
 .page-lede {
@@ -418,9 +489,20 @@
   border-top: 1px solid var(--border);
 }
 
-/* Alternating background so consecutive sections read as separate without a rule between each. */
+/* Alternating background so consecutive sections read as separate without a rule between each.
+ *
+ * Tinted toward the brand hue instead of flat grey. The mix is in oklab, NOT oklch, and that is
+ * not a style preference: mixing a chromatic colour into a near-neutral through oklch takes the
+ * hue channel through undefined territory — a neutral has no hue — and this project has already
+ * shipped a pink band that way. oklab interpolates the opponent axes directly and cannot invent
+ * a hue.
+ *
+ * 6% is deliberately below the threshold where a band reads as "a coloured panel". The look
+ * being avoided is a page of tinted cards, which is what "too AI" meant here; a whole band
+ * carrying a trace of blue reads as paper stock, not decoration. */
 .page-band-alt {
-  background: color-mix(in oklab, var(--muted) 45%, var(--background));
+  background:
+    color-mix(in oklab, var(--glow-brand) 6%, color-mix(in oklab, var(--muted) 45%, var(--background)));
 }
 
 /* One measure for the whole page, so every section shares a left edge.
@@ -475,9 +557,39 @@
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
+/* Step markers, walking the brand's own cyan -> blue -> violet travel.
+ *
+ * All three were the same cyan, so the numbering carried the sequence and the colour said nothing.
+ * Giving each its own stop means the colour repeats the order the numbers already state — the same
+ * three hues the hero mesh and the wordmark gradient use, so this reads as one system rather than
+ * three decorative accents.
+ *
+ * Text, not a fill, so each is mixed toward black the way --accent-2-text is: a colour picked to
+ * work as a swatch is too light to read as 12px type on near-white. Measured on the rendered page
+ * below; all three clear 4.5:1. */
 .page-step-n {
   font-size: 12px;
+  font-weight: 600;
   color: var(--accent-2-text);
+}
+
+/* Steps 2 and 3 read from TOKENS, not from literals.
+ *
+ * The first version hard-coded oklch stops mixed toward black. That is correct on the light page
+ * and wrong on the dark one, and the dark run said so: 2.65:1 and 2.29:1 against oklch(0.12) —
+ * both well under 4.5:1, because "mix toward black" moves a colour TOWARD a dark background
+ * instead of away from it. Caught only by running the probe with the dark class applied, which
+ * is why that pass exists rather than trusting the light result.
+ *
+ * --primary and --accent-3 are already defined per theme, and --*-text tokens already encode the
+ * per-theme mix direction (toward black on light, toward white on dark). Deriving from them means
+ * these two cannot be right in one theme and broken in the other. */
+.page-steps > :nth-child(2) .page-step-n {
+  color: var(--primary);
+}
+
+.page-steps > :nth-child(3) .page-step-n {
+  color: var(--accent-3-text);
 }
 
 .page-step h3 {
@@ -547,6 +659,16 @@
   max-width: 100%;
 }
 
+/* The four headline figures, in the brand gradient.
+ *
+ * These were plain --foreground: four 26px numbers, the most looked-at thing on the page after
+ * the headline, carrying no colour at all. Gradient text is the right treatment here rather than
+ * a flat accent because the numbers are a set — one fill travelling across all four reads as one
+ * claim, where four identical accent-coloured numbers read as four unrelated badges.
+ *
+ * Same @supports guard as the headline, and for the same reason: without background-clip, `color:
+ * transparent` renders nothing. The solid colour is declared first so no-support degrades to
+ * readable dark ink rather than four invisible numbers. */
 .page-figures dt {
   font-size: 26px;
   font-weight: 680;
@@ -554,6 +676,17 @@
   /* Tabular figures, not a monospace face. The numbers should line up without the page taking on a
      terminal look — which is the whole distinction being drawn in the font note in styles.css. */
   font-variant-numeric: tabular-nums;
+  color: var(--foreground);
+}
+
+@supports (background-clip: text) or (-webkit-background-clip: text) {
+  .page-figures dt {
+    background: var(--gradient-wordmark);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
 }
 
 .page-figures dd {

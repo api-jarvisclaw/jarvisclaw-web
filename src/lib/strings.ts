@@ -308,6 +308,22 @@ const zh: Record<string, string> = {
   auto: 'auto',
   'not servable': '当前无法服务',
 
+  // ---- the site footer ----
+  // Values copied from the MAIN SITE's zh.json, not translated again here: the two footers
+  // name the same columns and the same products, and two independent translations of
+  // "Product" is how they start disagreeing.
+  Product: '产品',
+  Developers: '开发者',
+  Connect: '连接',
+  Legal: '法律',
+  Models: '模型',
+  'API Keys': 'API 密钥',
+  'Get Started Free': '免费开始',
+  Terms: '服务条款',
+  Privacy: '隐私政策',
+  'The payment rail for AI. Built on x402, settled in USDC, running on Base & Solana.': 'AI 的支付通道。基于 x402 协议，以 USDC 结算，运行在 Base 与 Solana 网络。',
+  'Agents transact. Autonomously.': '智能体交易，自主结算。',
+
   // ---- the console's empty state ----
   //
   // Split around the product name, which is never translated. The two halves are separate keys

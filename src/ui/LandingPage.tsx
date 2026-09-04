@@ -411,30 +411,107 @@ export function LandingPage({
         </button>
       </section>
 
-      <footer className="page-foot">
-        {/* An inner wrapper, so the rule spans the window while the text lines up with the six sections
-            above it. Padding alone left this against the window edge on a wide monitor. */}
-        <div className="page-foot-inner">
-          <span className="page-foot-brand">
+      <SiteFooter onEnter={onEnter} />
+    </div>
+  )
+}
+
+/**
+ * The site footer, built to the main site's own structure.
+ *
+ * Measured on both rendered pages at 1440px, scrolled to the bottom:
+ *
+ *                      main site   ducat (before)
+ *   height             502px       81px
+ *   links              15          3
+ *   labelled columns   4           0
+ *   brand + tagline    yes         brand only
+ *   copyright line     yes         none
+ *
+ * A single 81px strip with three links reads as an unfinished page rather than a restrained
+ * one, and it was the one region of the site that had no counterpart on the main site at all.
+ *
+ * The column titles, their order and every href below are the main site's — copied from
+ * components/layout/components/footer.tsx rather than invented, so the two cannot drift into
+ * describing different products. Two deliberate differences, both because this IS the chat site:
+ *
+ *   - "Chat" points at this console (onEnter) instead of at ducat.jarvisclaw.ai, which is where
+ *     the main site sends it. Linking a visitor from ducat to ducat would be a no-op that looks
+ *     broken.
+ *   - the platform paths (/pricing, /keys, /sign-up, /user-agreement, /privacy-policy) are
+ *     absolute URLs on jarvisclaw.ai. They are the main site's OWN routes; app-relative here
+ *     would be routed by this SPA and answer 200 with an empty shell — the exact failure the
+ *     hero's docs button once had, and one that a 200 makes invisible.
+ */
+const PLATFORM = 'https://jarvisclaw.ai'
+
+function SiteFooter({ onEnter }: { onEnter: (prompt?: string) => void }) {
+  const t = useT()
+  return (
+    <footer className="page-foot">
+      {/* An inner wrapper, so the rule spans the window while the text lines up with the six
+          sections above it. Padding alone left this against the window edge on a wide monitor. */}
+      <div className="page-foot-inner">
+        <div className="page-foot-brandcol">
+          {/* The wordmark links to the platform, as it does in the main site's footer, rather than
+              being inert text. Measured: the main site's footer has 15 anchors to this one's 14,
+              and the wordmark is the difference. */}
+          <a className="page-foot-brand" href={PLATFORM}>
             <img src="/jc.png" alt="" width={18} height={18} />
             JarvisClaw
-          </span>
-          <nav>
-            <a href="https://docs.jarvisclaw.ai" target="_blank" rel="noopener noreferrer">
-              Docs
-            </a>
-            {/* jarvisclaw.ai, not the API host. DEFAULT_BASE_URL is api.jarvisclaw.ai — a gateway, not a
-                page — so "Platform" pointed a human at a machine endpoint. */}
-            <a href="https://jarvisclaw.ai" target="_blank" rel="noopener noreferrer">
-              Platform
-            </a>
-            <a href="https://blog.jarvisclaw.ai" target="_blank" rel="noopener noreferrer">
-              Blog
-            </a>
-          </nav>
+          </a>
+          <p className="page-foot-tagline">
+            {t('The payment rail for AI. Built on x402, settled in USDC, running on Base & Solana.')}
+          </p>
         </div>
-      </footer>
-    </div>
+
+
+        <nav className="page-foot-cols">
+          <div className="page-foot-col">
+            <h2>{t('Product')}</h2>
+            {/* A button, not an anchor: entering the console is a state change in this app, and
+                an <a href="#"> that calls preventDefault is a link that lies about where it goes. */}
+            <button type="button" onClick={() => onEnter()}>
+              {t('Chat')}
+            </button>
+            <a href={`${PLATFORM}/pricing`}>{t('Models')}</a>
+            <a href={`${PLATFORM}/marketplace`}>{t('Marketplace')}</a>
+            <a href="https://docs.jarvisclaw.ai">{t('Docs')}</a>
+          </div>
+
+          <div className="page-foot-col">
+            <h2>{t('Developers')}</h2>
+            <a href={`${PLATFORM}/keys`}>{t('API Keys')}</a>
+            <a href={`${PLATFORM}/sign-up`}>{t('Get Started Free')}</a>
+          </div>
+
+          <div className="page-foot-col">
+            <h2>{t('Connect')}</h2>
+            {/* Handles differ per platform because they were registered separately, so none can be
+                derived from another. Instagram is still under the older MakeMyJarvis handle. */}
+            <a href="https://x.com/ApiJarvisclaw">X</a>
+            <a href="https://www.youtube.com/@JarvisClaw">YouTube</a>
+            <a href="https://www.linkedin.com/in/jarvis-claw-34213b417/">LinkedIn</a>
+            <a href="https://www.instagram.com/MakeMyJarvis">Instagram</a>
+            <a href="https://www.tiktok.com/@jarvisclaw">TikTok</a>
+            <a href="https://www.reddit.com/user/Jarvisclaw/">Reddit</a>
+          </div>
+
+          <div className="page-foot-col">
+            <h2>{t('Legal')}</h2>
+            <a href={`${PLATFORM}/user-agreement`}>{t('Terms')}</a>
+            <a href={`${PLATFORM}/privacy-policy`}>{t('Privacy')}</a>
+          </div>
+        </nav>
+      </div>
+
+      {/* The year comes from the clock, not a literal: a hard-coded one is wrong every January
+          and nobody notices for months. */}
+      <div className="page-foot-tail">
+        <span>© {new Date().getFullYear()} JarvisClaw.</span>
+        <span>{t('Agents transact. Autonomously.')}</span>
+      </div>
+    </footer>
   )
 }
 

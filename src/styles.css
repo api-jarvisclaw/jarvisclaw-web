@@ -105,7 +105,22 @@
   --destructive-text: color-mix(in oklch, var(--destructive) 88%, black);
   --warning-text: color-mix(in oklch, var(--warning) 78%, black);
   --highlight-text: color-mix(in oklch, var(--highlight) 90%, black);
-  --accent-2-text: color-mix(in oklch, var(--accent-2) 88%, black);
+  /* 78%, not 88%. Measured against this theme's own background — oklch(0.98 0.006 250) — by
+     painting both through a canvas and computing the WCAG ratio:
+
+       88% toward black  4.34:1   FAILS 4.5:1 for normal text
+       78% toward black  5.69:1
+
+     It was 88% and had never been measured; the value came from the dark theme's mirror rule,
+     where mixing toward WHITE at 88% is fine because it moves away from the background rather
+     than toward it. Cyan is the trap of the set: it is the lightest hue here at equal L, so the
+     one mix ratio that works for blue and violet leaves cyan short. */
+  --accent-2-text: color-mix(in oklch, var(--accent-2) 78%, black);
+  /* Violet as readable text. New, because the landing page's third step marker needed it and the
+     alternative was a hard-coded oklch literal — which measured 2.29:1 on the dark theme, since a
+     mix toward black moves toward a dark background rather than away from it. A token pair is the
+     only shape that can be right in both themes. Measured 7.96:1 light. */
+  --accent-3-text: color-mix(in oklch, var(--accent-3) 92%, black);
 
   /* Elevation. A drop shadow that reads on a near-white surface is far softer than one on
      near-black, so the alpha is a token rather than a literal at each call site. */
@@ -113,11 +128,21 @@
   --shadow-strong: oklch(0.45 0.03 265 / 26%);
 
   /* The headline wordmark, as gradient text. Same cyan→blue→violet travel as dark, dropped in
-     lightness so it reads on a near-white page: measured 4.6-6.9:1 here, where the dark stops
-     gave 1.69-3.18:1. */
+     lightness so it reads on a near-white page, where the dark stops gave 1.69-3.18:1.
+
+     The cyan stop is 0.52, not 0.55. Re-measured when this token was finally USED — it had been
+     declared, documented and referenced NOWHERE, so its stated 4.6:1 floor had never been
+     exercised. At the cyan end it was 4.12:1 against this theme's background: a fail for normal
+     text, and the stop the headline's first characters land on. Measured sweep:
+
+       L 0.55  4.12  FAIL      L 0.50  5.02
+       L 0.52  4.63            L 0.48  5.35
+
+     0.52 is the lightest stop that clears 4.5:1, so it keeps as much of the cyan as the contrast
+     floor allows. The blue and violet stops were already 5.83 and 6.78. */
   --gradient-wordmark: linear-gradient(
     120deg,
-    oklch(0.55 0.13 208),
+    oklch(0.52 0.13 208),
     oklch(0.5 0.17 258),
     oklch(0.48 0.19 300)
   );
@@ -199,6 +224,10 @@
   --warning-text: color-mix(in oklch, var(--warning) 88%, white);
   --highlight-text: color-mix(in oklch, var(--highlight) 88%, white);
   --accent-2-text: color-mix(in oklch, var(--accent-2) 85%, white);
+  /* The dark half of the pair added for the landing page's third step marker. Mixed toward WHITE,
+     which is the whole reason this is a token: the light rule mixes toward black, and a single
+     hard-coded value measured 2.29:1 here. */
+  --accent-3-text: color-mix(in oklch, var(--accent-3) 82%, white);
 
   /* Near-black, and much heavier than light: on a dark surface a subtle shadow is invisible, so
      depth has to come from a deep, wide one. */

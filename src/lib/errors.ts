@@ -55,9 +55,21 @@ const PATTERNS: { re: RegExp; key: string; vars: string[] }[] = [
     key: 'Your wallet is on chain {have} but this payment is on {want}. Switch network and try again.',
     vars: ['have', 'want'],
   },
+  /**
+   * The "not currently servable" pattern is deliberately gone.
+   *
+   * It matched a sentence this app no longer produces, because the claim was measured to be
+   * false: a 400 from the pricing probe does not mean the model is dead. openai/gpt-image-2
+   * priced fine 50 times out of 50 while the console was telling people to pick another model.
+   *
+   * Its replacement relays the GATEWAY's own sentence, which cannot be matched by a fixed
+   * pattern here and is therefore not translated — the gateway already answers in careful,
+   * neutral language of its own. A pattern kept for a message nothing throws is worse than
+   * absent: it reads as coverage.
+   */
   {
-    re: /^(.+?) is listed but not currently servable — pick another model$/,
-    key: '{model} is listed but not currently servable — pick another model',
+    re: /^The gateway would not price this (.+?) request\. This is often temporary — try again, and if it keeps happening the request itself may need adjusting\.$/,
+    key: 'The gateway would not price this {model} request. This is often temporary — try again, and if it keeps happening the request itself may need adjusting.',
     vars: ['model'],
   },
   {

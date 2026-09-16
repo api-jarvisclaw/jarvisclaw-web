@@ -286,6 +286,60 @@ interface RawChoiceDelta {
 }
 
 /**
+ * How long the stream may go SILENT before it is treated as dead.
+ *
+ * A gap between bytes, not a total duration, and the difference is the whole design. Measured
+ * on this gateway's own free pool: the first content frame can take 23-91 seconds, because a
+ * reasoning model spends that time thinking rather than transmitting. A total-duration cap
+ * would kill those legitimately slow answers; an idle cap only fires when nothing at all is
+ * arriving, which is what "dead" actually means.
+ *
+ * 120s, chosen against that measured 91s worst case with margin. Reported as: the page sat with
+ * Stop showing and the send button spinning, with no answer, no error and no consent prompt —
+ * because `await reader.read()` had no bound and never settled.
+ */
+const STREAM_IDLE_LIMIT_MS = 120_000
+
+/**
+ * One `reader.read()`, bounded by silence.
+ *
+ * Losing the race does not merely report — it CANCELS the reader. A rejected promise with the
+ * body still open leaves the connection held and the browser's stream in an indeterminate
+ * state; cancelling makes the failure total and releases it.
+ *
+ * The timer is cleared on every settle. Left running, a long conversation would accumulate one
+ * live timer per frame and keep the tab awake.
+ */
+export async function readWithIdleLimit<T>(
+  reader: ReadableStreamDefaultReader<T>,
+  signal?: AbortSignal,
+): Promise<{ done: boolean; value?: T }> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const idle = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      // Cancel first, so the rejection below cannot race a still-open body.
+      void reader.cancel().catch(() => {})
+      reject(
+        new GatewayError(
+          `The model stopped responding — nothing arrived for ${Math.round(
+            STREAM_IDLE_LIMIT_MS / 1000,
+          )} seconds. Try again, or pick another model.`,
+          504,
+        ),
+      )
+    }, STREAM_IDLE_LIMIT_MS)
+  })
+  try {
+    return await Promise.race([reader.read(), idle])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+    // An abort that arrives while a read is pending would otherwise leave the reader open
+    // until the next frame, which on a stalled stream is never.
+    if (signal?.aborted) void reader.cancel().catch(() => {})
+  }
+}
+
+/**
  * Stream one chat completion, calling `onDelta` as text arrives.
  *
  * Tool calls are accumulated rather than streamed out: a partially-received
@@ -324,6 +378,8 @@ export async function streamChat(
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
+  // See readWithIdleLimit: the read below is otherwise unbounded, and an upstream that
+  // accepts the connection then stops writing leaves the page spinning forever.
 
   let content = ''
   let reasoning = ''
@@ -390,7 +446,7 @@ export async function streamChat(
   try {
     for (;;) {
       if (opts.signal?.aborted) break
-      const { done, value } = await reader.read()
+      const { done, value } = await readWithIdleLimit(reader, opts.signal)
       if (done) break
       buffer += decoder.decode(value, { stream: true })
       const frames = buffer.split(/\r?\n\r?\n/)

@@ -83,6 +83,21 @@ export type Turn =
        * the media is retrievable long after this tab stopped waiting.
        */
       job?: { id: string; pollUrl: string }
+      /**
+       * Set while the paid call itself is in flight, before anything is known about the result.
+       *
+       * Distinct from `job`, and the distinction is the fix. `job` means "the upstream accepted
+       * the request and is working on it, poll this id"; this means "we have not heard back at
+       * all". Only `job` existed, so a turn could only show a wait AFTER the POST returned —
+       * which for an image or a speech clip is the moment the media arrives. Measured on the
+       * live site: for the whole wait the transcript held one row, the user's own prompt, and
+       * the only progressbar on the page belonged to the sidebar.
+       *
+       * Never persisted: a reload cannot resume a call that has no job id, and a stored
+       * `waiting: true` would come back as a permanent empty card. `stripInlineBytes` clears it
+       * on the way to storage.
+       */
+      waiting?: boolean
       /** Wall-clock spent waiting so far, so a long wait shows progress. */
       waitedMs?: number
       /** Set once waiting ended without media, distinguishing "gave up" from "never started". */
@@ -343,7 +358,7 @@ function MediaView({ turn }: { turn: Extract<Turn, { kind: 'media' }> }) {
             {turn.failed.message}
             {turn.failed.retryable ? ' You can try again.' : null}
           </p>
-        ) : src === undefined && turn.job ? (
+        ) : src === undefined && showsWait(turn) ? (
           <WaitingView turn={turn} />
         ) : src === undefined ? (
           <p className="media-missing">
@@ -370,6 +385,23 @@ function MediaView({ turn }: { turn: Extract<Turn, { kind: 'media' }> }) {
       </div>
     </div>
   )
+}
+
+/**
+ * Whether a media turn with nothing to show yet should render the waiting indicator.
+ *
+ * Exported and pure because the defect was in this one predicate, and a test that renders the
+ * component would be testing React rather than the decision. It read `turn.job` alone, so only
+ * ASYNCHRONOUS media could show a wait — a queued video sets a job, while an image or a speech
+ * clip returns its bytes from the same call and never has one. Measured on the live site during
+ * an image generation: 0 waiting boxes, 0 progressbars inside a turn, and the transcript's only
+ * row was the user's own prompt for the whole wait.
+ *
+ * `waiting` covers the in-flight window that `job` cannot: the upstream has not answered, so
+ * there is no id to poll and nothing to resume.
+ */
+export function showsWait(turn: { job?: unknown; waiting?: boolean }): boolean {
+  return turn.job !== undefined || turn.waiting === true
 }
 
 /** Roughly how long each kind takes, so a wait can be shown against something. */
@@ -438,7 +470,13 @@ function WaitingView({ turn }: { turn: Extract<Turn, { kind: 'media' }> }) {
             'This is taking longer than usual. It keeps running on the server — reopen this chat in a minute and it will appear.'
           : turn.resumed
             ? 'Picked this back up after the page reloaded — the job kept running, and you were not charged again.'
-            : 'Already paid. You can keep chatting or close the tab; this carries on and will be here when you come back.'}
+            : /* A call still in flight has NO job id, so it cannot survive a reload — and telling
+                 someone they may close the tab would be false for exactly this window. The note
+                 says what is true of each state instead of one line for both: before the upstream
+                 answers there is nothing to come back to. */
+              turn.job
+              ? 'Already paid. You can keep chatting or close the tab; this carries on and will be here when you come back.'
+              : 'Paid and sent. Keep this tab open until it comes back.'}
       </p>
     </div>
   )

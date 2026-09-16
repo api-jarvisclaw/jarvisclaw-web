@@ -787,6 +787,54 @@ export function App({
         }
       }
 
+      /**
+       * The turn goes on screen BEFORE the call, not after it.
+       *
+       * Reported as "在处理都没有一个类似状态条的东西": a generation runs and the transcript
+       * shows nothing but the prompt you typed. The only sign of life was the spinner inside
+       * the send button.
+       *
+       * Measured on the live site, sampling the DOM every 500ms for the whole wait:
+       *
+       *     transcript rows (max):        1     <- the user's own prompt
+       *     rows that are NOT the prompt: 0
+       *     media-waiting boxes:          0
+       *     progressbar inside a turn:    0
+       *
+       * The cause was ordering, and it was invisible in review because the waiting UI already
+       * existed and worked. `WaitingView` renders a clock and a progress bar, but it lives in
+       * the `media` turn — and the `media` turn was appended AFTER `generate` resolved. For a
+       * video that is harmless, because the POST returns a receipt in a second and the long
+       * wait happens afterwards with the turn already on screen. For an IMAGE or a SPEECH clip
+       * the upstream call IS the wait, so the turn arrived at the same moment as the result and
+       * the indicator never had a moment to show.
+       *
+       * So the turn is created here, empty, and the call fills it in. `WaitingView` then covers
+       * the whole wait for every medium instead of only the asynchronous ones — which also
+       * removes the second half of the same problem: a synchronous kind never sets `job`, so it
+       * could not reach that branch at all.
+       *
+       * `waiting: true` is what marks it, rather than reusing `job`: a job id is a real thing
+       * that can be polled and resumed, and inventing one for a call that has none would make
+       * a reload try to poll a job that never existed.
+       */
+      const turnId = newId()
+      setTurns((t) => [
+        ...t,
+        {
+          kind: 'media',
+          id: turnId,
+          media: kind,
+          prompt,
+          model: useModel,
+          // Already approved and about to be spent. Showing it now is honest: the charge is
+          // authorised at this point, and a price that appears only on success would hide what
+          // a failed call cost.
+          spentUsd: quoted,
+          waiting: true,
+        },
+      ])
+
       try {
         const media = await generate(kind, prompt, {
           baseUrl,
@@ -801,26 +849,19 @@ export function App({
         tracker.current.record(spec.label, quoted)
         setSpendVersion((v) => v + 1)
 
-        // A media turn is placed on screen immediately, even with nothing to show yet. A
-        // queued video takes minutes, and the alternative is a page that looks idle while a
-        // paid job runs — which is what makes someone reload and lose the job id.
-        const turnId = newId()
-        setTurns((t) => {
-          const next: Turn[] = [
-            ...t,
-            {
-              kind: 'media',
-              id: turnId,
-              media: kind,
-              prompt,
-              model: useModel,
-              spentUsd: quoted,
-              job: media.job,
-              raw: media.job ? undefined : media.raw,
-            },
-          ]
-          persist(convId, next, history.current)
-          return next
+        // The turn already exists — it was created before the call so the wait had somewhere
+        // to show. This fills in what came back and clears `waiting`, which is what hands the
+        // turn over from WaitingView to the media itself.
+        //
+        // Persisted here rather than at creation: a turn written to storage before the call
+        // returns would come back after a reload as a wait with no job to poll and no media to
+        // show, which is a permanent-looking empty card. Nothing is lost by waiting — the turn
+        // is on screen either way, and `waitForJob` persists once there is a job id worth
+        // resuming.
+        patchMediaTurn(turnId, convId, {
+          waiting: false,
+          job: media.job,
+          raw: media.job ? undefined : media.raw,
         })
 
         // Synchronous result (images, speech): already in hand, nothing to wait for.

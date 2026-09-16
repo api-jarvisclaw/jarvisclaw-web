@@ -99,11 +99,22 @@ function isConversation(v: unknown): v is Conversation {
  * the safety net — a turn that reaches localStorage with base64 in it is the bug, whatever path
  * brought it there.
  */
+/**
+ * Also clears `waiting`, which is not bytes but has the same "must not be persisted" property.
+ *
+ * `waiting` means a paid call is in flight RIGHT NOW. It carries no job id — there is nothing to
+ * poll, because the upstream has not answered yet — so a reload cannot resume it. Persisting it
+ * would restore a turn stuck on a spinner that no code will ever finish: a permanent-looking
+ * "generating" for a call that ended when the page did. Dropped here for the same reason as the
+ * bytes: whatever path put it in a stored turn, that is the bug.
+ */
 function stripInlineBytes(turns: Turn[]): Turn[] {
   return turns.map((t) => {
     if (t.kind !== 'media') return t
-    if (!('b64' in t) || t.b64 === undefined) return t
-    const { b64: _dropped, ...rest } = t
+    const hasBytes = 'b64' in t && t.b64 !== undefined
+    const isWaiting = 'waiting' in t && t.waiting === true
+    if (!hasBytes && !isWaiting) return t
+    const { b64: _dropped, waiting: _waiting, ...rest } = t
     return rest as Turn
   })
 }

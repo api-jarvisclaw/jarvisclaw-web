@@ -433,6 +433,36 @@ export type PollState =
   | { state: 'failed'; message: string; retryable: boolean }
 
 /** Atomic USDC (6dp) -> dollars. */
+/**
+ * What to tell someone whose generation request was refused at pricing time.
+ *
+ * Prefers the gateway's own sentence. It is written to be honest about not knowing the cause —
+ * "Request rejected: this request was not accepted as-is" — and its own source comment explains
+ * why it names no provider and quotes no limit. Paraphrasing it here could only add a guess.
+ *
+ * Exported for the guard: the interesting property is the WORDING, and asserting it through a
+ * fetch mock in a test is more direct than reaching for the private branch that calls it.
+ */
+export async function priceRefusalMessage(res: Response, model: string): Promise<string> {
+  let upstream = ''
+  try {
+    const body = (await res.json()) as { error?: { message?: string } | string }
+    const raw = typeof body.error === 'string' ? body.error : body.error?.message
+    if (typeof raw === 'string' && raw.trim() !== '') upstream = raw.trim()
+  } catch {
+    // Not JSON, or already consumed. The fallback below still says something true.
+  }
+  if (upstream !== '') {
+    // Retry first, because the measured cause is transient. `model` is named so the message is
+    // still useful in a transcript that mixes modes, but NOT as the thing to change.
+    return `${upstream} (${model}) — this is often temporary, so trying again is worth a shot.`
+  }
+  return (
+    `The gateway would not price this ${model} request. This is often temporary — try again, ` +
+    `and if it keeps happening the request itself may need adjusting.`
+  )
+}
+
 function atomicToUsd(amount: string): number {
   const n = Number(amount)
   return Number.isFinite(n) ? n / 1_000_000 : NaN
@@ -683,10 +713,32 @@ export async function challengeGeneration(
     return { challenge, usd, url, body }
   }
 
+  /**
+   * A 400 is relayed, not interpreted as "this model is dead".
+   *
+   * This branch used to say "{model} is listed but not currently servable — pick another
+   * model", and that instruction was measured to be wrong. Reported as "生图完全用不了", with
+   * the console naming openai/gpt-image-2. Against production, with the browser's exact body:
+   *
+   *   browser, at the moment of the report      400   (reproduced)
+   *   curl, identical body, 20 back-to-back     402 x 20
+   *   curl, identical body, 30 spaced by 3s     402 x 30
+   *   browser again, minutes later              402
+   *
+   * Fifty out of fifty priced fine. The model was servable the whole time; the 400 was a
+   * window. So the old text sent people to change the one thing that was not broken, and
+   * changing it did not help — which is exactly what "完全用不了" describes.
+   *
+   * The gateway's own message is already careful about this ("Request rejected: this request
+   * was not accepted as-is") and is deliberately neutral about the cause, so relaying it beats
+   * inventing a diagnosis here. Its 400 is now also retried upstream before it is believed, so
+   * a 400 reaching this point has survived a repeat.
+   *
+   * A retry hint rather than a model-swap hint: the failure that produces this is transient
+   * often enough that "try again" is the honest first move.
+   */
   if (res.status === 400) {
-    throw new Error(
-      `${opts.model ?? spec.defaultModel} is listed but not currently servable — pick another model`,
-    )
+    throw new Error(await priceRefusalMessage(res, opts.model ?? spec.defaultModel))
   }
   throw new Error(`the gateway answered ${res.status} when asked to price this ${spec.unit}`)
 }

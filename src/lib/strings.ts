@@ -439,8 +439,11 @@ const zh: Record<string, string> = {
   // is silently the same as having no translation.
   'The gateway did not accept the payment. Check the wallet has USDC on Base.':
     '网关没有接受这笔支付。请检查钱包在 Base 上是否持有 USDC。',
-  '{model} is listed but not currently servable — pick another model':
-    '{model} 已上架但当前无法服务 —— 请换一个模型',
+  // Replaced the "already listed but unservable, pick another model" entry: that instruction
+  // was measured to be wrong (the model priced fine 50/50 while the console called it
+  // unservable), so the English sentence it translated no longer exists.
+  'The gateway would not price this {model} request. This is often temporary — try again, and if it keeps happening the request itself may need adjusting.':
+    '网关无法为这个 {model} 请求报价。这通常是临时的 —— 请重试；如果一直如此，可能需要调整请求本身。',
   'the gateway answered {status} when asked to price this {unit}':
     '请求 {unit} 报价时，网关返回了 {status}',
   '{what} generation failed ({status})': '{what} 生成失败（{status}）',

@@ -137,13 +137,63 @@ describe('challengeGeneration', () => {
     expect(sentBody(spy)).not.toHaveProperty('duration_seconds')
   })
 
-  it('names the unservable model on a 400 instead of repeating a cause-free message', async () => {
-    // The gateway answers a deliberately cause-free 400, and the actual fix is choosing
-    // another model — `auto/music` and `ali/qwen-image` are both advertised and both refuse.
-    stubResponse(400, { error: { message: 'Request rejected: this request was not accepted as-is.' } })
-    await expect(
-      challengeGeneration('music', 'a synth loop', { model: 'auto/music' }),
-    ).rejects.toThrow(/auto\/music is listed but not currently servable/)
+  /**
+   * This test used to assert the opposite, and the assertion was wrong.
+   *
+   * It read `rejects.toThrow(/auto\/music is listed but not currently servable/)`, with a comment
+   * stating "the actual fix is choosing another model". Measured against production, that is not
+   * what a 400 here means. Reported as "生图完全用不了", console naming openai/gpt-image-2, with
+   * the browser's exact body:
+   *
+   *   browser, at the moment of the report      400   (reproduced)
+   *   curl, identical body, 20 back-to-back     402 x 20
+   *   curl, identical body, 30 spaced by 3s     402 x 30
+   *   browser again, minutes later              402
+   *
+   * Fifty out of fifty priced fine, so the model was servable throughout and the 400 was a
+   * window. Telling someone to pick another model sent them to change the one thing that was
+   * not broken — and it did not help, which is what "完全用不了" describes.
+   */
+  it('relays the gateway’s own words on a 400 rather than blaming the model', async () => {
+    stubResponse(400, {
+      error: { message: 'Request rejected: this request was not accepted as-is.' },
+    })
+    const err = await challengeGeneration('music', 'a synth loop', {
+      model: 'auto/music',
+    }).then(
+      () => {
+        throw new Error('expected a rejection, but the call resolved')
+      },
+      (e: unknown) => e as Error,
+    )
+
+    expect(err.message).toContain('Request rejected: this request was not accepted as-is.')
+    // Still names the model, because a transcript mixes modes and "which request?" matters —
+    // but not as the thing to change.
+    expect(err.message).toContain('auto/music')
+    // The instruction that was measured to be wrong must not come back.
+    expect(err.message).not.toMatch(/not currently servable/)
+    expect(err.message).not.toMatch(/pick another model/)
+    // And the honest first move is offered.
+    expect(err.message).toMatch(/again/i)
+  })
+
+  it('still says something useful when the 400 carries no readable body', async () => {
+    // A non-JSON 400 (an edge proxy, an HTML error page) must not produce an empty message or
+    // the word "undefined" in the transcript.
+    stubResponse(400, 'not json at all' as unknown as Record<string, unknown>)
+    const err = await challengeGeneration('image', 'a red cube', {
+      model: 'openai/gpt-image-2',
+    }).then(
+      () => {
+        throw new Error('expected a rejection, but the call resolved')
+      },
+      (e: unknown) => e as Error,
+    )
+
+    expect(err.message).toContain('openai/gpt-image-2')
+    expect(err.message).toMatch(/try again/i)
+    expect(err.message).not.toMatch(/undefined/)
   })
 })
 

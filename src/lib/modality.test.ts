@@ -309,10 +309,66 @@ describe('speech is its own endpoint, not a chat model', () => {
 describe('generation options', () => {
   it('sends image size, quality and count', async () => {
     const spy = stubResponse(402, { accepts: [{ amount: '64000' }] })
+    // A model that ACCEPTS quality must be named. This test used to fall through to the
+    // default (gpt-image-2), which refuses the field — see the quality tests below.
     await challengeGeneration('image', 'a cube', {
+      model: 'openai/gpt-image-2.5-flare',
       options: { size: '1792x1024', quality: 'hd', n: 2 },
     })
     expect(sentBody(spy)).toMatchObject({ size: '1792x1024', quality: 'hd', n: 2 })
+  })
+
+  /**
+   * The defect these pin, in the upstream's own words when asked directly:
+   *
+   *   quality is not accepted for openai/gpt-image-2. It is priced per size at its default
+   *   tier, and quality changes the underlying cost by an order of magnitude. Models that
+   *   accept it: openai/gpt-image-2.5-flare, openai/gpt-image-2.5-sunburst.
+   *
+   * This app defaults `quality` to 'auto', so every gpt-image-2 request carried it and was
+   * refused before it could be priced. Reported as "生图完全用不了". Measured through our own
+   * gateway, deterministically:
+   *
+   *   with quality: 'auto'      400 x 3
+   *   without quality           402 x 3
+   *   2.5-flare + quality       402
+   *   2.5-sunburst + quality    402
+   *
+   * The model itself was never broken: called directly on the upstream it returns real PNG
+   * bytes. I first read the 400 as an upstream flake, because my early probe bodies happened
+   * to omit `quality` — the field was the discriminator all along.
+   */
+  it('omits quality for a model that refuses it', async () => {
+    const spy = stubResponse(402, { accepts: [{ amount: '64000' }] })
+    await challengeGeneration('image', 'a cube', {
+      model: 'openai/gpt-image-2',
+      options: { size: '1024x1024', quality: 'auto', n: 1 },
+    })
+    const body = sentBody(spy)
+    expect(body).not.toHaveProperty('quality')
+    // Everything else still goes: the fix drops one field, not the whole options set.
+    expect(body).toMatchObject({ size: '1024x1024', n: 1 })
+  })
+
+  it('omits quality for auto/image, which resolves to that model', async () => {
+    const spy = stubResponse(402, { accepts: [{ amount: '64000' }] })
+    await challengeGeneration('image', 'a cube', {
+      model: 'auto/image',
+      options: { quality: 'high' },
+    })
+    expect(sentBody(spy)).not.toHaveProperty('quality')
+  })
+
+  it('still sends quality to the models the upstream named as accepting it', async () => {
+    // The control. "Drop quality" must not become "drop quality everywhere" — that would
+    // silently disable a working control on the two models it works on.
+    for (const model of ['openai/gpt-image-2.5-flare', 'openai/gpt-image-2.5-sunburst']) {
+      const spy = stubResponse(402, { accepts: [{ amount: '64000' }] })
+      await challengeGeneration('image', 'a cube', { model, options: { quality: 'high' } })
+      expect(sentBody(spy), `${model} must still receive quality`).toMatchObject({
+        quality: 'high',
+      })
+    }
   })
 
   it('sends speech voice and speed', async () => {
@@ -394,7 +450,13 @@ describe('generation options', () => {
   it('every default is actually sent', async () => {
     // A default that the body drops is a UI that shows a setting nothing honours.
     const spy = stubResponse(402, { accepts: [{ amount: '64000' }] })
-    await challengeGeneration('image', 'x', { options: DEFAULT_OPTIONS.image })
+    // Named explicitly: the default model (gpt-image-2) refuses `quality`, so the full default
+    // set is only sendable to a model that accepts it. Asserting otherwise is what let the
+    // always-send-quality defect ship.
+    await challengeGeneration('image', 'x', {
+      model: 'openai/gpt-image-2.5-flare',
+      options: DEFAULT_OPTIONS.image,
+    })
     expect(sentBody(spy)).toMatchObject({ size: '1024x1024', quality: 'auto', n: 1 })
   })
 
@@ -409,6 +471,8 @@ describe('generation options', () => {
      */
     const spy = stubResponse(402, { accepts: [{ amount: '64000' }] })
     void challengeGeneration('image', 'x', {
+      // Accepts `quality`, so the field-name assertions below can cover it.
+      model: 'openai/gpt-image-2.5-flare',
       options: {
         size: '1024x1024',
         quality: 'low',

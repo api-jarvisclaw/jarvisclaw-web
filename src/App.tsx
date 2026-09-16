@@ -501,11 +501,39 @@ export function App({
       const stored = media.url ? await archive(media.url) : null
       const shownUrl = stored ?? media.url
 
-      if (shownUrl) {
+      /**
+       * Inline bytes go to IndexedDB, so the clip survives a reload.
+       *
+       * Only when there is no URL to archive. Speech returns base64 rather than a link, and the
+       * CDN Worker cannot copy it — it fetches from an allowlisted host and a `data:` URL has no
+       * host. So these bytes exist in this browser only.
+       *
+       * MOVED ABOVE the gallery write, and that ordering is the fix for "这个图片没有到gallery
+       * 库里啊". The gallery item used to be added only `if (shownUrl)`, so any medium that came
+       * back as base64 rather than a URL was silently left out — and gpt-image-2 returns
+       * `b64_json`. The item needs `mediaKey` to be reachable at all, and the key did not exist
+       * yet at that point, so the two had to swap order rather than the condition simply widen.
+       */
+      let mediaKey: string | undefined
+      if (!shownUrl && media.b64) {
+        mediaKey = (await putMedia(newId(), media.b64, mediaMimeType(kind))) ?? undefined
+      }
+
+      /**
+       * In the gallery whether it arrived as a URL or as bytes.
+       *
+       * `retentionOf` already understood both — it returns 'thisTab' for an item with only a
+       * `mediaKey` — and `GalleryItem.url` is documented as "empty for inline bytes". So the
+       * gallery was built for this case and the write site was the only thing that excluded it.
+       * That is why the symptom was a paid image that appeared in the transcript and nowhere
+       * else: nothing errored, the row was just never created.
+       */
+      if (shownUrl || mediaKey) {
         const item: GalleryItem = {
           id: newId(),
           kind,
-          url: shownUrl,
+          url: shownUrl ?? '',
+          mediaKey,
           prompt,
           model: usedModel,
           usd: quoted,
@@ -516,23 +544,6 @@ export function App({
           saveGallery(next)
           return next
         })
-      }
-
-      /**
-       * Inline bytes go to IndexedDB, so the clip survives a reload.
-       *
-       * Only when there is no URL to archive. Speech returns base64 rather than a link, and the
-       * CDN Worker cannot copy it — it fetches from an allowlisted host and a `data:` URL has no
-       * host. So these bytes exist in this browser only.
-       *
-       * Awaited before patching the turn, so `mediaKey` is set before anything persists. The old
-       * code put the base64 straight into the turn, where `saveConversations` wrote it to
-       * localStorage: seven 30s clips filled this origin's 4 MB budget, after which every
-       * conversation write failed silently and a refresh discarded everything since.
-       */
-      let mediaKey: string | undefined
-      if (!shownUrl && media.b64) {
-        mediaKey = (await putMedia(newId(), media.b64, mediaMimeType(kind))) ?? undefined
       }
 
       patchMediaTurn(turnId, convId, {
@@ -745,7 +756,16 @@ export function App({
        * `notice` or `error` turn, so the placeholder must go rather than sit under it.
        */
       const dropPlaceholder = () =>
-        setTurns((t) => t.filter((x) => !(x.kind === 'media' && x.id === turnId)))
+        setTurns((t) => {
+          const next = t.filter((x) => !(x.kind === 'media' && x.id === turnId))
+          // Persisted on the way out, because this is a terminal state for the run: the price
+          // notice, a decline, a refusal. Without it the whole exchange — including the user's
+          // own prompt — was never written, so a reload lost a conversation that had visibly
+          // finished. `runGeneration` had NO persist() at all; only `patchMediaTurn` wrote, and
+          // only when the call succeeded.
+          persist(convId, next, history.current)
+          return next
+        })
 
       // Priced anonymously first. The 402 challenge is what a wallet signs over, so it has
       // to be fetched before any wallet prompt — and it costs nothing, which means an
@@ -891,10 +911,18 @@ export function App({
         // its own job.
         void waitForJob(turnId, kind, media.job, prompt, useModel, quoted, convId)
       } catch (err) {
-        setTurns((t) => [
-          ...t,
-          { kind: 'error', text: err instanceof Error ? err.message : String(err) },
-        ])
+        // The turn stays and stops waiting, rather than being dropped: money may already have
+        // been spent by this point, and deleting the record of a paid failure is the one outcome
+        // worse than showing it. The error turn says what went wrong beside it.
+        patchMediaTurn(turnId, convId, { waiting: false })
+        setTurns((t) => {
+          const next: Turn[] = [
+            ...t,
+            { kind: 'error', text: err instanceof Error ? err.message : String(err) },
+          ]
+          persist(convId, next, history.current)
+          return next
+        })
       }
     },
     [
@@ -965,6 +993,37 @@ export function App({
             }
           }
           return next
+        })
+      }
+
+      /**
+       * Writes the transcript to storage WHILE the run is going, not only when it ends.
+       *
+       * Reported as "特别容易丢失之前的聊天记录，一刷新就没有了，体验极差", and measured on the
+       * deployed page: 2 rows on screen, reload, **0 rows**. The cause is that the only
+       * persist() on this path is in the run's `finally`, so everything before it exists in
+       * React state alone. Any reload mid-run — and an agent run takes tens of seconds, with
+       * up to 8 turns — throws the whole conversation away. So does closing the tab, and so
+       * does a crash. The window where the transcript is unsaved is exactly the window where
+       * the user is waiting and most likely to reload because it looks stuck.
+       *
+       * Throttled rather than per-event: text arrives token by token, and `saveConversations`
+       * serialises every conversation and writes one localStorage key, which is synchronous and
+       * would run hundreds of times per answer. 1.5s bounds the worst-case loss to about a
+       * sentence while keeping the write off the streaming path.
+       *
+       * Read through a state setter for the same reason the `finally` does: `turns` in this
+       * closure is the value from before the run, so persisting it directly would save an empty
+       * transcript over a full one — which would turn a save into the data loss it prevents.
+       */
+      let lastSave = 0
+      const checkpoint = (force = false) => {
+        const now = Date.now()
+        if (!force && now - lastSave < 1500) return
+        lastSave = now
+        setTurns((t) => {
+          persist(convId, t, history.current)
+          return t
         })
       }
 
@@ -1110,6 +1169,9 @@ export function App({
           signal: controller.signal,
         })) {
           apply(event)
+          // Checkpointed per event, throttled inside. An agent run is tens of seconds across up
+          // to 8 turns, and until this the whole thing lived in React state only.
+          checkpoint()
         }
       } catch (err) {
         // An abort is the user's own stop, not a failure to report.

@@ -6,6 +6,7 @@ import {
   partitionSteps,
   tailOf,
   showsWait,
+  publicModelName,
   waitHeadline,
   TAIL_CHARS,
   type ToolStep,
@@ -248,5 +249,62 @@ describe('waitHeadline', () => {
 
   it('keeps the resumed wording, which only happens after payment', () => {
     expect(waitHeadline({ resumed: true, spentUsd: 0.4 })).toBe('Still generating')
+  })
+})
+
+/**
+ * What the attribution line is allowed to print.
+ *
+ * Reported from a screenshot as "这个不要透露出来好吗，answer by". The line rendered the response's
+ * `model` field verbatim, and for one channel the upstream echoes a full resource identifier:
+ *
+ *     arn:aws:bedrock:us-east-1:<12-digit account>:application-inference-profile/<id>
+ *
+ * A region, an account number and a profile id, under an answer, on a page anyone can open without
+ * signing in. It cannot be fixed by filtering the catalogue — 0 of the 319 advertised models
+ * contain such a name, because the value arrives at answer time rather than from the listing.
+ *
+ * An allow-shape rather than a deny-list, and these tests pin that choice: a new channel echoing a
+ * new format must default to showing nothing, not to leaking a shape nobody listed.
+ */
+describe('publicModelName', () => {
+  it('refuses the ARN this was reported for', () => {
+    expect(
+      publicModelName(
+        'arn:aws:bedrock:us-east-1:158525983107:application-inference-profile/i0f8apavqo5l',
+      ),
+    ).toBe('')
+  })
+
+  it('shows an ordinary vendor/model name', () => {
+    // The control. Suppressing everything would "fix" the leak by removing a feature the user
+    // asked for earlier — auto/free resolves per request, so naming the model that answered is
+    // the only way to learn which one it was.
+    expect(publicModelName('nvidia/nemotron-3-super-120b')).toBe('nvidia/nemotron-3-super-120b')
+    expect(publicModelName('anthropic/claude-haiku-4.5')).toBe('anthropic/claude-haiku-4.5')
+    expect(publicModelName('glm-4-flash')).toBe('glm-4-flash')
+  })
+
+  it('refuses shapes no allowlist enumerated', () => {
+    // Any identifier carrying infrastructure detail, not just the one measured. A deny-list that
+    // named only ARNs would publish the next format unchallenged.
+    expect(publicModelName('https://internal.example/v1/deployments/x')).toBe('')
+    expect(publicModelName('projects/123456789012/locations/us/models/m')).toBe('')
+    expect(publicModelName('acct-158525983107-profile')).toBe('')
+    expect(publicModelName('a'.repeat(80))).toBe('')
+  })
+
+  it('returns empty rather than a partial identifier', () => {
+    // Trimming an ARN to its last segment would still publish the profile id, and would read as
+    // a model name — worse than saying nothing, because it looks trustworthy.
+    const out = publicModelName('arn:aws:bedrock:us-east-1:158525983107:foo/i0f8apavqo5l')
+    expect(out).toBe('')
+    expect(out).not.toContain('i0f8apavqo5l')
+  })
+
+  it('handles the absent cases the caller passes through', () => {
+    expect(publicModelName(undefined)).toBe('')
+    expect(publicModelName('')).toBe('')
+    expect(publicModelName('   ')).toBe('')
   })
 })

@@ -5,6 +5,7 @@ import {
   MusicIcon,
   SendIcon,
   VideoIcon,
+  WandIcon,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
@@ -29,6 +30,9 @@ import { useT } from './LocaleContext'
  */
 const MODE_ICONS = {
   image: ImageIcon,
+  // A lucide name, not an emoji: the icon set is typed as LucideIcon so a wrong name fails
+  // to compile rather than rendering per-OS glyphs.  
+  edit: WandIcon,
   video: VideoIcon,
   music: MusicIcon,
   speech: AudioLinesIcon,
@@ -56,7 +60,13 @@ const MODE_ICONS = {
  * toggle behaviour on the other four stays, because it now costs nothing and someone who
  * found it will keep using it.
  */
-export const COMPOSER_MODES = ['chat', 'image', 'video', 'music', 'speech'] as const
+/**
+ * `edit` sits next to `image` because it is the same medium arrived at differently: one makes a
+ * picture from a description, the other changes a picture you already have. Its models were
+ * advertised and priced all along and only the routing was missing — I had wrongly reported them
+ * as unservable, having sent them to the generation endpoint instead of /v1/images/edits.
+ */
+export const COMPOSER_MODES = ['chat', 'image', 'edit', 'video', 'music', 'speech'] as const
 
 /**
  * The composer: text box, model picker, and the generation modes.
@@ -147,7 +157,11 @@ export function Composer({
       ? 'Ask anything…'
       : mode === 'speech'
         ? 'Type the words to speak…'
-        : `Describe the ${GENERATIONS[mode].unit} you want…`
+        : // An edit is an instruction about an existing picture, not a description of a new one.
+          // "Describe the edit you want" would invite the wrong kind of sentence.
+          mode === 'edit'
+          ? 'Say what to change…'
+          : `Describe the ${GENERATIONS[mode].unit} you want…`
 
   return (
     <div className="composer">

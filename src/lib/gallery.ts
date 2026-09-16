@@ -22,7 +22,12 @@ const MAX_ITEMS = 200
 export const CDN_BASE_URL =
   (import.meta.env?.VITE_CDN_URL as string | undefined) ?? 'https://cdn.jarvisclaw.ai'
 
-export type GalleryKind = 'image' | 'video' | 'music' | 'speech'
+/**
+ * `edit` produces an image like `image` does, but is kept distinct rather than folded into it:
+ * the gallery row says what was paid for, and "you paid $0.028572 to edit this" is a different
+ * record from "you paid $0.064 to generate this". Collapsing them would lose which it was.
+ */
+export type GalleryKind = 'image' | 'edit' | 'video' | 'music' | 'speech'
 
 /**
  * How long a stored artifact actually survives.

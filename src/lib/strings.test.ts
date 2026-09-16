@@ -86,6 +86,7 @@ const DYNAMIC_KEYS = [
   '{n} categories',
   // GENERATIONS[kind].label from lib/modality.ts, rendered as t(GENERATIONS[kind].label).
   'Image',
+  'Edit',
   'Video',
   'Music',
   'Speech',

@@ -298,6 +298,18 @@ const zh: Record<string, string> = {
   // GENERATIONS[kind].label from lib/modality.ts, rendered as t(...) so the scan cannot see them —
   // gated by their own test, which reads modality.ts directly.
   Image: '图片',
+  // 编辑 rather than 修图: the mode edits an image you supply with a text instruction, which
+  // covers more than retouching a photo.
+  Edit: '编辑',
+  // The edit mode's source-image control. Its failure messages say what to DO, not what went
+  // wrong internally — someone whose photo is rejected needs to know to pick a smaller one.
+  'Source image': '原图',
+  'Choose an image…': '选择图片…',
+  Replace: '更换',
+  Remove: '移除',
+  'That file is not an image.': '这个文件不是图片。',
+  'That image is over 4 MB. Pick a smaller one.': '图片超过 4 MB,请选一张小一些的。',
+  'That image could not be read.': '这张图片无法读取。',
   Video: '视频',
   Music: '音乐',
   Speech: '语音',

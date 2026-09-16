@@ -705,7 +705,47 @@ export function App({
       const chosenMode = chosen ? modeForModel(chosen.model, chosen.modality) : null
       const useModel = chosenMode === kind ? model : spec.defaultModel
 
-      setTurns((t) => [...t, { kind: 'user', text: prompt }])
+      /**
+       * The user's turn and the placeholder go on together, before any network call.
+       *
+       * My first attempt at this created the placeholder after the quote, just before the paid
+       * call — and a live check on the deployed page showed 0 waiting boxes over a 12s hold. The
+       * reason is that the quote is a network call too, and on the anonymous path it is the ONLY
+       * one: the run ends at the price notice. So a placeholder created after it covers a window
+       * that, for a visitor with no wallet, does not exist.
+       *
+       * There are three sequential waits here — the quote, the consent dialog, and the paid call
+       * — and the complaint ("在处理都没有一个类似状态条的东西") does not distinguish between
+       * them. From the outside they are one wait. So the turn exists for all of it, from the
+       * moment Enter is pressed.
+       *
+       * `spentUsd: 0` until a price is known. It is not "free": nothing has been quoted yet, and
+       * MediaView shows the figure only once the quote lands, so a zero is never displayed as a
+       * price. Guessing a number here would put a wrong charge on screen.
+       */
+      const turnId = newId()
+      setTurns((t) => [
+        ...t,
+        { kind: 'user', text: prompt },
+        {
+          kind: 'media',
+          id: turnId,
+          media: kind,
+          prompt,
+          model: useModel,
+          spentUsd: 0,
+          waiting: true,
+        },
+      ])
+
+      /**
+       * Every early return has to clear the placeholder, or it becomes the frozen clock this
+       * change exists to remove. The failure modes are a refusal, a decline, an unpayable
+       * session and the anonymous price notice — all of which end the run with a separate
+       * `notice` or `error` turn, so the placeholder must go rather than sit under it.
+       */
+      const dropPlaceholder = () =>
+        setTurns((t) => t.filter((x) => !(x.kind === 'media' && x.id === turnId)))
 
       // Priced anonymously first. The 402 challenge is what a wallet signs over, so it has
       // to be fetched before any wallet prompt — and it costs nothing, which means an
@@ -720,6 +760,7 @@ export function App({
           options: genOptions[kind],
         })
       } catch (err) {
+        dropPlaceholder()
         setTurns((t) => [
           ...t,
           { kind: 'error', text: err instanceof Error ? err.message : String(err) },
@@ -732,6 +773,7 @@ export function App({
         // Told BEFORE any approval prompt: asking someone to approve a charge they have no
         // way to pay is a dialog that can only end in disappointment. Both rails are named,
         // because an existing customer's answer is "sign in", not "install a wallet".
+        dropPlaceholder()
         setTurns((t) => [
           ...t,
           {
@@ -748,6 +790,7 @@ export function App({
         usd: quoted,
       })
       if (!approved) {
+        dropPlaceholder()
         setTurns((t) => [...t, { kind: 'notice', text: `${spec.label} generation declined.` }])
         return
       }
@@ -764,6 +807,7 @@ export function App({
         // Unreachable today: `anonymous` is false and apiKey is null, so a wallet exists. Kept
         // as a real branch rather than a non-null assertion, so a future change that lets both
         // rails be absent reports it instead of throwing on a null.
+        dropPlaceholder()
         setTurns((t) => [
           ...t,
           { kind: 'error', text: 'No way to pay for this call — sign in or connect a wallet.' },
@@ -777,6 +821,7 @@ export function App({
             ).header,
           }
         } catch (err) {
+          dropPlaceholder()
           setTurns((t) => [
             ...t,
             isUserRejection(err)
@@ -788,52 +833,14 @@ export function App({
       }
 
       /**
-       * The turn goes on screen BEFORE the call, not after it.
+       * Now that the price is known, put it on the turn.
        *
-       * Reported as "在处理都没有一个类似状态条的东西": a generation runs and the transcript
-       * shows nothing but the prompt you typed. The only sign of life was the spinner inside
-       * the send button.
-       *
-       * Measured on the live site, sampling the DOM every 500ms for the whole wait:
-       *
-       *     transcript rows (max):        1     <- the user's own prompt
-       *     rows that are NOT the prompt: 0
-       *     media-waiting boxes:          0
-       *     progressbar inside a turn:    0
-       *
-       * The cause was ordering, and it was invisible in review because the waiting UI already
-       * existed and worked. `WaitingView` renders a clock and a progress bar, but it lives in
-       * the `media` turn — and the `media` turn was appended AFTER `generate` resolved. For a
-       * video that is harmless, because the POST returns a receipt in a second and the long
-       * wait happens afterwards with the turn already on screen. For an IMAGE or a SPEECH clip
-       * the upstream call IS the wait, so the turn arrived at the same moment as the result and
-       * the indicator never had a moment to show.
-       *
-       * So the turn is created here, empty, and the call fills it in. `WaitingView` then covers
-       * the whole wait for every medium instead of only the asynchronous ones — which also
-       * removes the second half of the same problem: a synchronous kind never sets `job`, so it
-       * could not reach that branch at all.
-       *
-       * `waiting: true` is what marks it, rather than reusing `job`: a job id is a real thing
-       * that can be polled and resumed, and inventing one for a call that has none would make
-       * a reload try to poll a job that never existed.
+       * The placeholder was created with `spentUsd: 0` before anything was quoted, because a
+       * guessed figure on screen is worse than none. This is the first moment a real number
+       * exists AND the charge has been approved, so it is the first moment it can be shown
+       * honestly — a price that appeared only on success would hide what a failed call cost.
        */
-      const turnId = newId()
-      setTurns((t) => [
-        ...t,
-        {
-          kind: 'media',
-          id: turnId,
-          media: kind,
-          prompt,
-          model: useModel,
-          // Already approved and about to be spent. Showing it now is honest: the charge is
-          // authorised at this point, and a price that appears only on success would hide what
-          // a failed call cost.
-          spentUsd: quoted,
-          waiting: true,
-        },
-      ])
+      patchMediaTurn(turnId, convId, { spentUsd: quoted })
 
       try {
         const media = await generate(kind, prompt, {

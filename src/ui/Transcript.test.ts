@@ -6,6 +6,7 @@ import {
   partitionSteps,
   tailOf,
   showsWait,
+  waitHeadline,
   TAIL_CHARS,
   type ToolStep,
 } from './Transcript'
@@ -216,5 +217,36 @@ describe('showsWait', () => {
     // stay that message rather than a spinner that never ends.
     expect(showsWait({})).toBe(false)
     expect(showsWait({ waiting: false })).toBe(false)
+  })
+})
+
+/**
+ * What the waiting row claims while it waits.
+ *
+ * The turn now exists from the moment Enter is pressed, which extends it over the PRICE CHECK as
+ * well as the generation. Measured on the deployed page, that window rendered:
+ *
+ *     Generating · 11s · usually about 30s
+ *     Paid and sent. Keep this tab open until it comes back.
+ *
+ * for an anonymous request that spends nothing and ended in "sign in with your JarvisClaw
+ * account to use its quota". Two false claims — work that had not started, and a payment that
+ * had not happened. Fixing the missing indicator by adding a lying one is not a fix.
+ */
+describe('waitHeadline', () => {
+  it('does not claim generation before the call is paid for', () => {
+    // spentUsd is 0 until the quote lands AND the spend is approved, which makes it the one
+    // value that cannot announce work early.
+    expect(waitHeadline({ spentUsd: 0 })).toBe('Checking price')
+  })
+
+  it('says generating once there is a real charge', () => {
+    // The control: this must not become "Checking price" forever, or the paid path loses the
+    // label it always had.
+    expect(waitHeadline({ spentUsd: 0.064 })).toBe('Generating')
+  })
+
+  it('keeps the resumed wording, which only happens after payment', () => {
+    expect(waitHeadline({ resumed: true, spentUsd: 0.4 })).toBe('Still generating')
   })
 })

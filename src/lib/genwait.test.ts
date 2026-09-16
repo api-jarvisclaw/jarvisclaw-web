@@ -124,12 +124,19 @@ describe('the waiting placeholder covers the whole wait', () => {
     const paid = body.indexOf('await generate(')
     expect(paid).toBeGreaterThan(create)
     const middle = body.slice(create, paid)
-    const returns = middle.match(/\n\s+return\n?/g) ?? []
+    /**
+     * A BARE `return` only — `/return\s*$/m` rather than `/return\b/`.
+     *
+     * The looser version raised a false alarm the moment `dropPlaceholder` itself grew a body:
+     * `return next` inside a `setTurns` callback is not an exit from `runGeneration`, it is that
+     * callback's own value. A guard that fires on correct code gets weakened or deleted, so the
+     * pattern has to name the thing it means. `return` with nothing after it is unambiguous —
+     * `runGeneration` returns void, so every real early exit takes that form.
+     */
+    const bareReturn = /\n[ \t]+return[ \t]*\r?$/gm
+    const returns = middle.match(bareReturn) ?? []
     expect(returns.length, 'the early-return region must be found').toBeGreaterThan(0)
-    // Each bare `return` in this region should have a dropPlaceholder within the preceding
-    // few lines.
-    const segments = middle.split(/\n\s+return\b/)
-    for (const seg of segments.slice(0, -1)) {
+    for (const seg of middle.split(bareReturn).slice(0, -1)) {
       const tail = seg.slice(-600)
       expect(
         tail,

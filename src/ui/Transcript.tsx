@@ -284,12 +284,14 @@ function TurnView({ turn }: { turn: Turn }) {
 
       {turn.text.trim() !== '' && <div className="bubble">{turn.text}</div>}
 
-      {turn.model && (
+      {publicModelName(turn.model) && (
         <div className="answered-by">
           {/* auto/free resolves per request, so naming the concrete model is the only
-              way the user learns which one answered. */}
+              way the user learns which one answered — but only the NAME. See
+              publicModelName: the upstream echoes an internal identifier for some
+              channels, and this line rendered it verbatim. */}
           <span>{t('answered by')}</span>
-          <span className="tool-name">{turn.model}</span>
+          <span className="tool-name">{publicModelName(turn.model)}</span>
         </div>
       )}
     </div>
@@ -417,6 +419,44 @@ export function showsWait(turn: { job?: unknown; waiting?: boolean }): boolean {
  * announce generation early. Exported and pure for the same reason as `showsWait`: the decision
  * is the thing that was wrong, and a rendering test would obscure it.
  */
+/**
+ * The model name that may be shown to a visitor, or '' when there is nothing safe to show.
+ *
+ * Reported from a screenshot as "这个不要透露出来好吗，answer by", and the reason is stronger than
+ * preference. The attribution rendered whatever the upstream put in the response's `model` field,
+ * verbatim, and for one channel that value is a full resource identifier:
+ *
+ *     arn:aws:bedrock:us-east-1:<12-digit account>:application-inference-profile/<id>
+ *
+ * That is infrastructure detail about the account serving the request — a region, an account
+ * number and a profile id — printed under an answer on a page anyone can open without signing in.
+ * The catalogue never advertises such a name (checked: 0 of 319 advertised models contain one), so
+ * this cannot be fixed by filtering the model list; the value arrives at answer time.
+ *
+ * ## An allow-shape, not a deny-list
+ *
+ * A public model name looks like `vendor/model` or a bare `model`: short, no scheme, no colons, no
+ * account numbers. Anything else is not shown at all rather than trimmed to its last segment —
+ * trimming would still publish the profile id, and it would silently start displaying whatever a
+ * future channel echoes. Showing nothing loses one line of provenance; a deny-list that misses a
+ * new format loses the property this exists to protect.
+ *
+ * Empty is a legitimate result and the caller must hide the row for it. Saying "answered by" with
+ * nothing after it would be worse than staying quiet.
+ */
+export function publicModelName(model: string | undefined): string {
+  if (!model) return ''
+  const name = model.trim()
+  if (name === '') return ''
+  // No ARNs, URLs, endpoint paths or account-number-shaped digit runs.
+  if (name.includes(':') || name.includes('//') || /\b\d{10,}\b/.test(name)) return ''
+  // `vendor/model`, or a bare name. One slash at most: a deeper path is a resource, not a name.
+  if ((name.match(/\//g) ?? []).length > 1) return ''
+  // A public model id is short. The longest in the live catalogue is well under this.
+  if (name.length > 64) return ''
+  return name
+}
+
 export function waitHeadline(turn: { resumed?: boolean; spentUsd: number }): string {
   if (turn.resumed) return 'Still generating'
   return turn.spentUsd > 0 ? 'Generating' : 'Checking price'

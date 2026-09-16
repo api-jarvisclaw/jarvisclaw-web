@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import {
   GENERATION_CHOICES,
+  imageAcceptsQuality,
   videoLimitsFor,
   speechVoicesFor,
   speechSpeedsFor,
@@ -54,6 +55,7 @@ export function GenerationOptions({
   const limits = videoLimitsFor(model ?? '')
   const voices = speechVoicesFor(model ?? '')
   const speeds = speechSpeedsFor(model ?? '')
+  const acceptsQuality = imageAcceptsQuality(model ?? '')
   const [open, setOpen] = useState(false)
   const boxRef = useRef<HTMLDivElement>(null)
 
@@ -102,12 +104,20 @@ export function GenerationOptions({
                 current={options.size ?? '1024x1024'}
                 onPick={(size) => onChange({ ...options, size: String(size) })}
               />
-              <Choices
-                label={t('Quality')}
-                values={GENERATION_CHOICES.image.quality}
-                current={options.quality ?? 'auto'}
-                onPick={(quality) => onChange({ ...options, quality: String(quality) })}
-              />
+              {/* Hidden for models that refuse the field, the same per-model treatment the video
+                  and speech controls already get.
+                  gpt-image-2 answers 400 to `quality` outright — "it is priced per size at its
+                  default tier" — and this app defaults it to 'auto', so offering the control
+                  would let someone set a value that guarantees a 400. Showing a knob whose only
+                  effect is to break the call is worse than not showing it. */}
+              {acceptsQuality && (
+                <Choices
+                  label={t('Quality')}
+                  values={GENERATION_CHOICES.image.quality}
+                  current={options.quality ?? 'auto'}
+                  onPick={(quality) => onChange({ ...options, quality: String(quality) })}
+                />
+              )}
               <Choices
                 label={t('Count')}
                 values={GENERATION_CHOICES.image.n}

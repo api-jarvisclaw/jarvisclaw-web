@@ -212,6 +212,45 @@ export const GENERATION_CHOICES = {
  * upstream balance ran out partway through. A 400 on one of them would be a docs/service
  * disagreement rather than a bug in this table, and `videoLimitsFor` is where to fix it.
  */
+/**
+ * Image models that REFUSE a `quality` field.
+ *
+ * Reported as "生图完全用不了", console naming openai/gpt-image-2. The cause was ours, and the
+ * upstream said so in plain words when asked directly:
+ *
+ *   quality is not accepted for openai/gpt-image-2. It is priced per size at its default tier,
+ *   and quality changes the underlying cost by an order of magnitude. Models that accept it:
+ *   openai/gpt-image-2.5-flare, openai/gpt-image-2.5-sunburst.
+ *
+ * This app sends `quality: 'auto'` by default (GENERATION_DEFAULTS), so every gpt-image-2
+ * request was rejected before it could be priced. Measured through our own gateway:
+ *
+ *   with quality: 'auto'   400 x 3      <- what the page sent
+ *   without quality        402 x 3
+ *   2.5-flare + quality    402
+ *   2.5-sunburst + quality 402
+ *
+ * Deterministic, not intermittent. I first read it as an upstream flake because my early
+ * curl bodies happened to omit `quality` — the field was the discriminator all along, and
+ * the model itself is fine: called directly it returns real PNG bytes.
+ *
+ * A DENY list, not an allow list. The upstream named the two models that accept `quality` and
+ * this list holds the one that refuses it, because an allow list would silently strip the field
+ * from every image model added later — turning a working control into a no-op that nobody
+ * notices. Being wrong here in the deny direction costs one clear 400 naming the field; being
+ * wrong in the allow direction costs a control that quietly stops working.
+ */
+export const IMAGE_QUALITY_UNSUPPORTED: readonly string[] = [
+  'openai/gpt-image-2',
+  // auto/image resolves to gpt-image-2 on the blockrun channel, so it inherits the refusal.
+  'auto/image',
+]
+
+/** Whether `quality` may be sent for this image model. */
+export function imageAcceptsQuality(model: string): boolean {
+  return !IMAGE_QUALITY_UNSUPPORTED.includes(model)
+}
+
 export const VIDEO_LIMITS: Record<
   string,
   { durations: readonly number[]; resolutions: readonly string[]; aspectRatios: readonly string[] }
@@ -560,7 +599,11 @@ function buildBody(
 
   if (kind === 'image') {
     if (options.size) body.size = options.size
-    if (options.quality) body.quality = options.quality
+    // Gated on the model, not sent hopefully. gpt-image-2 answers 400 for `quality` at all —
+    // "it is priced per size at its default tier" — and this app defaults the field to 'auto',
+    // so every request for that model was refused before it could be priced. See
+    // IMAGE_QUALITY_UNSUPPORTED.
+    if (options.quality && imageAcceptsQuality(model)) body.quality = options.quality
     // Guarded, not passed through: n=0 would ask for nothing and still be charged, and a
     // non-integer is rejected by the DTO's *uint.
     if (Number.isInteger(options.n) && (options.n as number) > 0) body.n = options.n

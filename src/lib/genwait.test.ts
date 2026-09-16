@@ -71,15 +71,24 @@ describe('the waiting placeholder covers the whole wait', () => {
   })
 
   it('adds it in the same update as the user turn', () => {
-    // One setTurns, so there is no frame in which the prompt is on screen alone. Two separate
-    // calls would also work in practice, but this way the invariant is structural rather than
-    // dependent on React batching.
+    /**
+     * One setTurns, so there is no frame in which the prompt is on screen alone.
+     *
+     * Anchored to the user turn that PRECEDES the placeholder, found by searching backwards from
+     * it. My first version used the first `kind: 'user'` in the function and a 400-character
+     * window, which broke the moment an early-exit branch (an edit with no source image) added
+     * its own user turn above this one — the distance grew and the guard failed on correct code.
+     * A guard that fires on correct code gets weakened, so it has to name what it means rather
+     * than rely on nothing else appearing nearby.
+     */
     const body = runGeneration()
-    const idx = body.indexOf("kind: 'user'")
     const placeholder = body.indexOf('waiting: true')
-    expect(idx).toBeGreaterThan(-1)
-    expect(placeholder - idx).toBeGreaterThan(0)
-    expect(placeholder - idx).toBeLessThan(400)
+    expect(placeholder).toBeGreaterThan(-1)
+    const userTurn = body.lastIndexOf("kind: 'user'", placeholder)
+    expect(userTurn, 'a user turn must precede the placeholder').toBeGreaterThan(-1)
+    // Same array literal: no `])` closing an intervening setTurns between the two.
+    const between = body.slice(userTurn, placeholder)
+    expect(between, 'the two must be added in one update').not.toContain('])')
   })
 
   it('quotes no price until one is known', () => {

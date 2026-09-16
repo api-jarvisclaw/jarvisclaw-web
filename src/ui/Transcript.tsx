@@ -49,7 +49,7 @@ export type Turn =
        * position — so the turn carries its own id and the update finds it by that.
        */
       id: string
-      media: 'image' | 'video' | 'music' | 'speech'
+      media: 'image' | 'edit' | 'video' | 'music' | 'speech'
       url?: string
       /**
        * Inline bytes, for this page load only.
@@ -463,10 +463,14 @@ export function waitHeadline(turn: { resumed?: boolean; spentUsd: number }): str
 }
 
 /** Roughly how long each kind takes, so a wait can be shown against something. */
-const TYPICAL_WAIT_S: Record<'image' | 'video' | 'music' | 'speech', number> = {
+const TYPICAL_WAIT_S: Record<'image' | 'edit' | 'video' | 'music' | 'speech', number> = {
   video: 180,
   music: 90,
   image: 30,
+  // Same order of work as generation on the same endpoint family. A guess, and the progress bar
+  // treats it as one: it fills to 90% against this number and stops rather than claiming to know
+  // when the edit will finish.
+  edit: 30,
   speech: 10,
 }
 

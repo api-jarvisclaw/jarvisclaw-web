@@ -16,7 +16,24 @@ import type { Challenge } from './wallet'
  * anything is spent. A video at over a dollar is exactly why the quote has to come first.
  */
 
-export type GenerationKind = 'image' | 'video' | 'music' | 'speech'
+/**
+ * `edit` is here because the models for it were already advertised and already priced —
+ * only the routing was missing.
+ *
+ * I had reported `ali/qwen-image-edit`, `-plus` and `-max` as unservable and suggested
+ * delisting them. That was wrong, and the mistake was mine: `modeForModel` knows four
+ * destinations, so every image-shaped name went to /v1/images/generations. These are EDIT
+ * models — an edit takes a source image, so a bare prompt is an incomplete request, not a
+ * dead model. Measured at /v1/images/edits:
+ *
+ *     ali/qwen-image-edit        402  $0.045000
+ *     ali/qwen-image-edit-plus   402  $0.028572
+ *     ali/qwen-image-edit-max    402  $0.075000
+ *
+ * Real per-image prices, not the $0.001 facilitator floor — which matters, because the
+ * floor is what made 19 other models look servable when quoted on /v1/chat/completions.
+ */
+export type GenerationKind = 'image' | 'edit' | 'video' | 'music' | 'speech'
 
 export interface GenerationSpec {
   kind: GenerationKind
@@ -34,6 +51,20 @@ export interface GenerationSpec {
    * the whole reason a speech call succeeds or fails.
    */
   promptField: 'prompt' | 'input'
+  /**
+   * Whether this mode cannot run without a source image.
+   *
+   * Enforced by the UI because the GATEWAY DOES NOT ENFORCE IT. Measured: /v1/images/edits
+   * returns the same 402 with the image, without it, and with the field under four different
+   * names (`image`, `images`, `image_url`, raw base64) — the quote is issued before the body is
+   * inspected. So a request with no image is quoted, paid for, and only then refused. That is
+   * the worst failure shape this app has: money gone, nothing produced.
+   *
+   * The corollary is that the 402 has no discriminating power over the body here, which is why
+   * the field name below follows our own documented contract (controller/openapi.go names
+   * `image` as required) rather than whichever spelling happens to return a price.
+   */
+  requiresSourceImage?: boolean
 }
 
 /**
@@ -62,6 +93,22 @@ export const GENERATIONS: Record<GenerationKind, GenerationSpec> = {
     label: 'Image',
     unit: 'image',
     promptField: 'prompt',
+  },
+  /**
+   * Editing an image you supply, rather than making one from nothing.
+   *
+   * Default is `-plus` at $0.028572 rather than `-edit` at $0.045 or `-max` at $0.075: the
+   * cheapest of the three is the kinder default for someone trying the feature, and the picker
+   * reaches the others. Same reasoning as the video default.
+   */
+  edit: {
+    kind: 'edit',
+    path: '/v1/images/edits',
+    defaultModel: 'ali/qwen-image-edit-plus',
+    label: 'Edit',
+    unit: 'edit',
+    promptField: 'prompt',
+    requiresSourceImage: true,
   },
   video: {
     kind: 'video',
@@ -425,6 +472,13 @@ export function videoLimitsFor(model: string): {
 
 export const DEFAULT_OPTIONS: Record<GenerationKind, GenerationOptions> = {
   image: { size: '1024x1024', quality: 'auto', n: 1 },
+  /**
+   * No `quality`. The measured cause of every gpt-image-2 400 was a field the model refuses,
+   * and nothing here establishes that the edit models accept it — so it is not sent on a hope.
+   * The 402 quote cannot answer the question either: /v1/images/edits prices identically with
+   * the field, without it, and with no image at all.
+   */
+  edit: { size: '1024x1024', n: 1 },
   video: { duration: 5 },
   music: {},
   speech: { speed: 1 },
@@ -540,6 +594,17 @@ export interface GenerationOptions {
    * 100 -> 564 KB on one prompt.
    */
   outputCompression?: number
+  /**
+   * Edit: the source image, as a `data:` URL.
+   *
+   * Held here rather than passed separately so that the image is part of the QUOTED body — the
+   * same rule the other options follow. It is also why `edit` cannot run without one: see
+   * `requiresSourceImage`, and note the gateway will happily quote and charge for an edit with
+   * no image attached.
+   */
+  sourceImage?: string
+  /** Edit: optional mask marking the area to change, also a `data:` URL. */
+  mask?: string
   /** Video: seconds. Sent as `duration_seconds` — see buildBody. */
   duration?: number
   /**
@@ -586,7 +651,7 @@ export interface GenerationOptions {
   lyrics?: string
 }
 
-function buildBody(
+export function buildBody(
   kind: GenerationKind,
   prompt: string,
   model: string,
@@ -624,6 +689,27 @@ function buildBody(
     ) {
       body.output_compression = options.outputCompression
     }
+  }
+
+  if (kind === 'edit') {
+    if (options.size) body.size = options.size
+    if (Number.isInteger(options.n) && (options.n as number) > 0) body.n = options.n
+    /**
+     * `image`, spelled the way OUR OWN contract requires it.
+     *
+     * controller/openapi.go declares `image` (binary) and `prompt` as the required fields of
+     * /v1/images/edits, and the ImageRequest DTO has an `image` field. That is the authority
+     * used here, because the live endpoint offers no way to tell: measured, it returns the same
+     * 402 for `image`, `images`, `image_url`, a raw base64 string, and for no image at all. A
+     * quote that cannot distinguish a complete request from an empty one cannot be used to pick
+     * a field name — reading the price back would just have confirmed whichever guess I made.
+     *
+     * Sent as a data: URL. The endpoint also accepts multipart, but a signed payment is issued
+     * for a URL and an amount rather than for a body, so a JSON body keeps one code path for
+     * quote and send instead of two that could drift apart.
+     */
+    if (options.sourceImage) body.image = options.sourceImage
+    if (options.mask) body.mask = options.mask
   }
 
   if (kind === 'video') {
@@ -710,7 +796,16 @@ function buildBody(
 export function modeForModel(model: string, modality: string): GenerationKind | null {
   switch (modality) {
     case 'image':
-      return 'image'
+      /**
+       * An edit model goes to the edit endpoint, not to image generation.
+       *
+       * Without this the picker sends `ali/qwen-image-edit` to /v1/images/generations, which
+       * refuses it — and that refusal is exactly what I misread as "the model is unservable"
+       * before recommending these three be delisted. Matched on the name because the catalogue
+       * carries no field for it: modality is inferred from the name in the first place, and
+       * `-edit` is the vendor's own marker for the distinction.
+       */
+      return /-edit(-|$)|image-edit/i.test(model) ? 'edit' : 'image'
     case 'video':
       return 'video'
     case 'audio':
@@ -899,6 +994,9 @@ export const POLL_DEADLINE_MS: Record<GenerationKind, number> = {
   // return nothing. Upstream takes minutes; the gateway allows itself 900s.
   video: 300_000,
   image: 120_000,
+  // Same endpoint family as image generation, so the same allowance. Not measured against a
+  // completed paid edit — stated as an assumption rather than presented as a measurement.
+  edit: 120_000,
   music: 300_000,
   // Speech is synchronous today (bytes come back inline). Kept short so that if a channel
   // ever queues it, the wait ends rather than hanging.

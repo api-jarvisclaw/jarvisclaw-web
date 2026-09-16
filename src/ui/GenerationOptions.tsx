@@ -171,6 +171,33 @@ export function GenerationOptions({
             </>
           )}
 
+          {mode === 'edit' && (
+            <>
+              {/* The source image, and the ONLY control here that is not optional.
+                  The gateway will not catch its absence: measured, /v1/images/edits returns the
+                  same 402 with the image, without it, and under four different field spellings.
+                  So an edit with nothing attached is quoted, PAID FOR, and only then refused —
+                  money gone, nothing produced. This control is what prevents that, which is why
+                  it sits at the top and why the send path checks it again. */}
+              <SourceImage
+                current={options.sourceImage}
+                onPick={(sourceImage) => onChange({ ...options, sourceImage })}
+              />
+              <Choices
+                label={t('Size')}
+                values={GENERATION_CHOICES.image.size}
+                current={options.size ?? '1024x1024'}
+                onPick={(size) => onChange({ ...options, size: String(size) })}
+              />
+              <Choices
+                label={t('Count')}
+                values={GENERATION_CHOICES.image.n}
+                current={options.n ?? 1}
+                onPick={(n) => onChange({ ...options, n: Number(n) })}
+              />
+            </>
+          )}
+
           {mode === 'video' && (
             <>
               <Choices
@@ -297,6 +324,102 @@ export function GenerationOptions({
           </p>
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * The source image for an edit mode, read locally into a `data:` URL.
+ *
+ * ## Why the bytes are inlined rather than uploaded first
+ *
+ * The image has to be part of the QUOTED body, because a payment is signed against a URL and an
+ * amount and then spent on the body we send. Uploading somewhere first would mean the quote
+ * covered a request that referenced a file the gateway may not be able to read — and the gateway
+ * cannot tell us, since it prices /v1/images/edits identically with the image, without it, and
+ * under four different field spellings.
+ *
+ * ## The size cap is not defensive
+ *
+ * A `data:` URL of a phone photo is several megabytes of base64 in a JSON body, and this app has
+ * already lost user data once to exactly that shape: seven inlined speech clips filled the
+ * origin's 4 MB localStorage, after which every conversation write failed SILENTLY and a refresh
+ * discarded everything since. The turn does not persist this field, but the cap keeps the request
+ * itself sane and gives a reason the user can act on rather than a failure they cannot see.
+ */
+const MAX_SOURCE_BYTES = 4 * 1024 * 1024
+
+function SourceImage({
+  current,
+  onPick,
+}: {
+  current?: string
+  onPick: (dataUrl: string | undefined) => void
+}) {
+  const t = useT()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [problem, setProblem] = useState<string | null>(null)
+
+  const read = (file: File) => {
+    setProblem(null)
+    if (!file.type.startsWith('image/')) {
+      setProblem(t('That file is not an image.'))
+      return
+    }
+    if (file.size > MAX_SOURCE_BYTES) {
+      // Named in MB because "4194304 bytes" is not something anyone can act on.
+      setProblem(t('That image is over 4 MB. Pick a smaller one.'))
+      return
+    }
+    const reader = new FileReader()
+    // onerror as well as onload: a file that vanishes or cannot be read otherwise leaves the
+    // panel looking like it accepted something, and the next thing the user does is pay.
+    reader.onerror = () => setProblem(t('That image could not be read.'))
+    reader.onload = () => {
+      const out = reader.result
+      if (typeof out === 'string') onPick(out)
+      else setProblem(t('That image could not be read.'))
+    }
+    reader.readAsDataURL(file)
+  }
+
+  return (
+    <div className="genopts-row">
+      <span className="genopts-label">{t('Source image')}</span>
+      <div className="genopts-choices">
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) read(file)
+            // Cleared so choosing the SAME file twice fires onChange again. Without this a
+            // user who picked the wrong image, then re-picked the right one, could find the
+            // second attempt silently ignored.
+            e.target.value = ''
+          }}
+        />
+        {current ? (
+          <>
+            {/* The chosen image itself, not a filename. This is the one control whose value
+                the user cannot otherwise verify before paying. */}
+            <img className="genopts-thumb" src={current} alt={t('Source image')} />
+            <button className="genopts-chip" onClick={() => inputRef.current?.click()}>
+              {t('Replace')}
+            </button>
+            <button className="genopts-chip" onClick={() => onPick(undefined)}>
+              {t('Remove')}
+            </button>
+          </>
+        ) : (
+          <button className="genopts-chip" onClick={() => inputRef.current?.click()}>
+            {t('Choose an image…')}
+          </button>
+        )}
+      </div>
+      {problem && <span className="genopts-problem">{problem}</span>}
     </div>
   )
 }

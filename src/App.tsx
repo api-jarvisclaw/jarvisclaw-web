@@ -717,6 +717,31 @@ export function App({
       const useModel = chosenMode === kind ? model : spec.defaultModel
 
       /**
+       * An edit cannot run without a source image, and WE have to be the ones to say so.
+       *
+       * Measured against the live gateway: /v1/images/edits returns the same 402 whether the
+       * image is present, absent, or named `image` / `images` / `image_url` / raw base64. The
+       * quote is issued before the body is inspected. So without this check the sequence is
+       * quote, consent dialog, wallet signature, USDC settled, THEN a refusal — the money is
+       * spent on-chain and cannot be reversed, and nothing was produced.
+       *
+       * Checked before the quote for that reason: the earliest point where refusing costs
+       * nothing. It is a notice rather than an error because the user has done nothing wrong;
+       * they just have not attached the picture yet.
+       */
+      if (spec.requiresSourceImage && !genOptions[kind]?.sourceImage) {
+        setTurns((t) => [
+          ...t,
+          { kind: 'user', text: prompt },
+          {
+            kind: 'notice',
+            text: `${spec.label} needs a picture to work from. Open the options beside the mode buttons and choose one, then send this again.`,
+          },
+        ])
+        return
+      }
+
+      /**
        * The user's turn and the placeholder go on together, before any network call.
        *
        * My first attempt at this created the placeholder after the quote, just before the paid

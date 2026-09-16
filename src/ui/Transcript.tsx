@@ -404,6 +404,24 @@ export function showsWait(turn: { job?: unknown; waiting?: boolean }): boolean {
   return turn.job !== undefined || turn.waiting === true
 }
 
+/**
+ * What the waiting row is called, which is not always "Generating".
+ *
+ * The turn now exists from the moment Enter is pressed, so it covers the price check as well as
+ * the generation — and during the price check nothing is being generated. Measured on the
+ * deployed page: an anonymous image request rendered "Generating · 11s" for a window that ended
+ * in "sign in to pay". A label that names work which never started is the same class of untruth
+ * as a progress bar with nothing behind it.
+ *
+ * Keyed on `spentUsd`, which is 0 until the quote lands and the spend is approved, so it cannot
+ * announce generation early. Exported and pure for the same reason as `showsWait`: the decision
+ * is the thing that was wrong, and a rendering test would obscure it.
+ */
+export function waitHeadline(turn: { resumed?: boolean; spentUsd: number }): string {
+  if (turn.resumed) return 'Still generating'
+  return turn.spentUsd > 0 ? 'Generating' : 'Checking price'
+}
+
 /** Roughly how long each kind takes, so a wait can be shown against something. */
 const TYPICAL_WAIT_S: Record<'image' | 'video' | 'music' | 'speech', number> = {
   video: 180,
@@ -449,7 +467,11 @@ function WaitingView({ turn }: { turn: Extract<Turn, { kind: 'media' }> }) {
       <p className="media-waiting">
         <LoaderIcon className="tool-glyph is-spinning" size={13} aria-hidden="true" />
         <span>
-          {turn.resumed ? 'Still generating' : 'Generating'} · {formatWait(seconds)}
+          {/* "Generating" is false before the call is paid for: at that point the outstanding
+              request is the price check, and nothing is being generated yet. Measured on the
+              deployed page, an anonymous image request showed "Generating · 11s" for a window
+              that ended in "sign in to pay" — a wait attributed to work that never started. */}
+          {waitHeadline(turn)} · {formatWait(seconds)}
           {/* Named while it is still normal, so a long wait is expected rather than alarming.
               Past that point the claim is dropped instead of repeated — insisting on "about
               3 min" at four minutes is worse than saying nothing. */}
@@ -470,13 +492,25 @@ function WaitingView({ turn }: { turn: Extract<Turn, { kind: 'media' }> }) {
             'This is taking longer than usual. It keeps running on the server — reopen this chat in a minute and it will appear.'
           : turn.resumed
             ? 'Picked this back up after the page reloaded — the job kept running, and you were not charged again.'
-            : /* A call still in flight has NO job id, so it cannot survive a reload — and telling
-                 someone they may close the tab would be false for exactly this window. The note
-                 says what is true of each state instead of one line for both: before the upstream
-                 answers there is nothing to come back to. */
+            : /* Three states, because the two claims in play — "you have paid" and "you may
+                 close the tab" — are independently true or false, and one sentence for all of
+                 them was wrong twice.
+
+                 A queued job may be left; a call in flight may not, because without a job id
+                 there is nothing to come back to. And neither may claim payment before there
+                 is any: measured on the deployed page, the pre-quote placeholder rendered
+                 "Paid and sent" while the request outstanding was the anonymous PRICE CHECK,
+                 which spends nothing and can end in "sign in to pay". Telling someone they
+                 paid when they have not is the worst of the three readings.
+
+                 `spentUsd > 0` rather than a flag: the price is patched on at the moment the
+                 quote lands AND the spend is approved, so it is the one value that cannot say
+                 "paid" early. */
               turn.job
               ? 'Already paid. You can keep chatting or close the tab; this carries on and will be here when you come back.'
-              : 'Paid and sent. Keep this tab open until it comes back.'}
+              : turn.spentUsd > 0
+                ? 'Paid and sent. Keep this tab open until it comes back.'
+                : 'Checking the price for this request.'}
       </p>
     </div>
   )

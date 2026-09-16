@@ -70,7 +70,14 @@ export async function connectWallet(): Promise<WalletAccount> {
     throw new Error('No wallet found. Install a browser wallet such as MetaMask or Rabby.')
   }
 
-  const accounts = (await provider.request({ method: 'eth_requestAccounts' })) as string[]
+  // Bounded for the same reason as the signature below: a popup that never renders leaves this
+  // await pending forever, and the Connect button spins with no way back.
+  const accounts = (await withTimeout(
+    provider.request({ method: 'eth_requestAccounts' }),
+    SIGNATURE_TIMEOUT_MS,
+    'The wallet did not respond to the connection request. Check for a pending wallet popup, ' +
+      'then try again.',
+  )) as string[]
   const address = accounts?.[0]
   if (typeof address !== 'string' || address === '') {
     throw new Error('The wallet returned no account.')
@@ -164,6 +171,42 @@ function randomNonce(): string {
   const bytes = new Uint8Array(32)
   crypto.getRandomValues(bytes)
   return `0x${[...bytes].map((b) => b.toString(16).padStart(2, '0')).join('')}`
+}
+
+/**
+ * How long a wallet prompt may go unanswered before it is treated as never having appeared.
+ *
+ * 90 seconds, not 15: reading an EIP-712 message is the point of typed-data signing, and a user
+ * who is checking the amount and the recipient is doing exactly what this design asks of them.
+ * The bound exists for the popup that never renders, not for the careful reader.
+ */
+const SIGNATURE_TIMEOUT_MS = 90_000
+
+/**
+ * Rejects with `message` if `p` has not settled within `ms`.
+ *
+ * The timer is always cleared, including on the happy path: a wallet call that resolves in two
+ * seconds would otherwise leave a 90-second timer alive per signature, and an agent run signs
+ * once per step.
+ *
+ * Deliberately does NOT cancel the underlying wallet request — there is no API to withdraw a
+ * pending EIP-1193 prompt. If the popup appears late and the user signs, that signature is
+ * simply unused, and an unused authorisation transfers nothing. Reporting a timeout while
+ * leaving a signable prompt open is the safe direction: the alternative is claiming failure and
+ * then having the call succeed anyway.
+ */
+async function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      p,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms)
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
 }
 
 /**
@@ -279,11 +322,33 @@ export async function signPayment(
     },
   }
 
-  const signature = (await provider.request({
-    method: 'eth_signTypedData_v4',
-    // Order matters and the data must be a string: some wallets reject an object here.
-    params: [account.address, JSON.stringify(typedData)],
-  })) as string
+  /**
+   * Bounded, because this was the most likely place the page hung.
+   *
+   * `provider.request` resolves when the user acts in the wallet's popup and rejects when they
+   * decline — but it does NEITHER if the popup never appears. That is a routine extension state
+   * (a suppressed popup, an extension mid-update, a wallet locked in another window), and with
+   * no bound the await simply never settled: the agent loop stayed inside `payForChat`, `busy`
+   * stayed true, and the page showed Stop and a spinner forever with no error and no dialog.
+   *
+   * Reported as "完全就跟死了一样", and it was: nothing in the UI could distinguish it from a
+   * crash. Nothing was charged — no signature means no authorisation — so the only damage was
+   * the silence, which is exactly what this replaces.
+   *
+   * 90 seconds. Long enough to find the popup, unlock the wallet and read the EIP-712 message
+   * (which is the whole point of typed-data signing and takes real reading), short enough that
+   * a dead popup does not look like a dead product.
+   */
+  const signature = (await withTimeout(
+    provider.request({
+      method: 'eth_signTypedData_v4',
+      // Order matters and the data must be a string: some wallets reject an object here.
+      params: [account.address, JSON.stringify(typedData)],
+    }),
+    SIGNATURE_TIMEOUT_MS,
+    'The wallet did not respond to the signature request. Check for a pending wallet popup, ' +
+      'then try again. Nothing was charged.',
+  )) as string
 
   if (typeof signature !== 'string' || !signature.startsWith('0x')) {
     throw new Error('The wallet returned no signature.')

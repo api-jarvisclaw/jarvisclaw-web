@@ -297,3 +297,68 @@ describe('inline media bytes never reach localStorage', () => {
     expect(store.size).toBe(1)
   })
 })
+
+/**
+ * `waiting` must not survive a page load.
+ *
+ * It marks a paid call that is in flight RIGHT NOW, and it deliberately carries no job id —
+ * there is nothing to poll, because the upstream has not answered. So unlike a queued video,
+ * this state cannot be resumed: the call died with the page.
+ *
+ * Persisting it would restore a turn stuck on a clock that no code will ever advance, which is
+ * the same permanent-looking failure the waiting indicator was added to remove — reintroduced
+ * one reload later. The stored turn must come back as a finished one so `MediaView` renders its
+ * real outcome instead of a spinner.
+ */
+describe('an in-flight generation is not persisted as still waiting', () => {
+  function inFlight(): Turn {
+    return {
+      kind: 'media',
+      id: 'w1',
+      media: 'image',
+      waiting: true,
+      prompt: 'a red cube',
+      model: 'openai/gpt-image-2',
+      spentUsd: 0.064,
+    }
+  }
+
+  it('drops `waiting` on the way to storage', () => {
+    const store = installStore()
+    saveConversations([
+      { id: 'c1', title: 'x', updatedAt: 1, turns: [inFlight()], history: [] },
+    ])
+    const raw = store.get('jarvisclaw.conversations.v1') ?? ''
+    expect(raw).not.toContain('waiting')
+  })
+
+  it('keeps everything else about the turn', () => {
+    // The strip must be surgical. Dropping the price or the prompt would lose the record of a
+    // charge that really happened, which is worse than the spinner.
+    const store = installStore()
+    saveConversations([
+      { id: 'c1', title: 'x', updatedAt: 1, turns: [inFlight()], history: [] },
+    ])
+    const raw = store.get('jarvisclaw.conversations.v1') ?? ''
+    expect(raw).toContain('openai/gpt-image-2')
+    expect(raw).toContain('0.064')
+    expect(raw).toContain('a red cube')
+  })
+
+  it('leaves a resumable queued job alone', () => {
+    // The control, and the reason the strip keys off `waiting` rather than "no media yet": a
+    // video's job id MUST persist, or a reload loses a paid job that is still running.
+    const store = installStore()
+    const queued: Turn = {
+      kind: 'media',
+      id: 'v1',
+      media: 'video',
+      job: { id: 'job-42', pollUrl: '/v1/videos/generations/job-42' },
+      prompt: 'a cube rotating',
+      model: 'bytedance/seedance-2.0-mini',
+      spentUsd: 0.4,
+    }
+    saveConversations([{ id: 'c2', title: 'y', updatedAt: 2, turns: [queued], history: [] }])
+    expect(store.get('jarvisclaw.conversations.v1') ?? '').toContain('job-42')
+  })
+})

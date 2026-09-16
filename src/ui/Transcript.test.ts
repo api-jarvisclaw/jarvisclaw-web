@@ -5,6 +5,7 @@ import {
   isPlumbing,
   partitionSteps,
   tailOf,
+  showsWait,
   TAIL_CHARS,
   type ToolStep,
 } from './Transcript'
@@ -172,5 +173,48 @@ describe('partitionSteps', () => {
       done('call_api', { spentUsd: 0.002 }),
     ])
     expect(shown.map((s) => s.spentUsd)).toEqual([0.001, 0.002])
+  })
+})
+
+/**
+ * Whether an unfinished media turn shows the waiting indicator.
+ *
+ * Reported as "在处理都没有一个类似状态条的东西" — a generation runs and the transcript shows
+ * nothing but the prompt. What made it invisible in review is that the waiting UI already
+ * existed and worked: `WaitingView` has a per-second clock and a progress bar, and video and
+ * music both reach it. The predicate below is the whole defect. It read `turn.job` alone, and a
+ * job id only exists for ASYNCHRONOUS media — an image or a speech clip returns its bytes from
+ * the same call, so it never had one and could not reach the indicator at all.
+ *
+ * Measured on the live site, sampling the DOM every 500ms through an image generation:
+ *
+ *     transcript rows (max):        1     <- the user's own prompt
+ *     rows that are NOT the prompt: 0
+ *     media-waiting boxes:          0
+ *     progressbar inside a turn:    0
+ *     progressbar anywhere on page: 1     <- the sidebar's spend meter, not feedback
+ *
+ * That last line is why this is a unit test on a predicate rather than a selector count: my
+ * first probe counted every [role=progressbar] on the page, found the sidebar's, and reported
+ * PASS on a run where the transcript was empty for a full minute.
+ */
+describe('showsWait', () => {
+  it('shows the wait for a synchronous generation, which has no job', () => {
+    // The case that was broken: images and speech. If this passes with `waiting` ignored, the
+    // indicator is unreachable for them however good WaitingView is.
+    expect(showsWait({ waiting: true })).toBe(true)
+  })
+
+  it('still shows the wait for a queued job', () => {
+    // The control. Extending the predicate must not cost the case that already worked — a
+    // resumed video has `waiting` cleared and only a job.
+    expect(showsWait({ job: { id: 'j1', pollUrl: '/v1/videos/generations/j1' } })).toBe(true)
+  })
+
+  it('shows nothing once the call has come back with neither', () => {
+    // A finished turn with no media is the "returned no media we could read" case, and it must
+    // stay that message rather than a spinner that never ends.
+    expect(showsWait({})).toBe(false)
+    expect(showsWait({ waiting: false })).toBe(false)
   })
 })

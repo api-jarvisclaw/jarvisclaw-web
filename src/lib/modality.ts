@@ -888,6 +888,54 @@ export async function challengeGeneration(
  * happen in response to the user's own click, and keeping the two apart is what lets the
  * price be shown and approved between them.
  */
+/**
+ * Encodes a quoted body as `multipart/form-data`, turning `data:` URLs back into files.
+ *
+ * Exported for its guard: the interesting property is that the image arrives as a FILE PART and
+ * not as a text field containing base64. The gateway looks for it in `MultipartForm.File["image"]`
+ * (relay/channel/openai/adaptor.go) and answers "image is required" when it is only a value — a
+ * failure that, like the one this function fixes, happens after the money is spent.
+ */
+export function toMultipart(body: Record<string, unknown>): FormData {
+  const form = new FormData()
+  for (const [key, value] of Object.entries(body)) {
+    if (value === undefined || value === null) continue
+    if (typeof value === 'string' && value.startsWith('data:')) {
+      const file = dataUrlToFile(value, key)
+      // A data: URL that will not parse is dropped rather than sent as a giant text field: the
+      // upstream would reject the request, and it would do so after the charge.
+      if (file) form.append(key, file, file.name)
+      continue
+    }
+    form.append(key, String(value))
+  }
+  return form
+}
+
+/** `data:image/png;base64,…` -> a File, or null when the URL is not one we can decode. */
+function dataUrlToFile(dataUrl: string, field: string): File | null {
+  const match = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(dataUrl)
+  if (!match) return null
+  const [, mime, isBase64, payload] = match
+  try {
+    let bytes: Uint8Array
+    if (isBase64) {
+      const binary = atob(payload)
+      bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    } else {
+      bytes = new TextEncoder().encode(decodeURIComponent(payload))
+    }
+    // The extension matters: the gateway picks the part's MIME type from the FILENAME
+    // (detectImageMimeType in the openai adaptor), so `blob` with no extension would be sent as
+    // the wrong type.
+    const ext = mime === 'image/jpeg' ? 'jpg' : mime === 'image/webp' ? 'webp' : 'png'
+    return new File([bytes as BlobPart], `${field}.${ext}`, { type: mime })
+  } catch {
+    return null
+  }
+}
+
 export async function generate(
   kind: GenerationKind,
   prompt: string,
@@ -906,10 +954,34 @@ export async function generate(
   const url = opts.url ?? `${opts.baseUrl ?? DEFAULT_BASE_URL}${spec.path}`
   const body = opts.body ?? buildBody(kind, prompt, opts.model ?? spec.defaultModel, opts.options)
 
+  /**
+   * An edit is sent as multipart/form-data. JSON is refused AFTER the payment.
+   *
+   * Reported as `Edit generation failed (400)` with the gateway relaying:
+   *
+   *     {"message":"Invalid multipart form","type":"bad_response_status_code"}
+   *
+   * I had concluded from the 402 that JSON was fine. It was not, and the quote could not have
+   * told me: /v1/images/edits prices a JSON body, an empty body, and four different field
+   * spellings identically — the price is issued before the body is read. The refusal comes from
+   * the upstream, which the blockrun channel hands our body to verbatim
+   * (`PassThroughBodyEnabled`), and it only happens on the PAID call. So the sequence was
+   * quote, approve, pay, then 400 — the failure shape this mode was supposed to prevent, and I
+   * built it in by trusting a price as evidence about a body.
+   *
+   * `body` is still the object the quote was issued for. Only the encoding changes, and the
+   * signature covers the URL and the amount rather than the bytes, so nothing about the payment
+   * is invalidated by this.
+   */
+  const form = spec.requiresSourceImage ? toMultipart(body) : null
+
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders(opts.cred) },
-    body: JSON.stringify(body),
+    // No Content-Type for multipart: the browser has to set it, because only it knows the
+    // boundary token it generated. Supplying one by hand produces a body the server cannot
+    // split — the same "Invalid multipart form" by a different route.
+    headers: form ? authHeaders(opts.cred) : { 'Content-Type': 'application/json', ...authHeaders(opts.cred) },
+    body: form ?? JSON.stringify(body),
     signal: opts.signal,
   })
 

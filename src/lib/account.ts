@@ -69,6 +69,36 @@ export function quotaToUsd(quota: number): number {
   return Number.isFinite(quota) ? quota / QUOTA_PER_USD : 0
 }
 
+/**
+ * Re-read the signed-in account's balance after money was spent.
+ *
+ * A key spends quota SERVER-SIDE: the gateway bills the account and the page is told nothing.
+ * The sidebar's "Spent" is a local counter, so it moves; the balance beside it is whatever
+ * `whoami` returned on mount and does not, which is why a paid call appeared to cost nothing
+ * until the user reloaded the page.
+ *
+ * Returns null when the balance could not be re-read, and callers keep the figure they already
+ * have. That is deliberate: a failed refresh is a network blip, and showing $0.0000 for one
+ * would be a worse lie than showing a slightly stale number. Nothing here decides whether a
+ * call may proceed — the spend limits do that locally — so a stale balance costs nothing but
+ * freshness.
+ */
+export async function refreshBalance(
+  account: Account,
+  opts: { baseUrl?: string; signal?: AbortSignal } = {},
+): Promise<Account | null> {
+  if (!sessionCheckAllowed()) return null
+  try {
+    const self = await platformCall<RawSelf>('/api/user/self', { ...opts, userId: account.id })
+    if (typeof self.quota !== 'number' && typeof self.quota !== 'string') return null
+    const quota = Number(self.quota)
+    if (!Number.isFinite(quota)) return null
+    return { ...account, quota, usedQuota: Number(self.used_quota ?? account.usedQuota) }
+  } catch {
+    return null
+  }
+}
+
 interface ApiEnvelope<T> {
   success?: boolean
   message?: string

@@ -21,7 +21,7 @@ import {
 } from './lib/gallery'
 import { putMedia, pruneMedia } from './lib/blobstore'
 import { DEFAULT_BASE_URL, FREE_MODEL, type ChatMessage, type Credential } from './lib/gateway'
-import type { Account } from './lib/account'
+import { refreshBalance, type Account } from './lib/account'
 import {
   awaitJob,
   challengeGeneration,
@@ -287,6 +287,38 @@ export function App({
   useEffect(() => {
     router.current = null
   }, [apiKey, wallet, baseUrl])
+
+  /**
+   * Re-read the account balance whenever this session spent money.
+   *
+   * A key is billed SERVER-SIDE, so nothing in the response says what the call cost the account.
+   * The sidebar's "Spent" is this page's own counter and moves immediately; the balance above it
+   * came from `whoami` on mount and did not, so a paid call looked free until the user reloaded —
+   * which is exactly how it was reported.
+   *
+   * Keyed on `spendVersion` rather than called from each payment site. There are three of them
+   * (chat signature, media generation, agent tool call) and they are the reason this bug existed:
+   * every one already bumps this counter for the sidebar, so hanging the refresh off the counter
+   * covers a fourth one written later without it having to remember. `spendVersion` starts at 0
+   * and is only ever incremented after a `record`, so the guard below is what stops this firing
+   * on mount, where `whoami` has just run.
+   *
+   * A wallet is deliberately NOT refreshed here: its balance is on-chain and this panel never
+   * showed one, so there is nothing to go stale.
+   */
+  useEffect(() => {
+    if (spendVersion === 0 || account === null) return
+    const ac = new AbortController()
+    void refreshBalance(account, { signal: ac.signal }).then((fresh) => {
+      // Null means the re-read failed — keep the figure already on screen rather than
+      // replacing a slightly stale number with a wrong one.
+      if (fresh !== null) setAccount(fresh)
+    })
+    return () => ac.abort()
+    // `account` is intentionally absent: including it would re-run this on the state update
+    // this effect itself performs, and poll the endpoint forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [spendVersion])
 
   useEffect(() => {
     const ac = new AbortController()

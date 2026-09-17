@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
+import { authHeaders } from './gateway'
 import { buildBody, encodeBody, GENERATIONS, modeForModel, toMultipart } from './modality'
 
 /**
@@ -320,5 +321,44 @@ describe('the options panel is bounded', () => {
     // `contain`, not `cover`: this is the picture being edited, and cropping the preview would
     // hide part of what the user is paying to change.
     expect(rule).toMatch(/object-fit:\s*contain/)
+  })
+})
+
+/**
+ * The credential must not change how the body is labelled.
+ *
+ * The third and last cause of the image-edit 400, and the subtlest. `authHeaders` included
+ * `'Content-Type': 'application/json'`, and `generate` spread it AFTER the encoder's headers — so
+ * a multipart body went out labelled as JSON. Measured against the live gateway with identical
+ * multipart bytes:
+ *
+ *     correct header       402  $0.028572   <- the real per-edit price
+ *     application/json     402  $0.010000   <- the gateway cannot read the body
+ *
+ * The wrong PRICE is what makes this diagnosable: unable to parse the form, the gateway fell back
+ * to a default. On the paid call the same failure read `invalid JSON request body`.
+ *
+ * And it was invisible anonymously: with no credential `authHeaders` returns nothing, so the quote
+ * was correctly labelled and only the PAID call broke. Every cheap signal said the fix worked.
+ */
+describe('the credential does not relabel the body', () => {
+  it('leaves a multipart request multipart', () => {
+    const encoded = encodeBody({ requiresSourceImage: true }, { prompt: 'x' })
+    const withKey = { ...encoded.headers, ...authHeaders({ apiKey: 'sk-abc' }) }
+    const withPayment = { ...encoded.headers, ...authHeaders({ payment: 'x402' }) }
+    // No content type at all: the browser must set it, because only it knows its boundary.
+    expect(withKey).not.toHaveProperty('Content-Type')
+    expect(withPayment).not.toHaveProperty('Content-Type')
+    // The credentials still arrive.
+    expect(withKey.Authorization).toBe('Bearer sk-abc')
+    expect(withPayment['X-PAYMENT']).toBe('x402')
+  })
+
+  it('still labels a JSON request as JSON', () => {
+    // The control. Removing the header from authHeaders must not leave the JSON modes unlabelled —
+    // that would break chat, image generation, video, music and speech all at once.
+    const encoded = encodeBody({}, { prompt: 'x' })
+    const merged = { ...encoded.headers, ...authHeaders({ apiKey: 'sk-abc' }) }
+    expect(merged['Content-Type']).toBe('application/json')
   })
 })

@@ -151,8 +151,28 @@ export async function listFreeModels(opts: RequestOptions = {}): Promise<string[
  * unauthenticated call must send no Authorization header at all rather than an empty
  * one, and this is the single place that decides it.
  */
+/**
+ * Credentials ONLY — no `Content-Type`.
+ *
+ * It used to include `'Content-Type': 'application/json'`, and that quietly broke the image-edit
+ * call. `generate` spread it over the encoder's headers, so for a `multipart/form-data` body the
+ * JSON type was put back on afterwards and the request went out mislabelled. Measured against the
+ * live gateway with the identical multipart bytes:
+ *
+ *     correct header       402  $0.028572   <- the real per-edit price
+ *     application/json     402  $0.010000   <- the gateway cannot read the body
+ *
+ * The wrong price is the tell: unable to parse the form, the gateway fell back to a default, and
+ * on the paid call the same failure surfaced as
+ * `invalid JSON request body (request id: …)`. Anonymously it looked fine because there is no
+ * credential, so this function never ran — which is exactly why the quote passed and only the
+ * PAID call failed.
+ *
+ * A function named for credentials must not decide how a body is encoded. The caller knows the
+ * body; this knows the credential. Every existing caller sends JSON and sets that header itself.
+ */
 export function authHeaders(cred: Credential): Record<string, string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const headers: Record<string, string> = {}
   if (cred.apiKey && cred.apiKey.trim() !== '') {
     headers.Authorization = `Bearer ${cred.apiKey.trim()}`
   }
@@ -246,7 +266,10 @@ export async function postJson<T>(
 ): Promise<T> {
   const res = await fetch((opts.baseUrl ?? DEFAULT_BASE_URL) + path, {
     method: 'POST',
-    headers: authHeaders(opts.cred ?? {}),
+    // The content type is stated HERE, by the code that chose JSON.stringify. authHeaders used
+    // to add it, which meant a function named for credentials decided a body's encoding — and it
+    // silently overrode multipart on the image-edit call.
+    headers: { 'Content-Type': 'application/json', ...authHeaders(opts.cred ?? {}) },
     body: JSON.stringify(payload),
     signal: opts.signal,
   })
@@ -363,7 +386,7 @@ export async function streamChat(
 ): Promise<ChatResult> {
   const res = await fetch((opts.baseUrl ?? DEFAULT_BASE_URL) + '/v1/chat/completions', {
     method: 'POST',
-    headers: authHeaders(opts.cred ?? {}),
+    headers: { 'Content-Type': 'application/json', ...authHeaders(opts.cred ?? {}) },
     signal: opts.signal,
     body: JSON.stringify({
       model: req.model ?? FREE_MODEL,

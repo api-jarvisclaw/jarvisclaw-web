@@ -14,7 +14,33 @@ describe('authHeaders', () => {
     // that makes the zero-config first run work at all.
     const headers = authHeaders({})
     expect(headers).not.toHaveProperty('Authorization')
-    expect(headers['Content-Type']).toBe('application/json')
+  })
+
+  it('sets no Content-Type, because it does not know the body', () => {
+    /**
+     * This assertion used to be its opposite — `expect(headers['Content-Type']).toBe(
+     * 'application/json')` — and it was encoding a defect.
+     *
+     * `generate` spreads these headers over its encoder's, so on a `multipart/form-data` body the
+     * JSON type was put back afterwards and the request went out mislabelled. Measured against the
+     * live gateway with identical multipart bytes:
+     *
+     *     correct header       402  $0.028572   <- the real per-edit price
+     *     application/json     402  $0.010000   <- the gateway cannot read the body
+     *
+     * The wrong price is the tell: unable to parse the form, the gateway fell back to a default,
+     * and on the paid call the same failure surfaced as `invalid JSON request body`. Anonymously it
+     * looked fine, because with no credential this function never ran — which is why the quote
+     * passed and only the PAID call failed.
+     */
+    expect(authHeaders({})).not.toHaveProperty('Content-Type')
+    expect(authHeaders({ apiKey: 'sk-abc' })).not.toHaveProperty('Content-Type')
+    expect(authHeaders({ payment: 'x402-header' })).not.toHaveProperty('Content-Type')
+  })
+
+  it('still carries the payment header', () => {
+    // The control: stripping the content type must not strip the credentials this exists for.
+    expect(authHeaders({ payment: 'abc' })['X-PAYMENT']).toBe('abc')
   })
 
   it('treats a blank or whitespace key as no key', () => {

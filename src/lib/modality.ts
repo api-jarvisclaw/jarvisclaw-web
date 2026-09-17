@@ -1011,6 +1011,9 @@ export async function generate(
 
   const res = await fetch(url, {
     method: 'POST',
+    // authHeaders contributes credentials only, so the encoder's content type survives. It used
+    // to add 'application/json' and, being spread second, put that back on a multipart body —
+    // the request went out mislabelled and the gateway answered 'invalid JSON request body'.
     headers: { ...encoded.headers, ...authHeaders(opts.cred) },
     body: encoded.body,
     signal: opts.signal,

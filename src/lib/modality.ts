@@ -834,10 +834,23 @@ export async function challengeGeneration(
   // up paying for something the gateway never priced.
   const body = buildBody(kind, prompt, opts.model ?? spec.defaultModel, opts.options)
 
+  /**
+   * Encoded by the SAME function the paid call uses.
+   *
+   * My first attempt at the multipart fix changed only `generate` and left this call on JSON. The
+   * live wire read `content-type: application/json` and the criterion still failed — because the
+   * quote is a separate fetch, and a fix applied to one of two call sites is not applied.
+   *
+   * Sharing `encodeBody` is not tidiness: the quote and the paid call must be the same request in
+   * every respect but the credential, or the price is issued for something other than what gets
+   * sent. Two literal fetch bodies is exactly how they drift.
+   */
+  const encoded = encodeBody(spec, body)
+
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    headers: encoded.headers,
+    body: encoded.body,
     signal: opts.signal,
   })
 
@@ -888,6 +901,27 @@ export async function challengeGeneration(
  * happen in response to the user's own click, and keeping the two apart is what lets the
  * price be shown and approved between them.
  */
+/**
+ * The single place that decides how a generation body goes on the wire.
+ *
+ * Used by BOTH `challengeGeneration` and `generate`, and that is the point rather than a
+ * convenience. The quote and the paid call must be the same request apart from the credential: a
+ * price issued for a JSON body and then spent on a multipart one is a signature paying for
+ * something the gateway never priced. My first multipart fix changed only `generate`, and the live
+ * wire still read `application/json` — a fix applied to one of two call sites is not applied.
+ *
+ * Note the empty header object for multipart. The browser MUST set that Content-Type, because only
+ * it knows the boundary token it generated; writing the header by hand produces a body the server
+ * cannot split, which is the same "Invalid multipart form" by another route.
+ */
+export function encodeBody(
+  spec: { requiresSourceImage?: boolean },
+  body: Record<string, unknown>,
+): { headers: Record<string, string>; body: BodyInit } {
+  if (spec.requiresSourceImage) return { headers: {}, body: toMultipart(body) }
+  return { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+}
+
 /**
  * Encodes a quoted body as `multipart/form-data`, turning `data:` URLs back into files.
  *
@@ -973,15 +1007,12 @@ export async function generate(
    * signature covers the URL and the amount rather than the bytes, so nothing about the payment
    * is invalidated by this.
    */
-  const form = spec.requiresSourceImage ? toMultipart(body) : null
+  const encoded = encodeBody(spec, body)
 
   const res = await fetch(url, {
     method: 'POST',
-    // No Content-Type for multipart: the browser has to set it, because only it knows the
-    // boundary token it generated. Supplying one by hand produces a body the server cannot
-    // split — the same "Invalid multipart form" by a different route.
-    headers: form ? authHeaders(opts.cred) : { 'Content-Type': 'application/json', ...authHeaders(opts.cred) },
-    body: form ?? JSON.stringify(body),
+    headers: { ...encoded.headers, ...authHeaders(opts.cred) },
+    body: encoded.body,
     signal: opts.signal,
   })
 

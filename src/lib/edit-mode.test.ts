@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
-import { buildBody, GENERATIONS, modeForModel, toMultipart } from './modality'
+import { buildBody, encodeBody, GENERATIONS, modeForModel, toMultipart } from './modality'
 
 /**
  * Image editing: the mode whose models I wrongly reported as unservable.
@@ -237,30 +237,43 @@ describe('an edit is encoded the way the upstream can read', () => {
   it('encodes only the modes that need it', () => {
     // Chat, image generation, video, music and speech all take JSON today. Switching them to
     // multipart would break every one of them, so the choice is keyed on the spec flag.
-    const src = stripComments(
-      readFileSync(new URL('./modality.ts', import.meta.url), 'utf8'),
+    expect(encodeBody({ requiresSourceImage: true }, { a: 1 }).headers).toEqual({})
+    expect(encodeBody({}, { a: 1 }).headers).toEqual({ 'Content-Type': 'application/json' })
+    expect(typeof encodeBody({}, { a: 1 }).body).toBe('string')
+    expect(encodeBody({ requiresSourceImage: true }, { a: 1 }).body instanceof FormData).toBe(true)
+  })
+
+  it('encodes the QUOTE the same way as the paid call', () => {
+    /**
+     * Both fetches, not one. My first attempt changed only `generate`; the live wire still read
+     * `content-type: application/json` because the quote is a separate fetch. A price issued for
+     * a JSON body and spent on a multipart one is a signature paying for a request the gateway
+     * never priced — so the two must go through one encoder.
+     */
+    const src = stripComments(readFileSync(new URL('./modality.ts', import.meta.url), 'utf8'))
+    const uses = src.match(/encodeBody\(spec, body\)/g) ?? []
+    expect(uses.length, 'both challengeGeneration and generate must encode via encodeBody')
+      .toBeGreaterThanOrEqual(2)
+    // And neither may hand-roll a JSON body beside it, which is how they drifted.
+    // Sliced to challengeGeneration ALONE. My first version ran to extractMedia, which swept in
+    // encodeBody's own definition — where that header legitimately appears — so the guard failed
+    // on correct code.
+    const qs = src.indexOf('export async function challengeGeneration')
+    const qe = src.indexOf('\nexport ', qs + 10)
+    const quote = src.slice(qs, qe)
+    expect(quote).toContain('encodeBody(spec, body)')
+    expect(quote, 'the quote must not hand-roll its own JSON body').not.toContain(
+      "'Content-Type': 'application/json'",
     )
-    expect(src).toContain('spec.requiresSourceImage ? toMultipart(body) : null')
   })
 
   it('lets the browser set the multipart Content-Type', () => {
     // Only the browser knows the boundary token it generated. A hand-written header yields a body
-    // the server cannot split — the same "Invalid multipart form" by another route.
-    /**
-     * Sliced at the `headers:` line rather than by a character count from the fetch call.
-     *
-     * My first version took 600 characters after `await fetch(url, {` and failed on correct code —
-     * the header line sits further in. A fixed-width window is the same self-invalidating guard
-     * this repo has hit before: it fails on a correct file and then gets loosened until it checks
-     * nothing.
-     */
-    const src = stripComments(readFileSync(new URL('./modality.ts', import.meta.url), 'utf8'))
-    const i = src.indexOf('headers: form ?')
-    expect(i, 'the fetch must choose its headers on the multipart flag').toBeGreaterThan(-1)
-    const line = src.slice(i, src.indexOf('\n', i))
-    expect(line).toContain('authHeaders(opts.cred)')
-    // The browser must set it, because only the browser knows its own boundary token.
-    expect(line).not.toContain('multipart/form-data')
+    // the server cannot split — the same "Invalid multipart form" by another route. So the
+    // multipart branch must contribute NO content-type at all.
+    const headers = encodeBody({ requiresSourceImage: true }, { a: 1 }).headers
+    expect(Object.keys(headers)).toEqual([])
+    expect(JSON.stringify(headers)).not.toContain('multipart')
   })
 })
 
@@ -268,9 +281,9 @@ describe('an edit is encoded the way the upstream can read', () => {
  * The options panel cannot be resized by its own contents.
  *
  * Reported as "页面比例不协调" with a screenshot: the panel filled the viewport and pushed its own
- * Size and Count rows off the edge. The panel had `min-width` and no maximum, so its width was
- * whatever its widest child asked for — and the new thumbnail was an <img> with no dimensions,
- * which contributes its INTRINSIC size. A 2240px screenshot therefore set the panel's width.
+ * Size and Count rows off the edge. It had `min-width` and no maximum, so its width was whatever
+ * its widest child asked for — and the new thumbnail was an <img> with no dimensions, which
+ * contributes its INTRINSIC size. A 2240px screenshot therefore set the panel's width.
  */
 describe('the options panel is bounded', () => {
   const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')

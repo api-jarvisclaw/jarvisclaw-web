@@ -97,14 +97,25 @@ export const GENERATIONS: Record<GenerationKind, GenerationSpec> = {
   /**
    * Editing an image you supply, rather than making one from nothing.
    *
-   * Default is `-plus` at $0.028572 rather than `-edit` at $0.045 or `-max` at $0.075: the
-   * cheapest of the three is the kinder default for someone trying the feature, and the picker
-   * reaches the others. Same reasoning as the video default.
+   * `openai/gpt-image-2`, and the default was `ali/qwen-image-edit-plus` because I chose it from
+   * a PRICE. Our own table quotes $0.028572 for that name, so /v1/images/edits answered 402 and
+   * I read that as "servable". Measured by the bytes instead — a keyed call, checking what comes
+   * back — of the eight candidates only TWO produce an edit:
+   *
+   *     openai/gpt-image-2        EDITS   png 450458B
+   *     openai/gpt-image-1        EDITS   png 971226B
+   *     google/nano-banana{,-2,-pro}   404  no such upstream route
+   *     ali/qwen-image-edit{,-plus,-max} 400  and upstream: "does not support image editing",
+   *                                           "Unknown image model" even on generations
+   *
+   * All eight quoted a price. Six of them cannot edit. That is the whole lesson: a 402 from this
+   * gateway is our own price table talking, and it says nothing about whether an upstream can
+   * serve the call. See MODEL NOTES — the same trap, one level deeper than when it was written.
    */
   edit: {
     kind: 'edit',
     path: '/v1/images/edits',
-    defaultModel: 'ali/qwen-image-edit-plus',
+    defaultModel: 'openai/gpt-image-2',
     label: 'Edit',
     unit: 'edit',
     promptField: 'prompt',
@@ -695,20 +706,24 @@ export function buildBody(
     if (options.size) body.size = options.size
     if (Number.isInteger(options.n) && (options.n as number) > 0) body.n = options.n
     /**
-     * `image`, spelled the way OUR OWN contract requires it.
+     * `images: [{ image_url: '<data URI>' }]` — measured against a call that returned an image.
      *
-     * controller/openapi.go declares `image` (binary) and `prompt` as the required fields of
-     * /v1/images/edits, and the ImageRequest DTO has an `image` field. That is the authority
-     * used here, because the live endpoint offers no way to tell: measured, it returns the same
-     * 402 for `image`, `images`, `image_url`, a raw base64 string, and for no image at all. A
-     * quote that cannot distinguish a complete request from an empty one cannot be used to pick
-     * a field name — reading the price back would just have confirmed whichever guess I made.
+     * I got this wrong twice by consulting the wrong authority. First I read our own
+     * `controller/openapi.go`, which documents `image` as a binary multipart field, and shipped
+     * three PRs building a multipart body. Then I trusted the 402, which prices `image`,
+     * `images`, `image_url`, raw base64 and no image at all identically — the quote is issued
+     * before the body is read, so it cannot discriminate.
      *
-     * Sent as a data: URL. The endpoint also accepts multipart, but a signed payment is issued
-     * for a URL and an amount rather than for a body, so a JSON body keeps one code path for
-     * quote and send instead of two that could drift apart.
+     * The only thing that could settle it was a call that produces bytes. Driving our own
+     * gateway with an API key, the errors are specific and the shapes rank:
+     *
+     *     { image: '<data URI>' }                    400  Invalid multipart form
+     *     { images: [{ image_url: { url } }] }       400  expected an image URL, got an object
+     *     { images: [{ image_url: '<data URI>' }] }  200  450 KB of real PNG
+     *
+     * JSON, not multipart. A `data:` URI string, not a nested object, and not a bare `image`.
      */
-    if (options.sourceImage) body.image = options.sourceImage
+    if (options.sourceImage) body.images = [{ image_url: options.sourceImage }]
     if (options.mask) body.mask = options.mask
   }
 
@@ -905,70 +920,24 @@ export async function challengeGeneration(
  * The single place that decides how a generation body goes on the wire.
  *
  * Used by BOTH `challengeGeneration` and `generate`, and that is the point rather than a
- * convenience. The quote and the paid call must be the same request apart from the credential: a
- * price issued for a JSON body and then spent on a multipart one is a signature paying for
- * something the gateway never priced. My first multipart fix changed only `generate`, and the live
- * wire still read `application/json` — a fix applied to one of two call sites is not applied.
+ * convenience: the quote and the paid call must be the same request apart from the credential. A
+ * price issued for one body and spent on another is a signature paying for something the gateway
+ * never priced. An earlier fix changed only `generate`, and the live wire still disagreed with it
+ * — a fix applied to one of two call sites is not applied.
  *
- * Note the empty header object for multipart. The browser MUST set that Content-Type, because only
- * it knows the boundary token it generated; writing the header by hand produces a body the server
- * cannot split, which is the same "Invalid multipart form" by another route.
+ * Every endpoint takes JSON, INCLUDING the image edit. I had this as a multipart branch for three
+ * PRs, on the strength of our own openapi.go documenting a binary `image` field. The call that
+ * actually returns bytes takes `images: [{ image_url: '<data URI>' }]` as JSON; multipart answers
+ * 400 "Invalid multipart form". The function is kept rather than inlined because the property it
+ * guarantees — one encoder for both fetches — is what broke before.
  */
 export function encodeBody(
-  spec: { requiresSourceImage?: boolean },
+  _spec: { requiresSourceImage?: boolean },
   body: Record<string, unknown>,
 ): { headers: Record<string, string>; body: BodyInit } {
-  if (spec.requiresSourceImage) return { headers: {}, body: toMultipart(body) }
   return { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
 }
 
-/**
- * Encodes a quoted body as `multipart/form-data`, turning `data:` URLs back into files.
- *
- * Exported for its guard: the interesting property is that the image arrives as a FILE PART and
- * not as a text field containing base64. The gateway looks for it in `MultipartForm.File["image"]`
- * (relay/channel/openai/adaptor.go) and answers "image is required" when it is only a value — a
- * failure that, like the one this function fixes, happens after the money is spent.
- */
-export function toMultipart(body: Record<string, unknown>): FormData {
-  const form = new FormData()
-  for (const [key, value] of Object.entries(body)) {
-    if (value === undefined || value === null) continue
-    if (typeof value === 'string' && value.startsWith('data:')) {
-      const file = dataUrlToFile(value, key)
-      // A data: URL that will not parse is dropped rather than sent as a giant text field: the
-      // upstream would reject the request, and it would do so after the charge.
-      if (file) form.append(key, file, file.name)
-      continue
-    }
-    form.append(key, String(value))
-  }
-  return form
-}
-
-/** `data:image/png;base64,…` -> a File, or null when the URL is not one we can decode. */
-function dataUrlToFile(dataUrl: string, field: string): File | null {
-  const match = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(dataUrl)
-  if (!match) return null
-  const [, mime, isBase64, payload] = match
-  try {
-    let bytes: Uint8Array
-    if (isBase64) {
-      const binary = atob(payload)
-      bytes = new Uint8Array(binary.length)
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-    } else {
-      bytes = new TextEncoder().encode(decodeURIComponent(payload))
-    }
-    // The extension matters: the gateway picks the part's MIME type from the FILENAME
-    // (detectImageMimeType in the openai adaptor), so `blob` with no extension would be sent as
-    // the wrong type.
-    const ext = mime === 'image/jpeg' ? 'jpg' : mime === 'image/webp' ? 'webp' : 'png'
-    return new File([bytes as BlobPart], `${field}.${ext}`, { type: mime })
-  } catch {
-    return null
-  }
-}
 
 export async function generate(
   kind: GenerationKind,

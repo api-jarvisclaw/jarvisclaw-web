@@ -5,6 +5,7 @@ import {
   KEYS_URL,
   listKeys,
   quotaToUsd,
+  refreshBalance,
   revealKey,
   SIGN_IN_URL,
   SIGN_UP_URL,
@@ -296,6 +297,84 @@ describe('quotaToUsd', () => {
     // "$NaN" in a balance field is worse than "$0.0000".
     expect(quotaToUsd(Number.NaN)).toBe(0)
     expect(quotaToUsd(Number.POSITIVE_INFINITY)).toBe(0)
+  })
+})
+
+describe('refreshBalance', () => {
+  const SIGNED_IN = {
+    id: 7,
+    username: 'ada',
+    displayName: 'Ada L',
+    quota: 750_000,
+    usedQuota: 250_000,
+  }
+
+  it('returns the new quota after the account was billed', async () => {
+    // The reported bug: a key is billed server-side, so the page is told nothing about what the
+    // call cost and the balance beside "Spent" stayed at its mount-time value until a reload.
+    const fresh = await refreshBalance(SIGNED_IN)
+    expect(fresh).not.toBeNull()
+    expect(fresh?.quota).toBe(500_000)
+    expect(fresh?.usedQuota).toBe(500_000)
+  })
+
+  it('keeps the identity fields it was given', async () => {
+    // /api/user/self is asked for a balance, not an identity. Rebuilding the whole account from
+    // it would blank the display name on any response that omits it, so the panel would show
+    // "user 7" the first time someone spent money.
+    stub(200, { success: true, data: { quota: 1_000 } })
+    const fresh = await refreshBalance(SIGNED_IN)
+    expect(fresh).toMatchObject({ id: 7, username: 'ada', displayName: 'Ada L', quota: 1_000 })
+  })
+
+  it('sends the account id the caller already knows', async () => {
+    // Unlike whoami this needs no /api/user/session round trip — the id is in hand. It must
+    // still carry the New-Api-User header, which UserAuth compares against the session.
+    const spy = stub(200, { success: true, data: { quota: 1_000 } })
+    await refreshBalance(SIGNED_IN)
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(String(spy.mock.calls[0]?.[0])).toContain('/api/user/self')
+    const headers = spy.mock.calls[0]?.[1]?.headers as Record<string, string> | undefined
+    expect(headers?.['New-Api-User']).toBe('7')
+  })
+
+  it('returns null when the re-read fails, so the caller keeps the old figure', async () => {
+    // The load-bearing case. A network blip must not repaint the balance as $0.0000: replacing a
+    // slightly stale number with a wrong one is the worse of the two failures, and this is the
+    // only thing standing between them.
+    stub(500, { success: false, message: 'upstream' })
+    await expect(refreshBalance(SIGNED_IN)).resolves.toBeNull()
+  })
+
+  it('returns null when the response carries no quota at all', async () => {
+    // A 200 with success:true and no quota field would otherwise become Number(undefined) = NaN,
+    // and quotaToUsd renders NaN as $0.0000 — a zero balance indistinguishable from a real one.
+    stub(200, { success: true, data: { id: 7, username: 'ada' } })
+    await expect(refreshBalance(SIGNED_IN)).resolves.toBeNull()
+  })
+
+  it('returns null for a quota that is not a finite number', async () => {
+    stub(200, { success: true, data: { quota: 'not-a-number' } })
+    await expect(refreshBalance(SIGNED_IN)).resolves.toBeNull()
+  })
+
+  it('accepts a numeric string, which the platform sometimes sends', async () => {
+    stub(200, { success: true, data: { quota: '250000' } })
+    await expect(refreshBalance(SIGNED_IN)).resolves.toMatchObject({ quota: 250_000 })
+  })
+
+  it('refuses to make a credentialed request from a foreign origin', async () => {
+    // Same guard as whoami: the gateway rejects credentialed requests from origins it does not
+    // whitelist, and the CORS failure is not catchable. Better to skip the refresh than to log
+    // one on every paid call.
+    stubOrigin('https://example.com')
+    const spy = stub(200, { success: true, data: { quota: 1_000 } })
+    await expect(refreshBalance(SIGNED_IN)).resolves.toBeNull()
+    expect(spy).not.toHaveBeenCalled()
+  })
+
+  beforeEach(() => {
+    stub(200, { success: true, data: { id: 7, quota: 500_000, used_quota: 500_000 } })
   })
 })
 

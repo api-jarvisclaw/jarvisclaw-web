@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
-import { buildBody, GENERATIONS, modeForModel } from './modality'
+import { buildBody, GENERATIONS, modeForModel, toMultipart } from './modality'
 
 /**
  * Image editing: the mode whose models I wrongly reported as unservable.
@@ -170,5 +170,142 @@ describe('the source-image control refuses what it cannot send', () => {
       readFileSync(new URL('../ui/GenerationOptions.tsx', import.meta.url), 'utf8'),
     )
     expect(opts).toContain('reader.onerror')
+  })
+})
+
+/**
+ * The paid call is multipart, and the image is a FILE part.
+ *
+ * Reported as `Edit generation failed (400)`, with the gateway relaying the upstream's words:
+ *
+ *     {"message":"Invalid multipart form","type":"bad_response_status_code"}
+ *
+ * I had concluded from the 402 that a JSON body was fine. The quote could not have told me: this
+ * endpoint prices a JSON body, an empty body, and four field spellings identically, because the
+ * price is issued before the body is read. The refusal comes from the upstream — the blockrun
+ * channel forwards our body verbatim (`PassThroughBodyEnabled`) — and only on the PAID call.
+ *
+ * So the sequence was quote, approve, pay, 400. That is the exact failure this mode was built to
+ * prevent, and I introduced it by treating a price as evidence about a body. These tests exist
+ * because nothing cheaper can catch it: every earlier signal was a 402.
+ */
+describe('an edit is encoded the way the upstream can read', () => {
+  it('sends the image as a file part, not a base64 text field', () => {
+    // The gateway reads MultipartForm.File["image"] and answers "image is required" when the
+    // field is only a value — another after-the-charge failure.
+    const form = toMultipart({
+      model: 'ali/qwen-image-edit-plus',
+      prompt: 'make it blue',
+      image: 'data:image/png;base64,iVBORw0KGgo=',
+    })
+    const image = form.get('image')
+    expect(image, 'the image must be present').not.toBeNull()
+    expect(image instanceof File, 'the image must be a File, not a string').toBe(true)
+    expect((image as File).type).toBe('image/png')
+    // The gateway derives the part's MIME type from the FILENAME, so an extensionless name is
+    // sent as the wrong type.
+    expect((image as File).name).toMatch(/\.png$/)
+  })
+
+  it('keeps the other quoted fields, so the paid body matches the priced one', () => {
+    const form = toMultipart({
+      model: 'ali/qwen-image-edit-plus',
+      prompt: 'make it blue',
+      size: '1024x1024',
+      n: 1,
+      image: 'data:image/png;base64,iVBORw0KGgo=',
+    })
+    expect(form.get('model')).toBe('ali/qwen-image-edit-plus')
+    expect(form.get('prompt')).toBe('make it blue')
+    expect(form.get('size')).toBe('1024x1024')
+    expect(form.get('n')).toBe('1')
+  })
+
+  it('picks the extension from the mime type', () => {
+    const jpeg = toMultipart({ image: 'data:image/jpeg;base64,/9j/4AA=' }).get('image') as File
+    expect(jpeg.name).toMatch(/\.jpg$/)
+    expect(jpeg.type).toBe('image/jpeg')
+  })
+
+  it('drops an undecodable data URL rather than sending it as text', () => {
+    // A giant base64 string in a text field would be refused upstream — after the charge.
+    const form = toMultipart({ prompt: 'x', image: 'data:image/png;base64,%%%not-base64%%%' })
+    expect(form.get('prompt')).toBe('x')
+    expect(form.get('image')).toBeNull()
+  })
+
+  it('encodes only the modes that need it', () => {
+    // Chat, image generation, video, music and speech all take JSON today. Switching them to
+    // multipart would break every one of them, so the choice is keyed on the spec flag.
+    const src = stripComments(
+      readFileSync(new URL('./modality.ts', import.meta.url), 'utf8'),
+    )
+    expect(src).toContain('spec.requiresSourceImage ? toMultipart(body) : null')
+  })
+
+  it('lets the browser set the multipart Content-Type', () => {
+    // Only the browser knows the boundary token it generated. A hand-written header yields a body
+    // the server cannot split — the same "Invalid multipart form" by another route.
+    /**
+     * Sliced at the `headers:` line rather than by a character count from the fetch call.
+     *
+     * My first version took 600 characters after `await fetch(url, {` and failed on correct code —
+     * the header line sits further in. A fixed-width window is the same self-invalidating guard
+     * this repo has hit before: it fails on a correct file and then gets loosened until it checks
+     * nothing.
+     */
+    const src = stripComments(readFileSync(new URL('./modality.ts', import.meta.url), 'utf8'))
+    const i = src.indexOf('headers: form ?')
+    expect(i, 'the fetch must choose its headers on the multipart flag').toBeGreaterThan(-1)
+    const line = src.slice(i, src.indexOf('\n', i))
+    expect(line).toContain('authHeaders(opts.cred)')
+    // The browser must set it, because only the browser knows its own boundary token.
+    expect(line).not.toContain('multipart/form-data')
+  })
+})
+
+/**
+ * The options panel cannot be resized by its own contents.
+ *
+ * Reported as "页面比例不协调" with a screenshot: the panel filled the viewport and pushed its own
+ * Size and Count rows off the edge. The panel had `min-width` and no maximum, so its width was
+ * whatever its widest child asked for — and the new thumbnail was an <img> with no dimensions,
+ * which contributes its INTRINSIC size. A 2240px screenshot therefore set the panel's width.
+ */
+describe('the options panel is bounded', () => {
+  const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
+
+  function block(selector: string): string {
+    const i = css.indexOf(selector)
+    expect(i, `${selector} must exist`).toBeGreaterThan(-1)
+    const open = css.indexOf('{', i)
+    const close = css.indexOf('}', open)
+    // Comments stripped: a guard here once passed on the prose explaining the value it forbade.
+    return css.slice(open, close).replace(/\/\*[\s\S]*?\*\//g, '')
+  }
+
+  it('caps the panel in both axes', () => {
+    const rule = block('.genopts-menu {')
+    expect(rule).toMatch(/max-width:/)
+    expect(rule).toMatch(/max-height:/)
+    // A cap that exceeds the viewport is not a cap. min() keeps a narrow phone from scrolling
+    // sideways instead.
+    expect(rule).toMatch(/min\(/)
+  })
+
+  it('bounds the height with a scroll, not just a number', () => {
+    // overflow-y: auto without a height bound does nothing — an unconstrained flex/grid child
+    // defaults to min-height:auto and simply grows.
+    const rule = block('.genopts-menu {')
+    expect(rule).toMatch(/overflow-y:\s*auto/)
+  })
+
+  it('gives the thumbnail its own size so it cannot drive the layout', () => {
+    const rule = block('.genopts-thumb {')
+    expect(rule).toMatch(/max-width:/)
+    expect(rule).toMatch(/max-height:/)
+    // `contain`, not `cover`: this is the picture being edited, and cropping the preview would
+    // hide part of what the user is paying to change.
+    expect(rule).toMatch(/object-fit:\s*contain/)
   })
 })

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import { authHeaders } from './gateway'
-import { buildBody, encodeBody, GENERATIONS, modeForModel, toMultipart } from './modality'
+import { buildBody, encodeBody, GENERATIONS, modeForModel } from './modality'
 
 /**
  * Image editing: the mode whose models I wrongly reported as unservable.
@@ -44,12 +44,13 @@ describe('the edit endpoint is wired to the right place', () => {
     expect(GENERATIONS.edit.path).not.toBe(GENERATIONS.image.path)
   })
 
-  it('defaults to a model measured at a real price on that endpoint', () => {
-    // One of the three that quoted a genuine per-image price. Naming a model here without having
-    // seen it priced is how the earlier defaults in this file went wrong.
-    expect(['ali/qwen-image-edit', 'ali/qwen-image-edit-plus', 'ali/qwen-image-edit-max']).toContain(
-      GENERATIONS.edit.defaultModel,
-    )
+  it('defaults to a model measured to RETURN AN EDIT, not one with a price', () => {
+    /**
+     * This test used to accept any of the three qwen-edit names, because they quoted real
+     * per-image prices. All three answer 400 upstream — 'does not support image editing', and
+     * 'Unknown image model' even on the generation endpoint. The price was our own table.
+     */
+    expect(['openai/gpt-image-2', 'openai/gpt-image-1']).toContain(GENERATIONS.edit.defaultModel)
   })
 
   it('declares that it cannot run without a source image', () => {
@@ -62,20 +63,18 @@ describe('the edit endpoint is wired to the right place', () => {
 })
 
 describe('the body carries the image under the name our contract documents', () => {
-  it('sends `image`', () => {
-    // controller/openapi.go declares `image` (binary) and `prompt` as required. That is the
-    // authority, because the live 402 cannot distinguish the spellings — it prices all four
-    // identically, and with no image at all. Reading the price back would only have confirmed
-    // whichever guess was made.
-    const body = buildBody('edit', 'make it blue', 'ali/qwen-image-edit-plus', {
+  it('sends the image under images[].image_url', () => {
+    // Was `expect(body).toMatchObject({ image: … })`, taken from our own openapi.go. The call
+    // that returns bytes takes `images: [{ image_url: '<data URI>' }]`.
+    const body = buildBody('edit', 'make it blue', 'openai/gpt-image-2', {
       sourceImage: 'data:image/png;base64,AAAA',
       size: '1024x1024',
       n: 1,
     })
     expect(body).toMatchObject({
-      model: 'ali/qwen-image-edit-plus',
+      model: 'openai/gpt-image-2',
       prompt: 'make it blue',
-      image: 'data:image/png;base64,AAAA',
+      images: [{ image_url: 'data:image/png;base64,AAAA' }],
     })
   })
 
@@ -175,117 +174,99 @@ describe('the source-image control refuses what it cannot send', () => {
 })
 
 /**
- * The paid call is multipart, and the image is a FILE part.
+ * The body shape, established by a call that returned image bytes.
  *
- * Reported as `Edit generation failed (400)`, with the gateway relaying the upstream's words:
+ * I got this wrong twice, and both times by consulting something other than the product.
  *
- *     {"message":"Invalid multipart form","type":"bad_response_status_code"}
+ *   1. Our own `controller/openapi.go` documents `image` as a binary multipart field, so three
+ *      PRs went into building a multipart body. The upstream answers 400 to it.
+ *   2. The 402 quote, which prices `image`, `images`, `image_url`, raw base64 and NO image
+ *      identically — the price is issued before the body is read.
  *
- * I had concluded from the 402 that a JSON body was fine. The quote could not have told me: this
- * endpoint prices a JSON body, an empty body, and four field spellings identically, because the
- * price is issued before the body is read. The refusal comes from the upstream — the blockrun
- * channel forwards our body verbatim (`PassThroughBodyEnabled`) — and only on the PAID call.
+ * Driving our own gateway with an API key finally ranked the shapes, because the errors are
+ * specific and the success is unambiguous:
  *
- * So the sequence was quote, approve, pay, 400. That is the exact failure this mode was built to
- * prevent, and I introduced it by treating a price as evidence about a body. These tests exist
- * because nothing cheaper can catch it: every earlier signal was a 402.
+ *     { image: '<data URI>' }                    400  Invalid multipart form
+ *     { images: [{ image_url: { url } }] }       400  expected an image URL, got an object
+ *     { images: [{ image_url: '<data URI>' }] }  200  450 KB of real PNG, differing from source
  */
-describe('an edit is encoded the way the upstream can read', () => {
-  it('sends the image as a file part, not a base64 text field', () => {
-    // The gateway reads MultipartForm.File["image"] and answers "image is required" when the
-    // field is only a value — another after-the-charge failure.
-    const form = toMultipart({
-      model: 'ali/qwen-image-edit-plus',
-      prompt: 'make it blue',
-      image: 'data:image/png;base64,iVBORw0KGgo=',
+describe('the edit body carries the image the way the upstream reads it', () => {
+  it('sends images[].image_url as a data URI string', () => {
+    const body = buildBody('edit', 'make it green', 'openai/gpt-image-2', {
+      sourceImage: 'data:image/png;base64,AAAA',
     })
-    const image = form.get('image')
-    expect(image, 'the image must be present').not.toBeNull()
-    expect(image instanceof File, 'the image must be a File, not a string').toBe(true)
-    expect((image as File).type).toBe('image/png')
-    // The gateway derives the part's MIME type from the FILENAME, so an extensionless name is
-    // sent as the wrong type.
-    expect((image as File).name).toMatch(/\.png$/)
+    expect(body.images).toEqual([{ image_url: 'data:image/png;base64,AAAA' }])
   })
 
-  it('keeps the other quoted fields, so the paid body matches the priced one', () => {
-    const form = toMultipart({
-      model: 'ali/qwen-image-edit-plus',
-      prompt: 'make it blue',
-      size: '1024x1024',
-      n: 1,
-      image: 'data:image/png;base64,iVBORw0KGgo=',
+  it('does not send a bare `image` field', () => {
+    // The multipart-era spelling. It answers 400 'Invalid multipart form' on a JSON body.
+    const body = buildBody('edit', 'make it green', 'openai/gpt-image-2', {
+      sourceImage: 'data:image/png;base64,AAAA',
     })
-    expect(form.get('model')).toBe('ali/qwen-image-edit-plus')
-    expect(form.get('prompt')).toBe('make it blue')
-    expect(form.get('size')).toBe('1024x1024')
-    expect(form.get('n')).toBe('1')
+    expect(body).not.toHaveProperty('image')
   })
 
-  it('picks the extension from the mime type', () => {
-    const jpeg = toMultipart({ image: 'data:image/jpeg;base64,/9j/4AA=' }).get('image') as File
-    expect(jpeg.name).toMatch(/\.jpg$/)
-    expect(jpeg.type).toBe('image/jpeg')
+  it('does not nest the URL in an object', () => {
+    // `{ image_url: { url } }` is refused: 'expected an image URL, but got an object instead'.
+    const body = buildBody('edit', 'make it green', 'openai/gpt-image-2', {
+      sourceImage: 'data:image/png;base64,AAAA',
+    })
+    const first = (body.images as Array<{ image_url: unknown }>)[0]
+    expect(typeof first.image_url).toBe('string')
   })
 
-  it('drops an undecodable data URL rather than sending it as text', () => {
-    // A giant base64 string in a text field would be refused upstream — after the charge.
-    const form = toMultipart({ prompt: 'x', image: 'data:image/png;base64,%%%not-base64%%%' })
-    expect(form.get('prompt')).toBe('x')
-    expect(form.get('image')).toBeNull()
+  it('sends JSON, not multipart', () => {
+    // Every endpoint takes JSON, the edit included. The multipart branch is gone.
+    const encoded = encodeBody({ requiresSourceImage: true }, { a: 1 })
+    expect(encoded.headers).toEqual({ 'Content-Type': 'application/json' })
+    expect(typeof encoded.body).toBe('string')
   })
 
-  it('encodes only the modes that need it', () => {
-    // Chat, image generation, video, music and speech all take JSON today. Switching them to
-    // multipart would break every one of them, so the choice is keyed on the spec flag.
-    expect(encodeBody({ requiresSourceImage: true }, { a: 1 }).headers).toEqual({})
-    expect(encodeBody({}, { a: 1 }).headers).toEqual({ 'Content-Type': 'application/json' })
-    expect(typeof encodeBody({}, { a: 1 }).body).toBe('string')
-    expect(encodeBody({ requiresSourceImage: true }, { a: 1 }).body instanceof FormData).toBe(true)
-  })
-
-  it('encodes the QUOTE the same way as the paid call', () => {
-    /**
-     * Both fetches, not one. My first attempt changed only `generate`; the live wire still read
-     * `content-type: application/json` because the quote is a separate fetch. A price issued for
-     * a JSON body and spent on a multipart one is a signature paying for a request the gateway
-     * never priced — so the two must go through one encoder.
-     */
+  it('encodes the quote and the paid call through one function', () => {
+    // The property that broke when only `generate` was changed: a price issued for one body and
+    // spent on another is a signature paying for a request the gateway never priced.
     const src = stripComments(readFileSync(new URL('./modality.ts', import.meta.url), 'utf8'))
     const uses = src.match(/encodeBody\(spec, body\)/g) ?? []
-    expect(uses.length, 'both challengeGeneration and generate must encode via encodeBody')
+    expect(uses.length, 'both challengeGeneration and generate must use encodeBody')
       .toBeGreaterThanOrEqual(2)
-    // And neither may hand-roll a JSON body beside it, which is how they drifted.
-    // Sliced to challengeGeneration ALONE. My first version ran to extractMedia, which swept in
-    // encodeBody's own definition — where that header legitimately appears — so the guard failed
-    // on correct code.
-    const qs = src.indexOf('export async function challengeGeneration')
-    const qe = src.indexOf('\nexport ', qs + 10)
-    const quote = src.slice(qs, qe)
-    expect(quote).toContain('encodeBody(spec, body)')
-    expect(quote, 'the quote must not hand-roll its own JSON body').not.toContain(
-      "'Content-Type': 'application/json'",
-    )
-  })
-
-  it('lets the browser set the multipart Content-Type', () => {
-    // Only the browser knows the boundary token it generated. A hand-written header yields a body
-    // the server cannot split — the same "Invalid multipart form" by another route. So the
-    // multipart branch must contribute NO content-type at all.
-    const headers = encodeBody({ requiresSourceImage: true }, { a: 1 }).headers
-    expect(Object.keys(headers)).toEqual([])
-    expect(JSON.stringify(headers)).not.toContain('multipart')
   })
 })
 
 /**
- * The options panel cannot be resized by its own contents.
+ * Only models MEASURED to return an edited image may be offered.
  *
- * Reported as "页面比例不协调" with a screenshot: the panel filled the viewport and pushed its own
- * Size and Count rows off the edge. It had `min-width` and no maximum, so its width was whatever
- * its widest child asked for — and the new thumbnail was an <img> with no dimensions, which
- * contributes its INTRINSIC size. A 2240px screenshot therefore set the panel's width.
+ * Eight candidates, all eight quoting a price from our own table, and only two producing bytes:
+ *
+ *     openai/gpt-image-2                 EDITS   png 450458B
+ *     openai/gpt-image-1                 EDITS   png 971226B
+ *     google/nano-banana{,-2,-pro}       404     no such upstream route
+ *     ali/qwen-image-edit{,-plus,-max}   400     'does not support image editing', and
+ *                                                'Unknown image model' even on generations
+ *
+ * The qwen names are the ones I originally shipped as the default and recommended keeping in the
+ * catalogue, on the strength of their 402. A 402 from this gateway is our own price table
+ * talking; it says nothing about whether an upstream can serve the call.
  */
+describe('the edit default is a model that actually edits', () => {
+  const MEASURED_TO_EDIT = ['openai/gpt-image-2', 'openai/gpt-image-1']
+
+  it('defaults to one of the two that produced bytes', () => {
+    expect(MEASURED_TO_EDIT).toContain(GENERATIONS.edit.defaultModel)
+  })
+
+  it('does not default to a model that only quotes a price', () => {
+    // Named explicitly so re-introducing one is a failing test rather than a silent regression.
+    const QUOTES_BUT_CANNOT_EDIT = [
+      'ali/qwen-image-edit',
+      'ali/qwen-image-edit-plus',
+      'ali/qwen-image-edit-max',
+      'google/nano-banana',
+      'google/nano-banana-2',
+      'google/nano-banana-pro',
+    ]
+    expect(QUOTES_BUT_CANNOT_EDIT).not.toContain(GENERATIONS.edit.defaultModel)
+  })
+})
 describe('the options panel is bounded', () => {
   const css = readFileSync(new URL('../styles.css', import.meta.url), 'utf8')
 
@@ -342,16 +323,18 @@ describe('the options panel is bounded', () => {
  * was correctly labelled and only the PAID call broke. Every cheap signal said the fix worked.
  */
 describe('the credential does not relabel the body', () => {
-  it('leaves a multipart request multipart', () => {
-    const encoded = encodeBody({ requiresSourceImage: true }, { prompt: 'x' })
-    const withKey = { ...encoded.headers, ...authHeaders({ apiKey: 'sk-abc' }) }
-    const withPayment = { ...encoded.headers, ...authHeaders({ payment: 'x402' }) }
-    // No content type at all: the browser must set it, because only it knows its boundary.
-    expect(withKey).not.toHaveProperty('Content-Type')
-    expect(withPayment).not.toHaveProperty('Content-Type')
-    // The credentials still arrive.
-    expect(withKey.Authorization).toBe('Bearer sk-abc')
-    expect(withPayment['X-PAYMENT']).toBe('x402')
+  it('does not let the credential change the content type', () => {
+    /**
+     * The multipart era is over — every endpoint takes JSON — but the property this caught is
+     * still worth holding: `authHeaders` must contribute credentials only. It used to add
+     * 'Content-Type: application/json' and, spread second, silently relabelled a body. A
+     * function named for credentials deciding an encoding is the defect, whatever the encoding.
+     */
+    expect(authHeaders({ apiKey: 'sk-abc' })).not.toHaveProperty('Content-Type')
+    expect(authHeaders({ payment: 'x402' })).not.toHaveProperty('Content-Type')
+    const merged = { ...encodeBody({}, { a: 1 }).headers, ...authHeaders({ apiKey: 'sk-abc' }) }
+    expect(merged['Content-Type']).toBe('application/json')
+    expect(merged.Authorization).toBe('Bearer sk-abc')
   })
 
   it('still labels a JSON request as JSON', () => {

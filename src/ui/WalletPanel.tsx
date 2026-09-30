@@ -1,12 +1,15 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import {
   connectWallet,
   hasWallet,
   isUserRejection,
+  listWallets,
   PER_SIGNATURE_CAP_USDC,
+  startWalletDiscovery,
   switchToBase,
   type WalletAccount,
+  type WalletOption,
 } from '../lib/wallet'
 import { useT } from './LocaleContext'
 
@@ -34,15 +37,25 @@ export function WalletPanel({
   const t = useT()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [wallets, setWallets] = useState<WalletOption[]>(() => listWallets())
+
+  // Wallets announce synchronously on request, but one that finishes loading later announces on
+  // its own — so re-read shortly after, instead of freezing the list at first render.
+  useEffect(() => {
+    startWalletDiscovery()
+    setWallets(listWallets())
+    const late = setTimeout(() => setWallets(listWallets()), 500)
+    return () => clearTimeout(late)
+  }, [])
 
   const installed = hasWallet()
   const wrongChain = account !== null && account.chainId !== BASE_CHAIN_ID
 
-  const connect = async () => {
+  const connect = async (uuid?: string) => {
     setBusy(true)
     setError('')
     try {
-      onAccount(await connectWallet())
+      onAccount(await connectWallet(uuid))
     } catch (err) {
       // Declining is not a failure to report as one — the user chose it, and an error
       // banner for a deliberate "no" trains people to ignore error banners.
@@ -94,9 +107,32 @@ export function WalletPanel({
           <p>
             {t('Connect a wallet to reach paid models and callable APIs. Every charge is signed by you, in your wallet, showing the exact amount before it happens.')}
           </p>
-          <button className="wallet-btn" onClick={connect} disabled={busy}>
-            {busy ? t('Waiting for your wallet…') : t('Connect wallet')}
-          </button>
+          {wallets.length > 1 ? (
+            // One button per wallet. With several installed, window.ethereum belongs to whichever
+            // loaded last, and that one can be broken while the others work.
+            <div className="wallet-choices">
+              {wallets.map((w) => (
+                <button
+                  key={w.uuid}
+                  className="wallet-btn"
+                  onClick={() => void connect(w.uuid)}
+                  disabled={busy}
+                >
+                  {w.icon !== '' && <img src={w.icon} alt="" width={18} height={18} />}
+                  {t('Connect {name}', { name: w.name })}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <button
+              className="wallet-btn"
+              onClick={() => void connect(wallets[0]?.uuid)}
+              disabled={busy}
+            >
+              {busy ? t('Waiting for your wallet…') : t('Connect wallet')}
+            </button>
+          )}
+          {busy && wallets.length > 1 && <p>{t('Waiting for your wallet…')}</p>}
         </>
       ) : (
         <>

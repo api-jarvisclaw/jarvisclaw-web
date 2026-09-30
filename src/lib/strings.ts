@@ -217,6 +217,9 @@ const zh: Record<string, string> = {
   // ---- composer and chat ----
   'Connect wallet': '连接钱包',
   'Waiting for your wallet…': '等待你的钱包确认…',
+  'Connect {name}': '连接 {name}',
+  'That wallet is no longer available. Reload the page and try again.':
+    '这个钱包已不可用。请刷新页面后重试。',
   Disconnect: '断开连接',
   Prompt: '提示词',
 

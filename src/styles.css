@@ -2913,6 +2913,24 @@ body.is-resizing * {
   text-decoration: none;
 }
 
+.wallet-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wallet-choices .wallet-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.wallet-choices .wallet-btn img {
+  flex: none;
+  border-radius: 4px;
+}
+
 .wallet-btn:hover:not(:disabled) {
   filter: brightness(1.1);
   box-shadow: 0 2px 8px var(--shadow-color);

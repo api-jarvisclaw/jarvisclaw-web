@@ -47,8 +47,86 @@ declare global {
   }
 }
 
+/**
+ * One wallet extension, as it announced itself over EIP-6963.
+ *
+ * Why this exists: `window.ethereum` is a single slot, and every installed wallet writes to it.
+ * With MetaMask and Trust Wallet both installed, Trust Wallet won the slot while its in-page
+ * channel had failed to come up, so every request threw its own "Broadcast channel unavailable"
+ * and the page offered no way to reach MetaMask at all. EIP-6963 has each wallet announce
+ * itself separately, so the user can pick the one that works.
+ */
+export interface WalletOption {
+  /** Stable per page load; the key to pass back to `connectWallet`. */
+  uuid: string
+  name: string
+  /** A data: URI, or '' when the wallet sent anything else — never a remote URL. */
+  icon: string
+  rdns: string
+  provider: Eip1193Provider
+}
+
+const announced = new Map<string, WalletOption>()
+let discovering = false
+
+/** The wallet chosen at connect time. Signing must go to the same one, not to window.ethereum. */
+let active: Eip1193Provider | null = null
+
+interface AnnounceDetail {
+  info?: { uuid?: unknown; name?: unknown; icon?: unknown; rdns?: unknown }
+  provider?: Eip1193Provider
+}
+
+function onAnnounce(event: Event): void {
+  const detail = (event as CustomEvent<AnnounceDetail>).detail
+  const info = detail?.info
+  const provider = detail?.provider
+  if (!info || !provider || typeof provider.request !== 'function') return
+  if (typeof info.uuid !== 'string' || info.uuid === '') return
+  const icon = typeof info.icon === 'string' && info.icon.startsWith('data:image/') ? info.icon : ''
+  announced.set(info.uuid, {
+    uuid: info.uuid,
+    name: typeof info.name === 'string' && info.name !== '' ? info.name : 'Browser wallet',
+    icon,
+    rdns: typeof info.rdns === 'string' ? info.rdns : '',
+    provider,
+  })
+}
+
+/**
+ * Start listening for wallet announcements, and ask every wallet to announce.
+ *
+ * Idempotent. Wallets answer `eip6963:requestProvider` synchronously in practice, but one that
+ * loads late announces on its own, so the listener stays attached for the page's lifetime.
+ */
+export function startWalletDiscovery(target: EventTarget | undefined = globalThis.window): void {
+  if (discovering || !target || typeof target.addEventListener !== 'function') return
+  discovering = true
+  target.addEventListener('eip6963:announceProvider', onAnnounce)
+  target.dispatchEvent(new Event('eip6963:requestProvider'))
+}
+
+/** Every wallet that has announced itself, in announcement order. */
+export function listWallets(): WalletOption[] {
+  return [...announced.values()]
+}
+
+/** For tests: forget every announcement and the active wallet. */
+export function resetWalletDiscovery(target: EventTarget | undefined = globalThis.window): void {
+  target?.removeEventListener?.('eip6963:announceProvider', onAnnounce)
+  announced.clear()
+  discovering = false
+  active = null
+}
+
+/** The provider every call after connect must use. */
+function currentProvider(): Eip1193Provider | undefined {
+  return active ?? window.ethereum
+}
+
 export function hasWallet(): boolean {
-  return typeof window !== 'undefined' && window.ethereum !== undefined
+  if (typeof window === 'undefined') return false
+  return window.ethereum !== undefined || announced.size > 0
 }
 
 export interface WalletAccount {
@@ -64,8 +142,16 @@ export interface WalletAccount {
  * state, and a reload asks again. That is deliberate — a page that silently reconnects a
  * wallet is a page that can spend without the user opening it.
  */
-export async function connectWallet(): Promise<WalletAccount> {
-  const provider = window.ethereum
+export async function connectWallet(uuid?: string): Promise<WalletAccount> {
+  // A named wallet is used exactly; an unknown uuid is an error rather than a silent fallback
+  // to window.ethereum, which is the broken wallet the user just chose to avoid.
+  let provider: Eip1193Provider | undefined
+  if (uuid !== undefined) {
+    provider = announced.get(uuid)?.provider
+    if (!provider) throw new Error('That wallet is no longer available. Reload the page and try again.')
+  } else {
+    provider = window.ethereum ?? listWallets()[0]?.provider
+  }
   if (!provider) {
     throw new Error('No wallet found. Install a browser wallet such as MetaMask or Rabby.')
   }
@@ -89,12 +175,13 @@ export async function connectWallet(): Promise<WalletAccount> {
     throw new Error('The wallet returned an unreadable chain id.')
   }
 
+  active = provider
   return { address, chainId }
 }
 
 /** Asks the wallet to switch to Base, adding it if the wallet does not know it. */
 export async function switchToBase(): Promise<void> {
-  const provider = window.ethereum
+  const provider = currentProvider()
   if (!provider) throw new Error('No wallet found.')
   try {
     await provider.request({
@@ -236,7 +323,7 @@ export async function signPayment(
    */
   capUsd: number = PER_SIGNATURE_CAP_USDC,
 ): Promise<SignedPayment> {
-  const provider = window.ethereum
+  const provider = currentProvider()
   if (!provider) throw new Error('No wallet found.')
 
   const req = selectEvmRequirement(challenge)

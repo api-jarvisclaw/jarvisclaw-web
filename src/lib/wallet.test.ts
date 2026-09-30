@@ -3,10 +3,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   base64Utf8,
   connectWallet,
+  hasWallet,
   isUserRejection,
+  listWallets,
   PER_SIGNATURE_CAP_USDC,
+  resetWalletDiscovery,
   selectEvmRequirement,
   signPayment,
+  startWalletDiscovery,
   type WalletAccount,
 } from './wallet'
 
@@ -52,6 +56,8 @@ function challenge(over: Record<string, unknown> = {}) {
 }
 
 afterEach(() => {
+  // The connected wallet is module state; without this a provider from one test signs in the next.
+  resetWalletDiscovery(undefined)
   vi.unstubAllGlobals()
 })
 
@@ -98,6 +104,125 @@ describe('connectWallet', () => {
   it('refuses an unparseable chain id', async () => {
     stubWallet({ eth_chainId: 'not-hex' })
     await expect(connectWallet()).rejects.toThrow(/unreadable chain id/)
+  })
+})
+
+/**
+ * Several wallets installed at once — the reported case.
+ *
+ * MetaMask and Trust Wallet were both installed; Trust Wallet held `window.ethereum` and every
+ * request to it threw its own "Broadcast channel unavailable". EIP-6963 lets each wallet
+ * announce itself, so the page can reach the working one.
+ */
+describe('EIP-6963 wallet discovery', () => {
+  function brokenProvider() {
+    return {
+      request: vi.fn(async () => {
+        throw new Error('Broadcast channel unavailable')
+      }),
+    }
+  }
+
+  function workingProvider() {
+    return {
+      request: vi.fn(async ({ method }: { method: string }) => {
+        if (method === 'eth_requestAccounts') return [BASE.address]
+        if (method === 'eth_chainId') return '0x2105'
+        if (method === 'eth_signTypedData_v4') return `0x${'cd'.repeat(32)}1c`
+        return null
+      }),
+    }
+  }
+
+  /** A window whose wallets answer requestProvider, as real extensions do. */
+  function pageWith(ethereum: unknown, wallets: Array<{ uuid: string; name: string; provider: unknown; icon?: string }>) {
+    const target = new EventTarget()
+    target.addEventListener('eip6963:requestProvider', () => {
+      for (const w of wallets) {
+        target.dispatchEvent(
+          new CustomEvent('eip6963:announceProvider', {
+            detail: {
+              info: { uuid: w.uuid, name: w.name, icon: w.icon ?? 'data:image/svg+xml,x', rdns: `io.${w.name}` },
+              provider: w.provider,
+            },
+          }),
+        )
+      }
+    })
+    Object.assign(target, { ethereum })
+    vi.stubGlobal('window', target)
+    return target
+  }
+
+  afterEach(() => {
+    resetWalletDiscovery(window)
+  })
+
+  it('lists every announced wallet, not just the one in window.ethereum', () => {
+    const broken = brokenProvider()
+    pageWith(broken, [
+      { uuid: 'tw', name: 'Trust Wallet', provider: broken },
+      { uuid: 'mm', name: 'MetaMask', provider: workingProvider() },
+    ])
+    startWalletDiscovery(window)
+    expect(listWallets().map((w) => w.name)).toEqual(['Trust Wallet', 'MetaMask'])
+  })
+
+  it('connects the wallet the user picked, not window.ethereum', async () => {
+    const broken = brokenProvider()
+    const mm = workingProvider()
+    pageWith(broken, [
+      { uuid: 'tw', name: 'Trust Wallet', provider: broken },
+      { uuid: 'mm', name: 'MetaMask', provider: mm },
+    ])
+    startWalletDiscovery(window)
+    await expect(connectWallet('mm')).resolves.toEqual({ address: BASE.address, chainId: 8453 })
+    expect(broken.request).not.toHaveBeenCalled()
+  })
+
+  it('signs with the wallet that was connected', async () => {
+    // The load-bearing case: connecting MetaMask and then signing through window.ethereum would
+    // hand the payment to the broken wallet, and the user would see the same error at pay time.
+    const broken = brokenProvider()
+    const mm = workingProvider()
+    pageWith(broken, [
+      { uuid: 'tw', name: 'Trust Wallet', provider: broken },
+      { uuid: 'mm', name: 'MetaMask', provider: mm },
+    ])
+    startWalletDiscovery(window)
+    const account = await connectWallet('mm')
+    await signPayment(challenge(), 'https://api.jarvisclaw.ai/v1/images/generations', account)
+    expect(mm.request).toHaveBeenCalledWith(expect.objectContaining({ method: 'eth_signTypedData_v4' }))
+    expect(broken.request).not.toHaveBeenCalled()
+  })
+
+  it('refuses an unknown wallet instead of falling back to window.ethereum', async () => {
+    const broken = brokenProvider()
+    pageWith(broken, [{ uuid: 'tw', name: 'Trust Wallet', provider: broken }])
+    startWalletDiscovery(window)
+    await expect(connectWallet('gone')).rejects.toThrow(/no longer available/)
+    expect(broken.request).not.toHaveBeenCalled()
+  })
+
+  it('finds a wallet that only announces, with no window.ethereum', async () => {
+    pageWith(undefined, [{ uuid: 'mm', name: 'MetaMask', provider: workingProvider() }])
+    startWalletDiscovery(window)
+    expect(hasWallet()).toBe(true)
+    await expect(connectWallet()).resolves.toMatchObject({ chainId: 8453 })
+  })
+
+  it('drops an icon that is not a data: image, so a wallet cannot make the page fetch a URL', () => {
+    pageWith(undefined, [
+      { uuid: 'x', name: 'X', provider: workingProvider(), icon: 'https://tracker.example/p.png' },
+    ])
+    startWalletDiscovery(window)
+    expect(listWallets()[0]?.icon).toBe('')
+  })
+
+  it('ignores an announcement without a usable provider', () => {
+    pageWith(undefined, [{ uuid: 'bad', name: 'Bad', provider: {} }])
+    startWalletDiscovery(window)
+    expect(listWallets()).toEqual([])
   })
 })
 

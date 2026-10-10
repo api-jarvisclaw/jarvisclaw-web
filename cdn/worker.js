@@ -25,7 +25,7 @@
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, HEAD, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, HEAD, POST, PUT, OPTIONS',
   // Content-Type must be allowed or the browser's preflight for a JSON POST fails before the
   // request is sent — the same class of bug that silently killed credentialed calls to the
   // gateway until api-server#528.
@@ -125,9 +125,20 @@ export default {
     if (url.pathname === '/gallery' && request.method === 'POST') {
       return putGallery(request, env)
     }
+    if (url.pathname === '/archive' && request.method === 'PUT') {
+      return putArchive(request, env)
+    }
 
     const isMedia = url.pathname.startsWith('/media/')
     const isGallery = url.pathname.startsWith('/gallery/')
+    /**
+     * `/archive/…` — the gateway's permanent copy of every generated medium.
+     *
+     * Before this, generated media reached R2 only by accident: a BlockRun URL was cached under
+     * media/ the first time somebody opened it (and expired a day later), and MixRoute images and
+     * TTS never touched the bucket at all. Never expires; written only by putArchive below.
+     */
+    const isArchive = url.pathname.startsWith('/archive/')
     /**
      * `/showcase/…` — the curated prompt-gallery assets.
      *
@@ -142,7 +153,7 @@ export default {
      * cdn/upload-showcase.sh, and there is no case where a browser should be able to add one.
      */
     const isShowcase = url.pathname.startsWith('/showcase/')
-    if (!isMedia && !isGallery && !isShowcase) {
+    if (!isMedia && !isGallery && !isShowcase && !isArchive) {
       return new Response('Not Found', { status: 404, headers: CORS })
     }
     if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -167,7 +178,7 @@ export default {
       // A gallery or showcase object that is not in R2 is simply gone — there is no upstream to
       // fall back to, because we are the only copy. Falling through to the origin fetch below
       // would ask blockrun.ai for a key it never had and return a confusing 404 from there.
-      if (isGallery || isShowcase) {
+      if (isGallery || isShowcase || isArchive) {
         return new Response('Not Found', { status: 404, headers: CORS })
       }
 
@@ -298,6 +309,76 @@ async function putGallery(request, env) {
 
   const origin = new URL(request.url).origin
   return json({ key, url: `${origin}/${key}`, bytes: body.byteLength, contentType }, 201)
+}
+
+/** An archived object may not exceed this (Workers accept request bodies up to 100 MB). */
+const MAX_ARCHIVE_BYTES = 95 * 1024 * 1024
+
+/**
+ * Stores one generated medium, sent as raw bytes by the gateway.
+ *
+ * Unlike /gallery this takes bytes, which is safe only because it is authenticated: the caller
+ * must present ARCHIVE_TOKEN (a Worker secret shared with the gateway). Without the secret the
+ * route is closed — an unset secret refuses everything rather than opening the door.
+ *
+ * Content type is still allowlisted: the gateway is trusted, but the bytes come from upstream
+ * providers, and an HTML/SVG body served from our domain would be stored XSS.
+ */
+async function putArchive(request, env) {
+  const expected = env.ARCHIVE_TOKEN || ''
+  const auth = request.headers.get('Authorization') || ''
+  const presented = auth.startsWith('Bearer ') ? auth.slice(7) : ''
+  if (!expected || !(await timingSafeEqual(presented, expected))) {
+    return json({ error: 'unauthorized' }, 401)
+  }
+
+  const contentType = (request.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase()
+  if (!GALLERY_TYPES.has(contentType)) {
+    return json({ error: `${contentType || 'an unknown type'} is not a storable medium` }, 415)
+  }
+  const declared = Number(request.headers.get('Content-Length') || '0')
+  if (declared > MAX_ARCHIVE_BYTES) {
+    return json({ error: `too large: ${declared} bytes, limit ${MAX_ARCHIVE_BYTES}` }, 413)
+  }
+  const body = await request.arrayBuffer()
+  if (body.byteLength === 0) {
+    return json({ error: 'empty body' }, 400)
+  }
+  if (body.byteLength > MAX_ARCHIVE_BYTES) {
+    return json({ error: `too large: ${body.byteLength} bytes, limit ${MAX_ARCHIVE_BYTES}` }, 413)
+  }
+
+  const ext = EXT[contentType] ?? 'bin'
+  const day = new Date().toISOString().slice(0, 10)
+  const key = `archive/${day}/${crypto.randomUUID()}.${ext}`
+  // Provenance travels with the object, so the bucket alone can answer "whose is this".
+  const customMetadata = {}
+  for (const [header, field] of [
+    ['X-Archive-Request-Id', 'request_id'],
+    ['X-Archive-User-Id', 'user_id'],
+    ['X-Archive-Model', 'model'],
+    ['X-Archive-Media-Type', 'media_type'],
+  ]) {
+    const v = request.headers.get(header)
+    if (v) customMetadata[field] = v.slice(0, 256)
+  }
+  await env.MEDIA_BUCKET.put(key, body, { httpMetadata: { contentType }, customMetadata })
+
+  const origin = new URL(request.url).origin
+  return json({ key, url: `${origin}/${key}`, bytes: body.byteLength, contentType }, 201)
+}
+
+async function timingSafeEqual(a, b) {
+  const enc = new TextEncoder()
+  const [ha, hb] = await Promise.all([
+    crypto.subtle.digest('SHA-256', enc.encode(a)),
+    crypto.subtle.digest('SHA-256', enc.encode(b)),
+  ])
+  const x = new Uint8Array(ha)
+  const y = new Uint8Array(hb)
+  let diff = 0
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i]
+  return diff === 0
 }
 
 async function handleOriginResponse(env, key, originResp) {
